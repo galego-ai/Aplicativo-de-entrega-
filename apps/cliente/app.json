@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "CLICK-FOOD Cliente",
+    "slug": "click-food-cliente",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "android": {
+      "package": "br.com.clickfood.cliente"
+    },
+    "ios": {
+      "bundleIdentifier": "br.com.clickfood.cliente",
+      "supportsTablet": true
+    }
+  }
+}
