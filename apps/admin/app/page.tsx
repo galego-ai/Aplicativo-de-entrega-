@@ -4,136 +4,129 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 type Metrics = {
-  gmv_today: number;
-  platform_revenue_today: number;
-  orders_today: number;
-  active_stores: number;
-  online_drivers: number;
-  customers: number;
-  average_ticket_today: number;
-  past_due_invoices: number;
-  pending_drivers: number;
-  failed_payments: number;
-  critical_tickets: number;
+  gmv_today: number; platform_revenue_today: number; orders_today: number; active_stores: number;
+  online_drivers: number; customers: number; average_ticket_today: number; past_due_invoices: number;
+  pending_drivers: number; failed_payments: number; critical_tickets: number;
 };
+type StoreRow = { id: string; name: string; slug: string; status: string; city_id: string | null; created_at: string; cities?: { name: string; state: string } | null };
+type DriverRow = { id: string; user_id: string; status: string; online: boolean; rating: number; acceptance_rate: number; city_id: string | null; cities?: { name: string; state: string } | null; profileName?: string };
+type City = { id: string; name: string; state: string };
+type Tab = "Dashboard" | "Lojas" | "Entregadores";
 
-const emptyMetrics: Metrics = {
-  gmv_today: 0, platform_revenue_today: 0, orders_today: 0, active_stores: 0,
-  online_drivers: 0, customers: 0, average_ticket_today: 0, past_due_invoices: 0,
-  pending_drivers: 0, failed_payments: 0, critical_tickets: 0,
-};
-
-const menu = ["Dashboard", "Pedidos", "Lojas", "Entregadores", "Clientes", "Cidades", "Planos", "Financeiro", "Bônus lojistas", "Suporte", "Auditoria"];
-const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
-const number = (value: number) => new Intl.NumberFormat("pt-BR").format(value || 0);
+const emptyMetrics: Metrics = { gmv_today:0, platform_revenue_today:0, orders_today:0, active_stores:0, online_drivers:0, customers:0, average_ticket_today:0, past_due_invoices:0, pending_drivers:0, failed_payments:0, critical_tickets:0 };
+const brl = (value:number) => new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(value || 0);
+const number = (value:number) => new Intl.NumberFormat("pt-BR").format(value || 0);
+const normalizeSlug = (value:string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 export default function Home() {
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [authorized, setAuthorized] = useState(false);
-  const [userEmail, setUserEmail] = useState("");
-  const [metrics, setMetrics] = useState<Metrics>(emptyMetrics);
+  const [loading,setLoading] = useState(true);
+  const [email,setEmail] = useState(""); const [password,setPassword] = useState("");
+  const [authMode,setAuthMode] = useState<"login"|"signup">("login");
+  const [message,setMessage] = useState(""); const [authorized,setAuthorized] = useState(false);
+  const [signedIn,setSignedIn] = useState(false); const [userEmail,setUserEmail] = useState("");
+  const [bootstrapCode,setBootstrapCode] = useState(""); const [tab,setTab] = useState<Tab>("Dashboard");
+  const [metrics,setMetrics] = useState<Metrics>(emptyMetrics); const [stores,setStores] = useState<StoreRow[]>([]); const [drivers,setDrivers] = useState<DriverRow[]>([]); const [cities,setCities] = useState<City[]>([]);
+  const [activationCode,setActivationCode] = useState(""); const [activationStore,setActivationStore] = useState("");
+  const [storeForm,setStoreForm] = useState({ storeName:"", legalName:"", slug:"", document:"", email:"", phone:"", cityId:"", description:"" });
 
-  const cards = useMemo(() => [
-    ["GMV hoje", brl(metrics.gmv_today)],
-    ["Receita CLICK-FOOD", brl(metrics.platform_revenue_today)],
-    ["Pedidos hoje", number(metrics.orders_today)],
-    ["Lojas ativas", number(metrics.active_stores)],
-    ["Entregadores online", number(metrics.online_drivers)],
-    ["Clientes ativos", number(metrics.customers)],
-    ["Ticket médio", brl(metrics.average_ticket_today)],
-    ["Inadimplentes", number(metrics.past_due_invoices)],
-  ], [metrics]);
+  const cards = useMemo(() => [["GMV hoje",brl(metrics.gmv_today)],["Receita CLICK-FOOD",brl(metrics.platform_revenue_today)],["Pedidos hoje",number(metrics.orders_today)],["Lojas ativas",number(metrics.active_stores)],["Entregadores online",number(metrics.online_drivers)],["Clientes",number(metrics.customers)],["Ticket médio",brl(metrics.average_ticket_today)],["Inadimplentes",number(metrics.past_due_invoices)]], [metrics]);
+
+  async function loadAll() {
+    const [metricResult,storeResult,driverResult,cityResult] = await Promise.all([
+      supabase.rpc("admin_dashboard_metrics"),
+      supabase.from("stores").select("id,name,slug,status,city_id,created_at,cities(name,state)").order("created_at",{ascending:false}).limit(200),
+      supabase.from("drivers").select("id,user_id,status,online,rating,acceptance_rate,city_id,cities(name,state)").order("created_at",{ascending:false}).limit(200),
+      supabase.from("cities").select("id,name,state").order("state").order("name"),
+    ]);
+    if (metricResult.data) setMetrics({ ...emptyMetrics, ...(metricResult.data as Metrics) });
+    if (storeResult.data) setStores(storeResult.data as unknown as StoreRow[]);
+    if (cityResult.data) setCities(cityResult.data as City[]);
+    if (driverResult.data) {
+      const raw = driverResult.data as unknown as DriverRow[];
+      const ids = raw.map((driver)=>driver.user_id);
+      const profiles = ids.length ? await supabase.from("profiles").select("id,full_name").in("id",ids) : { data: [] as any[] };
+      const names = new Map((profiles.data ?? []).map((profile:any)=>[profile.id,profile.full_name]));
+      setDrivers(raw.map((driver)=>({ ...driver, profileName:names.get(driver.user_id) || "Entregador" })));
+    }
+    if (metricResult.error || storeResult.error || driverResult.error || cityResult.error) setMessage("Alguns dados não puderam ser carregados.");
+  }
 
   async function loadSession() {
-    const { data } = await supabase.auth.getSession();
-    const session = data.session;
-    if (!session) {
-      setAuthorized(false);
-      setLoading(false);
-      return;
-    }
+    setLoading(true);
+    const { data } = await supabase.auth.getSession(); const session = data.session;
+    if (!session) { setSignedIn(false); setAuthorized(false); setLoading(false); return; }
+    setSignedIn(true); setUserEmail(session.user.email ?? "");
     const role = String(session.user.app_metadata?.clickfood_role ?? "");
-    const isAdmin = ["SUPER_ADMIN", "ADMIN", "SUPPORT"].includes(role);
-    setUserEmail(session.user.email ?? "");
+    const isAdmin = ["SUPER_ADMIN","ADMIN","SUPPORT"].includes(role);
     setAuthorized(isAdmin);
-    if (!isAdmin) setMessage("Esta conta não possui permissão de Matriz CLICK-FOOD.");
-    if (isAdmin) await loadMetrics();
+    if (isAdmin) await loadAll();
     setLoading(false);
   }
 
-  async function loadMetrics() {
-    const { data, error } = await supabase.rpc("admin_dashboard_metrics");
-    if (error) {
-      setMessage("Não foi possível carregar os indicadores da Matriz.");
-      return;
+  useEffect(()=>{ loadSession(); const {data}=supabase.auth.onAuthStateChange(()=>loadSession()); return ()=>data.subscription.unsubscribe(); },[]);
+
+  async function submitAuth(event:FormEvent) {
+    event.preventDefault(); setLoading(true); setMessage("");
+    if (authMode === "signup") {
+      const { data, error } = await supabase.auth.signUp({ email:email.trim(), password, options:{ data:{ full_name:"Administrador CLICK-FOOD" } } });
+      if (error) setMessage(error.message);
+      else if (!data.session) setMessage("Conta criada. Confirme o e-mail recebido e depois entre para ativar o Super Admin.");
+      else await loadSession();
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email:email.trim(), password });
+      if (error) setMessage("E-mail ou senha inválidos.");
     }
-    setMetrics({ ...emptyMetrics, ...(data as Metrics) });
+    setLoading(false);
   }
 
-  useEffect(() => {
-    loadSession();
-    const { data } = supabase.auth.onAuthStateChange(() => loadSession());
-    return () => data.subscription.unsubscribe();
-  }, []);
-
-  async function login(event: FormEvent) {
-    event.preventDefault();
-    setMessage("");
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    if (error) {
-      setMessage("E-mail ou senha inválidos.");
-      setLoading(false);
-    }
+  async function bootstrapAdmin() {
+    setMessage(""); setLoading(true);
+    const { data,error } = await supabase.functions.invoke("bootstrap-admin",{ body:{ code:bootstrapCode } });
+    if (error || data?.error) { setMessage("Código de ativação inválido, expirado ou já utilizado."); setLoading(false); return; }
+    await supabase.auth.refreshSession(); setMessage("Super Admin ativado com sucesso."); await loadSession();
   }
 
-  async function logout() {
-    await supabase.auth.signOut();
-    setAuthorized(false);
-    setMetrics(emptyMetrics);
+  async function logout() { await supabase.auth.signOut(); setAuthorized(false); setSignedIn(false); setMetrics(emptyMetrics); }
+
+  async function createStore(event:FormEvent) {
+    event.preventDefault(); setMessage(""); setActivationCode("");
+    const slug = storeForm.slug || normalizeSlug(storeForm.storeName);
+    const {data,error}=await supabase.functions.invoke("admin-operations",{body:{ action:"CREATE_STORE", ...storeForm, slug, cityId:storeForm.cityId || undefined }});
+    if(error || data?.error){ setMessage(data?.error === "SLUG_ALREADY_EXISTS" ? "Já existe uma loja com esse identificador." : "Não foi possível criar a loja."); return; }
+    setActivationCode(data.onboardingCode); setActivationStore(data.store?.name ?? storeForm.storeName);
+    setStoreForm({storeName:"",legalName:"",slug:"",document:"",email:"",phone:"",cityId:"",description:""}); await loadAll();
   }
 
-  if (loading) return <main className="authPage"><div className="authCard"><div className="brand"><span>CLICK</span>-FOOD</div><p>Carregando ambiente seguro...</p></div></main>;
-
-  if (!authorized) {
-    return (
-      <main className="authPage">
-        <form className="authCard" onSubmit={login}>
-          <div className="brand dark"><span>CLICK</span>-FOOD</div>
-          <p className="authRole">ADMINISTRAÇÃO CENTRAL</p>
-          <h1>Entrar na Matriz</h1>
-          <label>E-mail<input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-          <label>Senha<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
-          {message && <div className="authMessage">{message}</div>}
-          <button className="loginButton" type="submit">ENTRAR</button>
-        </form>
-      </main>
-    );
+  async function changeStoreStatus(storeId:string,status:"ACTIVE"|"SUSPENDED"|"BLOCKED") {
+    const {data,error}=await supabase.functions.invoke("admin-operations",{body:{action:"STORE_STATUS",storeId,status}});
+    if(error || data?.error){setMessage("Não foi possível alterar a loja.");return;} setMessage(`Status da loja alterado para ${status}.`); await loadAll();
+  }
+  async function reissueCode(storeId:string,storeName:string) {
+    const {data,error}=await supabase.functions.invoke("admin-operations",{body:{action:"REISSUE_STORE_CODE",storeId}});
+    if(error || data?.error){setMessage("Não foi possível gerar um novo código.");return;} setActivationCode(data.onboardingCode); setActivationStore(storeName);
+  }
+  async function changeDriverStatus(driverId:string,status:"ACTIVE"|"BLOCKED"|"PENDING") {
+    const {data,error}=await supabase.functions.invoke("admin-operations",{body:{action:"DRIVER_STATUS",driverId,status}});
+    if(error || data?.error){setMessage("Não foi possível alterar o entregador.");return;} setMessage(`Entregador atualizado para ${status}.`); await loadAll();
   }
 
-  return (
-    <main className="shell">
-      <aside className="sidebar">
-        <div className="brand"><span>CLICK</span>-FOOD</div>
-        <p className="role">MATRIZ</p>
-        <nav>{menu.map((item, index) => <button key={item} className={index === 0 ? "active" : ""}>{item}</button>)}</nav>
-      </aside>
-      <section className="content">
-        <header className="topbar">
-          <div><p className="eyebrow">Visão geral em tempo real</p><h1>Dashboard</h1><small>{userEmail}</small></div>
-          <div className="topActions"><div className="status">Supabase conectado</div><button className="logout" onClick={logout}>Sair</button></div>
-        </header>
-        {message && <div className="notice">{message}</div>}
-        <div className="metricGrid">{cards.map(([label, value]) => <article className="metric" key={label}><p>{label}</p><strong>{value}</strong></article>)}</div>
-        <div className="panels">
-          <article className="panel wide"><div className="panelTitle"><h2>Operação</h2><span>Dados reais do CLICK-FOOD</span></div><div className="emptyState">Os gráficos serão preenchidos automaticamente conforme os pedidos começarem a entrar.</div></article>
-          <article className="panel"><div className="panelTitle"><h2>Atenção</h2></div><ul className="alerts"><li>{number(metrics.past_due_invoices)} lojas inadimplentes</li><li>{number(metrics.pending_drivers)} entregadores aguardando aprovação</li><li>{number(metrics.failed_payments)} pagamentos com falha hoje</li><li>{number(metrics.critical_tickets)} chamados críticos</li></ul></article>
-        </div>
-        <article className="panel"><div className="panelTitle"><h2>Banco de produção</h2><button className="primary" onClick={loadMetrics}>Atualizar indicadores</button></div><div className="emptyState">CLICK-FOOD está usando banco, autenticação e regras RLS próprios, sem compartilhar infraestrutura com o CLICK-GO.</div></article>
-      </section>
-    </main>
-  );
+  if(loading) return <main className="authPage"><div className="authCard"><div className="brand dark"><span>CLICK</span>-FOOD</div><p>Carregando ambiente seguro...</p></div></main>;
+
+  if(!signedIn) return <main className="authPage"><form className="authCard" onSubmit={submitAuth}><div className="brand dark"><span>CLICK</span>-FOOD</div><p className="authRole">ADMINISTRAÇÃO CENTRAL</p><h1>{authMode==="login"?"Entrar na Matriz":"Criar acesso inicial"}</h1><label>E-mail<input type="email" autoComplete="email" value={email} onChange={(e)=>setEmail(e.target.value)} required/></label><label>Senha<input type="password" minLength={8} value={password} onChange={(e)=>setPassword(e.target.value)} required/></label>{message&&<div className="authMessage">{message}</div>}<button className="loginButton" type="submit">{authMode==="login"?"ENTRAR":"CRIAR CONTA"}</button><button type="button" className="textButton" onClick={()=>setAuthMode(authMode==="login"?"signup":"login")}>{authMode==="login"?"Primeiro acesso? Criar conta":"Já tenho conta"}</button></form></main>;
+
+  if(!authorized) return <main className="authPage"><div className="authCard"><div className="brand dark"><span>CLICK</span>-FOOD</div><p className="authRole">ATIVAÇÃO DA MATRIZ</p><h1>Ativar Super Admin</h1><p>Conta autenticada: <b>{userEmail}</b></p><label>Código único<input value={bootstrapCode} onChange={(e)=>setBootstrapCode(e.target.value)} placeholder="CF-..."/></label>{message&&<div className="authMessage">{message}</div>}<button className="loginButton" onClick={bootstrapAdmin}>ATIVAR SUPER ADMIN</button><button className="textButton" onClick={logout}>Sair desta conta</button></div></main>;
+
+  return <main className="shell">
+    <aside className="sidebar"><div className="brand"><span>CLICK</span>-FOOD</div><p className="role">MATRIZ</p><nav>{(["Dashboard","Lojas","Entregadores"] as Tab[]).map(item=><button key={item} onClick={()=>setTab(item)} className={tab===item?"active":""}>{item}</button>)}</nav></aside>
+    <section className="content"><header className="topbar"><div><p className="eyebrow">Operação CLICK-FOOD</p><h1>{tab}</h1><small>{userEmail}</small></div><div className="topActions"><div className="status">Produção conectada</div><button className="logout" onClick={logout}>Sair</button></div></header>
+      {message&&<div className="notice">{message}</div>}
+      {activationCode&&<div className="activationBox"><div><b>Código de ativação — {activationStore}</b><p>Envie este código ao lojista. Ele expira em 7 dias e funciona uma única vez.</p></div><code>{activationCode}</code><button onClick={()=>navigator.clipboard?.writeText(activationCode)}>Copiar</button></div>}
+
+      {tab==="Dashboard"&&<><div className="metricGrid">{cards.map(([label,value])=><article className="metric" key={label}><p>{label}</p><strong>{value}</strong></article>)}</div><div className="panels"><article className="panel wide"><div className="panelTitle"><h2>Resumo operacional</h2><button className="primary" onClick={loadAll}>Atualizar</button></div><div className="summaryGrid"><div><b>{stores.length}</b><span>lojas cadastradas</span></div><div><b>{drivers.length}</b><span>entregadores cadastrados</span></div><div><b>{metrics.pending_drivers}</b><span>aguardando aprovação</span></div></div></article><article className="panel"><div className="panelTitle"><h2>Atenção</h2></div><ul className="alerts"><li>{metrics.past_due_invoices} lojas inadimplentes</li><li>{metrics.pending_drivers} entregadores pendentes</li><li>{metrics.failed_payments} pagamentos com falha</li><li>{metrics.critical_tickets} chamados críticos</li></ul></article></div></>}
+
+      {tab==="Lojas"&&<div className="twoColumns"><form className="panel formPanel" onSubmit={createStore}><div className="panelTitle"><h2>Cadastrar nova loja</h2></div><label>Nome da loja<input value={storeForm.storeName} onChange={(e)=>setStoreForm({...storeForm,storeName:e.target.value,slug:storeForm.slug||normalizeSlug(e.target.value)})} required/></label><label>Razão social<input value={storeForm.legalName} onChange={(e)=>setStoreForm({...storeForm,legalName:e.target.value})} placeholder="Opcional — usa o nome da loja se vazio"/></label><label>Identificador/slug<input value={storeForm.slug} onChange={(e)=>setStoreForm({...storeForm,slug:normalizeSlug(e.target.value)})} required/></label><div className="formRow"><label>Documento<input value={storeForm.document} onChange={(e)=>setStoreForm({...storeForm,document:e.target.value})}/></label><label>Telefone<input value={storeForm.phone} onChange={(e)=>setStoreForm({...storeForm,phone:e.target.value})}/></label></div><label>E-mail comercial<input type="email" value={storeForm.email} onChange={(e)=>setStoreForm({...storeForm,email:e.target.value})}/></label><label>Cidade<select value={storeForm.cityId} onChange={(e)=>setStoreForm({...storeForm,cityId:e.target.value})}><option value="">Sem cidade definida</option>{cities.map(city=><option value={city.id} key={city.id}>{city.name} - {city.state}</option>)}</select></label><label>Descrição<textarea value={storeForm.description} onChange={(e)=>setStoreForm({...storeForm,description:e.target.value})}/></label><button className="primary wideButton">CRIAR LOJA E GERAR CÓDIGO</button></form><section className="panel listPanel"><div className="panelTitle"><h2>Lojas cadastradas</h2><span>{stores.length}</span></div><div className="tableList">{stores.map(store=><div className="tableItem" key={store.id}><div><b>{store.name}</b><small>{store.slug} • {store.cities?`${store.cities.name}-${store.cities.state}`:"cidade não definida"}</small></div><span className={`badge ${store.status.toLowerCase()}`}>{store.status}</span><div className="itemActions"><button onClick={()=>reissueCode(store.id,store.name)}>Novo código</button>{store.status!=="ACTIVE"&&<button onClick={()=>changeStoreStatus(store.id,"ACTIVE")}>Ativar</button>}{store.status==="ACTIVE"&&<button onClick={()=>changeStoreStatus(store.id,"SUSPENDED")}>Suspender</button>}<button className="danger" onClick={()=>changeStoreStatus(store.id,"BLOCKED")}>Bloquear</button></div></div>)}{!stores.length&&<div className="emptyState">Nenhuma loja cadastrada.</div>}</div></section></div>}
+
+      {tab==="Entregadores"&&<section className="panel listPanel"><div className="panelTitle"><h2>Entregadores</h2><span>{drivers.length}</span></div><div className="tableList">{drivers.map(driver=><div className="tableItem driverItem" key={driver.id}><div><b>{driver.profileName}</b><small>{driver.cities?`${driver.cities.name}-${driver.cities.state}`:"cidade não definida"} • ★ {Number(driver.rating).toFixed(1)} • aceitação {Number(driver.acceptance_rate).toFixed(0)}%</small></div><span className={`badge ${driver.status.toLowerCase()}`}>{driver.status}{driver.online?" • ONLINE":""}</span><div className="itemActions">{driver.status!=="ACTIVE"&&<button onClick={()=>changeDriverStatus(driver.id,"ACTIVE")}>Aprovar</button>}{driver.status==="ACTIVE"&&<button className="danger" onClick={()=>changeDriverStatus(driver.id,"BLOCKED")}>Bloquear</button>}{driver.status==="BLOCKED"&&<button onClick={()=>changeDriverStatus(driver.id,"PENDING")}>Revisar</button>}</div></div>)}{!drivers.length&&<div className="emptyState">Nenhum entregador cadastrado.</div>}</div></section>}
+    </section>
+  </main>;
 }
