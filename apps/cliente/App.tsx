@@ -1,148 +1,64 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import * as Location from "expo-location";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 
-type Tab = "home" | "search" | "orders" | "favorites" | "profile";
-type Store = { id: string; name: string; description: string | null; minimum_order: number; average_preparation_time: number };
-type Order = { id: string; order_number: number; total: number; status: string; created_at: string; stores: { name: string } | { name: string }[] | null };
+type Tab = "home" | "search" | "orders" | "profile";
+type Store = { id:string; name:string; description:string|null; minimum_order:number; average_preparation_time:number };
+type Product = { id:string; name:string; description:string|null; price:number; promotional_price:number|null };
+type Address = { id:string; label:string|null; street:string; number:string|null; district:string|null; reference:string|null };
+type Order = { id:string; order_number:number; total:number; status:string; payment_status:string; created_at:string; stores:{name:string}|{name:string}[]|null };
+type CartItem = Product & { quantity:number };
+type DeliveryType = "DELIVERY"|"PICKUP";
 
-const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
+const brl=(value:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value||0);
 
-function AuthScreen() {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function submit() {
-    setBusy(true); setMessage("");
-    if (mode === "register") {
-      if (!name.trim() || !phone.trim() || password.length < 6) {
-        setMessage("Informe nome, telefone e uma senha com pelo menos 6 caracteres."); setBusy(false); return;
-      }
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(), password,
-        options: { data: { full_name: name.trim(), phone: phone.trim() } },
-      });
-      if (error) setMessage(error.message);
-      else if (!data.session) setMessage("Cadastro criado. Confirme seu e-mail para entrar.");
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) setMessage("E-mail ou senha inválidos.");
-    }
-    setBusy(false);
-  }
-
-  return (
-    <SafeAreaView style={styles.authSafe}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f7f7f7" />
-      <ScrollView contentContainerStyle={styles.authWrap} keyboardShouldPersistTaps="handled">
-        <Text style={styles.brand}><Text style={styles.brandYellow}>CLICK</Text>-FOOD</Text>
-        <Text style={styles.authKicker}>DELIVERY, FIDELIDADE E BENEFÍCIOS</Text>
-        <Text style={styles.authTitle}>{mode === "login" ? "Entre para pedir" : "Crie sua conta"}</Text>
-        {mode === "register" && <><TextInput style={styles.authInput} placeholder="Nome completo" value={name} onChangeText={setName} /><TextInput style={styles.authInput} placeholder="Telefone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} /></>}
-        <TextInput style={styles.authInput} placeholder="E-mail" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail} />
-        <TextInput style={styles.authInput} placeholder="Senha" secureTextEntry value={password} onChangeText={setPassword} />
-        {!!message && <Text style={styles.authMessage}>{message}</Text>}
-        <Pressable style={[styles.primaryButton, busy && { opacity: .5 }]} onPress={submit} disabled={busy}><Text style={styles.primaryButtonText}>{busy ? "AGUARDE..." : mode === "login" ? "ENTRAR" : "CRIAR CONTA"}</Text></Pressable>
-        <Pressable onPress={() => { setMode(mode === "login" ? "register" : "login"); setMessage(""); }}><Text style={styles.switchText}>{mode === "login" ? "Ainda não tenho conta" : "Já tenho uma conta"}</Text></Pressable>
-      </ScrollView>
-    </SafeAreaView>
-  );
+function AuthScreen(){
+  const[mode,setMode]=useState<"login"|"register">("login"); const[name,setName]=useState(""); const[phone,setPhone]=useState(""); const[email,setEmail]=useState(""); const[password,setPassword]=useState(""); const[message,setMessage]=useState(""); const[busy,setBusy]=useState(false);
+  async function submit(){setBusy(true);setMessage("");if(mode==="register"){if(!name.trim()||!phone.trim()||password.length<8){setMessage("Informe nome, telefone e senha com pelo menos 8 caracteres.");setBusy(false);return;}const{data,error}=await supabase.auth.signUp({email:email.trim(),password,options:{data:{full_name:name.trim(),phone:phone.trim()}}});if(error)setMessage(error.message);else if(!data.session)setMessage("Cadastro criado. Confirme seu e-mail para entrar.");}else{const{error}=await supabase.auth.signInWithPassword({email:email.trim(),password});if(error)setMessage("E-mail ou senha inválidos.");}setBusy(false);}
+  return <SafeAreaView style={styles.authSafe}><StatusBar barStyle="dark-content"/><ScrollView contentContainerStyle={styles.authWrap} keyboardShouldPersistTaps="handled"><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.kicker}>DELIVERY NA SUA CIDADE</Text><Text style={styles.authTitle}>{mode==="login"?"Entre para pedir":"Crie sua conta"}</Text>{mode==="register"&&<><TextInput style={styles.input} placeholder="Nome completo" value={name} onChangeText={setName}/><TextInput style={styles.input} placeholder="Telefone" keyboardType="phone-pad" value={phone} onChangeText={setPhone}/></>}<TextInput style={styles.input} placeholder="E-mail" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail}/><TextInput style={styles.input} placeholder="Senha" secureTextEntry value={password} onChangeText={setPassword}/>{!!message&&<Text style={styles.message}>{message}</Text>}<Pressable style={[styles.darkButton,busy&&styles.disabled]} onPress={submit} disabled={busy}><Text style={styles.darkButtonText}>{busy?"AGUARDE...":mode==="login"?"ENTRAR":"CRIAR CONTA"}</Text></Pressable><Pressable onPress={()=>{setMode(mode==="login"?"register":"login");setMessage("");}}><Text style={styles.switchText}>{mode==="login"?"Ainda não tenho conta":"Já tenho uma conta"}</Text></Pressable></ScrollView></SafeAreaView>;
 }
 
-function StoreCard({ store }: { store: Store }) {
-  return (
-    <Pressable style={styles.storeCard}>
-      <View style={styles.storeImage}><Text style={styles.storeEmoji}>🍽️</Text></View>
-      <View style={styles.storeBody}>
-        <View style={styles.rowBetween}><Text style={styles.storeName}>{store.name}</Text><Text style={styles.liveBadge}>ABERTA</Text></View>
-        <Text style={styles.storeMeta}>{store.description || "Cardápio disponível no CLICK-FOOD"}</Text>
-        <Text style={styles.storeMeta}>Preparo médio: {store.average_preparation_time} min • Mínimo {brl(store.minimum_order)}</Text>
-      </View>
-    </Pressable>
-  );
+export default function App(){
+  const[session,setSession]=useState<Session|null>(null); const[loading,setLoading]=useState(true); const[tab,setTab]=useState<Tab>("home");
+  const[stores,setStores]=useState<Store[]>([]); const[orders,setOrders]=useState<Order[]>([]); const[query,setQuery]=useState(""); const[message,setMessage]=useState("");
+  const[selectedStore,setSelectedStore]=useState<Store|null>(null); const[products,setProducts]=useState<Product[]>([]); const[cart,setCart]=useState<CartItem[]>([]);
+  const[addresses,setAddresses]=useState<Address[]>([]); const[selectedAddressId,setSelectedAddressId]=useState(""); const[deliveryType,setDeliveryType]=useState<DeliveryType>("DELIVERY"); const[coupon,setCoupon]=useState(""); const[placing,setPlacing]=useState(false);
+  const[addressForm,setAddressForm]=useState({label:"Casa",street:"",number:"",district:"",reference:""}); const[savingAddress,setSavingAddress]=useState(false);
+  const cartSubtotal=useMemo(()=>cart.reduce((sum,item)=>sum+Number(item.promotional_price??item.price)*item.quantity,0),[cart]);
+
+  useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false);});const{data}=supabase.auth.onAuthStateChange((_event,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[]);
+  useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();}},[session]);
+
+  async function loadStores(){const{data}=await supabase.from("stores").select("id,name,description,minimum_order,average_preparation_time").eq("status","ACTIVE").order("name").limit(50);setStores((data??[]).map((s:any)=>({...s,minimum_order:Number(s.minimum_order),average_preparation_time:Number(s.average_preparation_time)})));}
+  async function loadOrders(){if(!session)return;const{data}=await supabase.from("orders").select("id,order_number,total,status,payment_status,created_at,stores(name)").eq("customer_id",session.user.id).order("created_at",{ascending:false}).limit(30);setOrders((data??[]).map((o:any)=>({...o,total:Number(o.total)})));}
+  async function loadAddresses(){if(!session)return;const{data}=await supabase.from("customer_addresses").select("id,label,street,number,district,reference").eq("user_id",session.user.id).order("is_default",{ascending:false}).order("created_at",{ascending:false});const rows=(data??[]) as Address[];setAddresses(rows);if(rows.length&&!selectedAddressId)setSelectedAddressId(rows[0].id);}
+  async function openStore(store:Store){setMessage("");setSelectedStore(store);setCart([]);const{data,error}=await supabase.from("products").select("id,name,description,price,promotional_price").eq("store_id",store.id).eq("active",true).eq("available_delivery",true).order("name");if(error){setMessage("Não foi possível abrir o cardápio.");return;}setProducts((data??[]).map((p:any)=>({...p,price:Number(p.price),promotional_price:p.promotional_price==null?null:Number(p.promotional_price)})));}
+  function addProduct(product:Product){setCart(current=>{const found=current.find(item=>item.id===product.id);return found?current.map(item=>item.id===product.id?{...item,quantity:item.quantity+1}:item):[...current,{...product,quantity:1}];});}
+  function changeQty(id:string,delta:number){setCart(current=>current.map(item=>item.id===id?{...item,quantity:item.quantity+delta}:item).filter(item=>item.quantity>0));}
+
+  async function saveAddressWithLocation(){if(!session||!addressForm.street.trim()||!addressForm.number.trim()){setMessage("Informe rua e número do endereço.");return;}setSavingAddress(true);setMessage("");const permission=await Location.requestForegroundPermissionsAsync();if(permission.status!=="granted"){setMessage("Autorize a localização para calcular o frete deste endereço.");setSavingAddress(false);return;}const position=await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.Balanced});const{data,error}=await supabase.from("customer_addresses").insert({user_id:session.user.id,label:addressForm.label.trim()||"Endereço",street:addressForm.street.trim(),number:addressForm.number.trim(),district:addressForm.district.trim()||null,reference:addressForm.reference.trim()||null,latitude:position.coords.latitude,longitude:position.coords.longitude,is_default:addresses.length===0}).select("id").single();if(error){setMessage("Não foi possível salvar o endereço.");setSavingAddress(false);return;}setAddressForm({label:"Casa",street:"",number:"",district:"",reference:""});await loadAddresses();if(data?.id)setSelectedAddressId(data.id);setMessage("Endereço salvo e localização registrada.");setSavingAddress(false);}
+
+  async function placeOrder(){if(!session||!selectedStore||!cart.length)return;if(cartSubtotal<selectedStore.minimum_order){setMessage(`Pedido mínimo: ${brl(selectedStore.minimum_order)}.`);return;}if(deliveryType==="DELIVERY"&&!selectedAddressId){setMessage("Cadastre e selecione um endereço para entrega.");return;}setPlacing(true);setMessage("");let deliveryQuoteId: string|undefined;let deliveryFee=0;if(deliveryType==="DELIVERY"){const quoteResult=await supabase.functions.invoke("quote-delivery",{body:{storeId:selectedStore.id,addressId:selectedAddressId}});if(quoteResult.error||quoteResult.data?.error){const code=quoteResult.data?.error;setMessage(code==="OUTSIDE_DELIVERY_RADIUS"?"Este endereço está fora da área de entrega.":"Não foi possível calcular o frete. Confira a localização do endereço.");setPlacing(false);return;}deliveryQuoteId=quoteResult.data.quote.id;deliveryFee=Number(quoteResult.data.quote.fee);}
+    const result=await supabase.functions.invoke("create-order",{body:{storeId:selectedStore.id,deliveryType,addressId:deliveryType==="DELIVERY"?selectedAddressId:undefined,deliveryQuoteId,paymentMethod:"CASH",couponCode:coupon.trim()||undefined,items:cart.map(item=>({productId:item.id,quantity:item.quantity}))}});if(result.error||result.data?.error){const code=result.data?.error;setMessage(code==="COUPON_INVALID"?"Cupom inválido.":code==="MINIMUM_ORDER_NOT_REACHED"?"O pedido não atingiu o valor mínimo.":"Não foi possível enviar o pedido.");setPlacing(false);return;}const total=Number(result.data.total);setMessage(`Pedido enviado! Total ${brl(total)}${deliveryFee?` • entrega ${brl(deliveryFee)}`:""}.`);setCart([]);setCoupon("");setSelectedStore(null);setTab("orders");await loadOrders();setPlacing(false);}
+
+  const filtered=useMemo(()=>stores.filter(store=>`${store.name} ${store.description??""}`.toLowerCase().includes(query.toLowerCase())),[stores,query]);
+  if(loading)return <SafeAreaView style={styles.center}><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text>Carregando...</Text></SafeAreaView>;
+  if(!session)return <AuthScreen/>;
+
+  if(selectedStore)return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><ScrollView contentContainerStyle={styles.scroll}><Pressable onPress={()=>{setSelectedStore(null);setMessage("");}}><Text style={styles.back}>‹ Voltar</Text></Pressable><Text style={styles.storeTitle}>{selectedStore.name}</Text><Text style={styles.meta}>{selectedStore.description||"Cardápio CLICK-FOOD"}</Text><Text style={styles.meta}>Pedido mínimo {brl(selectedStore.minimum_order)} • preparo médio {selectedStore.average_preparation_time} min</Text>{!!message&&<Text style={styles.notice}>{message}</Text>}<Text style={styles.section}>Cardápio</Text>{products.length?products.map(product=><View style={styles.productRow} key={product.id}><View style={{flex:1}}><Text style={styles.productName}>{product.name}</Text><Text style={styles.meta}>{product.description||""}</Text><Text style={styles.price}>{brl(Number(product.promotional_price??product.price))}</Text></View><Pressable style={styles.addButton} onPress={()=>addProduct(product)}><Text style={styles.addText}>+</Text></Pressable></View>):<Text style={styles.empty}>Nenhum produto disponível.</Text>}
+    <Text style={styles.section}>Meu carrinho</Text>{cart.length?cart.map(item=><View style={styles.cartRow} key={item.id}><View style={{flex:1}}><Text style={styles.productName}>{item.quantity}× {item.name}</Text><Text style={styles.price}>{brl(Number(item.promotional_price??item.price)*item.quantity)}</Text></View><View style={styles.qty}><Pressable onPress={()=>changeQty(item.id,-1)}><Text>−</Text></Pressable><Text>{item.quantity}</Text><Pressable onPress={()=>changeQty(item.id,1)}><Text>+</Text></Pressable></View></View>):<Text style={styles.empty}>Adicione itens para continuar.</Text>}
+    <View style={styles.segment}><Pressable style={[styles.segmentButton,deliveryType==="DELIVERY"&&styles.segmentActive]} onPress={()=>setDeliveryType("DELIVERY")}><Text style={deliveryType==="DELIVERY"?styles.segmentActiveText:undefined}>Entrega</Text></Pressable><Pressable style={[styles.segmentButton,deliveryType==="PICKUP"&&styles.segmentActive]} onPress={()=>setDeliveryType("PICKUP")}><Text style={deliveryType==="PICKUP"?styles.segmentActiveText:undefined}>Retirar na loja</Text></Pressable></View>
+    {deliveryType==="DELIVERY"&&<><Text style={styles.section}>Endereço de entrega</Text>{addresses.map(address=><Pressable key={address.id} style={[styles.addressCard,selectedAddressId===address.id&&styles.addressSelected]} onPress={()=>setSelectedAddressId(address.id)}><Text style={styles.productName}>{address.label||"Endereço"}</Text><Text style={styles.meta}>{address.street}, {address.number}{address.district?` • ${address.district}`:""}</Text></Pressable>)}<View style={styles.addressForm}><Text style={styles.formTitle}>Adicionar endereço usando minha localização atual</Text><TextInput style={styles.input} placeholder="Nome (Casa, Trabalho...)" value={addressForm.label} onChangeText={value=>setAddressForm({...addressForm,label:value})}/><TextInput style={styles.input} placeholder="Rua/Avenida" value={addressForm.street} onChangeText={value=>setAddressForm({...addressForm,street:value})}/><TextInput style={styles.input} placeholder="Número" value={addressForm.number} onChangeText={value=>setAddressForm({...addressForm,number:value})}/><TextInput style={styles.input} placeholder="Bairro" value={addressForm.district} onChangeText={value=>setAddressForm({...addressForm,district:value})}/><TextInput style={styles.input} placeholder="Referência" value={addressForm.reference} onChangeText={value=>setAddressForm({...addressForm,reference:value})}/><Pressable style={styles.secondaryButton} onPress={saveAddressWithLocation} disabled={savingAddress}><Text style={styles.secondaryText}>{savingAddress?"SALVANDO...":"SALVAR ENDEREÇO + GPS"}</Text></Pressable></View></>}
+    <Text style={styles.section}>Cupom</Text><TextInput style={styles.input} placeholder="Digite o código do cupom" autoCapitalize="characters" value={coupon} onChangeText={setCoupon}/><View style={styles.totalBox}><Text>Subtotal</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>Pagamento operacional disponível agora: dinheiro na entrega/retirada. PIX e cartão online entram quando o gateway de produção for conectado.</Text></View><Pressable style={[styles.checkout,!cart.length&&styles.disabled]} disabled={!cart.length||placing} onPress={placeOrder}><Text style={styles.checkoutText}>{placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable></ScrollView></SafeAreaView>;
+
+  const home=<ScrollView contentContainerStyle={styles.scroll}><View style={styles.header}><View><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.kicker}>LOJAS DISPONÍVEIS</Text></View><View style={styles.avatar}><Text>{String(session.user.user_metadata?.full_name??"CF").slice(0,2).toUpperCase()}</Text></View></View><Pressable style={styles.searchBox} onPress={()=>setTab("search")}><Text>⌕  O que você quer pedir hoje?</Text></Pressable><View style={styles.hero}><View style={{flex:1}}><Text style={styles.heroKicker}>CLICK-FOOD</Text><Text style={styles.heroTitle}>Peça, acompanhe e aproveite.</Text><Text style={styles.heroText}>Seu pedido é calculado e validado com segurança no servidor.</Text></View><Text style={styles.heroEmoji}>🍔</Text></View><Text style={styles.section}>Lojas</Text>{stores.length?stores.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}><View style={styles.storeIcon}><Text style={{fontSize:32}}>🍽️</Text></View><View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text><Text style={styles.meta}>Mínimo {brl(store.minimum_order)}</Text></View><Text>›</Text></Pressable>):<Text style={styles.empty}>Ainda não há lojas ativas.</Text>}</ScrollView>;
+  const search=<ScrollView contentContainerStyle={styles.scroll}><Text style={styles.pageTitle}>Buscar</Text><TextInput style={styles.input} autoFocus placeholder="Nome da loja" value={query} onChangeText={setQuery}/>{filtered.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}><View style={styles.storeIcon}><Text style={{fontSize:30}}>🍽️</Text></View><View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text></View><Text>›</Text></Pressable>)}</ScrollView>;
+  const ordersView=<ScrollView contentContainerStyle={styles.scroll}><View style={styles.rowBetween}><Text style={styles.pageTitle}>Meus pedidos</Text><Pressable onPress={loadOrders}><Text style={styles.link}>Atualizar</Text></Pressable></View>{!!message&&<Text style={styles.notice}>{message}</Text>}{orders.length?orders.map(order=>{const rel=Array.isArray(order.stores)?order.stores[0]:order.stores;return <View style={styles.orderCard} key={order.id}><View><Text style={styles.productName}>{rel?.name??"CLICK-FOOD"} • #{order.order_number}</Text><Text style={styles.meta}>{order.status} • pagamento {order.payment_status}</Text></View><Text style={styles.price}>{brl(order.total)}</Text></View>}):<Text style={styles.empty}>Nenhum pedido ainda.</Text>}</ScrollView>;
+  const profile=<ScrollView contentContainerStyle={styles.scroll}><Text style={styles.pageTitle}>Minha conta</Text><View style={styles.profile}><View style={styles.avatar}><Text>{String(session.user.user_metadata?.full_name??"CF").slice(0,2).toUpperCase()}</Text></View><View><Text style={styles.productName}>{session.user.user_metadata?.full_name??"Cliente CLICK-FOOD"}</Text><Text style={styles.meta}>{session.user.email}</Text></View></View><Text style={styles.section}>Endereços salvos</Text>{addresses.map(address=><View style={styles.addressCard} key={address.id}><Text style={styles.productName}>{address.label||"Endereço"}</Text><Text style={styles.meta}>{address.street}, {address.number}</Text></View>)}<Pressable style={styles.signOut} onPress={()=>supabase.auth.signOut()}><Text style={styles.signOutText}>SAIR</Text></Pressable></ScrollView>;
+  const screen=tab==="home"?home:tab==="search"?search:tab==="orders"?ordersView:profile; const tabs:Array<[Tab,string,string]>=[["home","⌂","Início"],["search","⌕","Buscar"],["orders","▤","Pedidos"],["profile","○","Perfil"]];
+  return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><View style={{flex:1}}>{screen}</View><View style={styles.bottom}>{tabs.map(([key,icon,label])=><Pressable style={styles.tab} key={key} onPress={()=>setTab(key)}><Text style={[styles.tabIcon,tab===key&&styles.tabActive]}>{icon}</Text><Text style={[styles.tabLabel,tab===key&&styles.tabActive]}>{label}</Text></Pressable>)}</View></SafeAreaView>;
 }
 
-export default function App() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [tab, setTab] = useState<Tab>("home");
-  const [stores, setStores] = useState<Store[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setLoading(false); });
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-    return () => data.subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!session) return;
-    loadStores(); loadOrders();
-  }, [session]);
-
-  async function loadStores() {
-    const { data } = await supabase.from("stores").select("id,name,description,minimum_order,average_preparation_time").eq("status", "ACTIVE").order("name").limit(30);
-    setStores((data ?? []).map((s: any) => ({ ...s, minimum_order: Number(s.minimum_order), average_preparation_time: Number(s.average_preparation_time) })));
-  }
-
-  async function loadOrders() {
-    if (!session) return;
-    const { data } = await supabase.from("orders").select("id,order_number,total,status,created_at,stores(name)").eq("customer_id", session.user.id).order("created_at", { ascending: false }).limit(30);
-    setOrders((data ?? []).map((o: any) => ({ ...o, total: Number(o.total) })));
-  }
-
-  const filteredStores = useMemo(() => stores.filter((store) => `${store.name} ${store.description ?? ""}`.toLowerCase().includes(query.toLowerCase())), [stores, query]);
-
-  if (loading) return <SafeAreaView style={styles.center}><Text style={styles.brand}><Text style={styles.brandYellow}>CLICK</Text>-FOOD</Text><Text>Carregando...</Text></SafeAreaView>;
-  if (!session) return <AuthScreen />;
-
-  const home = <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-    <View style={styles.header}><View><Text style={styles.brand}><Text style={styles.brandYellow}>CLICK</Text>-FOOD</Text><Text style={styles.addressLabel}>DELIVERY NA SUA CIDADE</Text></View><View style={styles.avatar}><Text>{(session.user.user_metadata?.full_name ?? "CF").slice(0,2).toUpperCase()}</Text></View></View>
-    <Pressable style={styles.searchBox} onPress={() => setTab("search")}><Text style={styles.searchIcon}>⌕</Text><Text style={styles.searchPlaceholder}>O que você quer pedir hoje?</Text></Pressable>
-    <View style={styles.hero}><View style={{ flex: 1 }}><Text style={styles.heroKicker}>CLICK-FOOD</Text><Text style={styles.heroTitle}>Delivery e benefícios em um só app</Text><Text style={styles.heroText}>Lojas ativas aparecem aqui automaticamente.</Text></View><Text style={styles.heroEmoji}>🍔</Text></View>
-    <Text style={styles.sectionTitle}>Lojas disponíveis</Text>
-    {stores.length ? stores.map((store) => <StoreCard key={store.id} store={store} />) : <View style={styles.empty}><Text style={styles.emptyTitle}>Ainda não há lojas ativas.</Text><Text style={styles.storeMeta}>Assim que uma loja for liberada pela plataforma ela aparecerá aqui.</Text></View>}
-  </ScrollView>;
-
-  const search = <ScrollView contentContainerStyle={styles.scrollContent}><Text style={styles.pageTitle}>Buscar</Text><View style={styles.searchBox}><TextInput autoFocus value={query} onChangeText={setQuery} placeholder="Loja ou produto" style={styles.searchInput} /></View>{filteredStores.map((store) => <StoreCard key={store.id} store={store} />)}</ScrollView>;
-
-  const ordersView = <ScrollView contentContainerStyle={styles.scrollContent}><View style={styles.rowBetween}><Text style={styles.pageTitle}>Meus pedidos</Text><Pressable onPress={loadOrders}><Text style={styles.link}>Atualizar</Text></Pressable></View>{orders.length ? orders.map((order) => { const storeRel = Array.isArray(order.stores) ? order.stores[0] : order.stores; return <View key={order.id} style={styles.historyRow}><View><Text style={styles.storeName}>{storeRel?.name ?? "CLICK-FOOD"} • #{order.order_number}</Text><Text style={styles.storeMeta}>{order.status}</Text></View><Text style={styles.orderTotal}>{brl(order.total)}</Text></View>; }) : <View style={styles.empty}><Text style={styles.emptyTitle}>Nenhum pedido ainda.</Text></View>}</ScrollView>;
-
-  const favorites = <ScrollView contentContainerStyle={styles.scrollContent}><Text style={styles.pageTitle}>Favoritos</Text><View style={styles.empty}><Text style={styles.emptyTitle}>Seus favoritos aparecerão aqui.</Text></View></ScrollView>;
-
-  const profile = <ScrollView contentContainerStyle={styles.scrollContent}><Text style={styles.pageTitle}>Minha conta</Text><View style={styles.profileCard}><View style={styles.avatarLarge}><Text style={styles.avatarLargeText}>{(session.user.user_metadata?.full_name ?? "CF").slice(0,2).toUpperCase()}</Text></View><View style={{flex:1}}><Text style={styles.storeName}>{session.user.user_metadata?.full_name ?? "Cliente CLICK-FOOD"}</Text><Text style={styles.storeMeta}>{session.user.email}</Text></View></View>{["Endereços", "Formas de pagamento", "Cupons", "Meus pontos", "Notificações", "Ajuda e suporte", "Termos e privacidade"].map((item) => <Pressable key={item} style={styles.menuRow}><Text style={styles.menuText}>{item}</Text><Text>›</Text></Pressable>)}<Pressable style={styles.signOut} onPress={() => supabase.auth.signOut()}><Text style={styles.signOutText}>SAIR</Text></Pressable></ScrollView>;
-
-  const screen = tab === "home" ? home : tab === "search" ? search : tab === "orders" ? ordersView : tab === "favorites" ? favorites : profile;
-  const tabs: Array<[Tab,string,string]> = [["home","⌂","Início"],["search","⌕","Buscar"],["orders","▤","Pedidos"],["favorites","♡","Favoritos"],["profile","○","Perfil"]];
-
-  return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content" backgroundColor="#f7f7f7"/><View style={styles.body}>{screen}</View><View style={styles.bottomBar}>{tabs.map(([key,icon,label])=><Pressable key={key} style={styles.tab} onPress={()=>setTab(key)}><Text style={[styles.tabIcon,tab===key&&styles.tabActive]}>{icon}</Text><Text style={[styles.tabLabel,tab===key&&styles.tabActive]}>{label}</Text></Pressable>)}</View></SafeAreaView>;
-}
-
-const styles = StyleSheet.create({
-  safe:{flex:1,backgroundColor:"#f7f7f7"},body:{flex:1},center:{flex:1,alignItems:"center",justifyContent:"center",gap:10,backgroundColor:"#f7f7f7"},scrollContent:{padding:18,paddingBottom:30},
-  authSafe:{flex:1,backgroundColor:"#f7f7f7"},authWrap:{flexGrow:1,justifyContent:"center",padding:26},authKicker:{fontSize:10,fontWeight:"900",color:"#977800",letterSpacing:1.3,marginTop:12},authTitle:{fontSize:30,fontWeight:"900",marginVertical:22},authInput:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e1e1e1",borderRadius:14,padding:14,marginBottom:10,fontSize:15},authMessage:{backgroundColor:"#fff5d2",padding:12,borderRadius:12,marginVertical:8,color:"#6c5800"},switchText:{textAlign:"center",fontWeight:"800",color:"#8d7000",padding:18},
-  header:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:18},brand:{fontSize:24,fontWeight:"900",color:"#111"},brandYellow:{color:"#f4c400"},addressLabel:{fontSize:10,fontWeight:"800",color:"#777",marginTop:8},avatar:{width:42,height:42,borderRadius:21,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},
-  searchBox:{minHeight:52,borderRadius:16,backgroundColor:"#fff",flexDirection:"row",alignItems:"center",paddingHorizontal:15,borderWidth:1,borderColor:"#ececec",marginBottom:18},searchIcon:{fontSize:22,marginRight:8},searchPlaceholder:{color:"#777"},searchInput:{flex:1,fontSize:15,color:"#111"},
-  hero:{backgroundColor:"#111",borderRadius:22,padding:20,minHeight:145,flexDirection:"row",alignItems:"center",marginBottom:24},heroKicker:{color:"#f4c400",fontWeight:"900",fontSize:11},heroTitle:{color:"#fff",fontWeight:"900",fontSize:23,marginTop:8,maxWidth:245},heroText:{color:"#c9c9c9",marginTop:8,fontSize:12},heroEmoji:{fontSize:54},
-  sectionTitle:{fontSize:19,fontWeight:"900",color:"#111",marginVertical:12},pageTitle:{fontSize:28,fontWeight:"900",marginBottom:20},rowBetween:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},link:{color:"#9c7900",fontWeight:"800",fontSize:12},
-  storeCard:{backgroundColor:"#fff",borderRadius:20,overflow:"hidden",marginBottom:14,borderWidth:1,borderColor:"#ececec"},storeImage:{height:95,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},storeEmoji:{fontSize:42},storeBody:{padding:14},storeName:{fontSize:15,fontWeight:"900",color:"#111"},storeMeta:{color:"#777",fontSize:12,marginTop:4},liveBadge:{fontSize:9,fontWeight:"900",color:"#16784b",backgroundColor:"#e9f8ef",paddingHorizontal:8,paddingVertical:4,borderRadius:9},
-  bottomBar:{minHeight:72,flexDirection:"row",backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e7e7e7",paddingTop:8,paddingBottom:6},tab:{flex:1,alignItems:"center",justifyContent:"center"},tabIcon:{fontSize:20,color:"#777"},tabLabel:{fontSize:9,color:"#777",marginTop:3,fontWeight:"700"},tabActive:{color:"#9c7900",fontWeight:"900"},
-  primaryButton:{backgroundColor:"#111",paddingVertical:15,borderRadius:14,alignItems:"center",marginTop:8},primaryButtonText:{color:"#fff",fontWeight:"900",fontSize:12},historyRow:{backgroundColor:"#fff",padding:15,borderRadius:16,flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:10},orderTotal:{fontWeight:"900",color:"#8d7000"},
-  profileCard:{flexDirection:"row",gap:14,alignItems:"center",backgroundColor:"#fff",padding:16,borderRadius:18,marginBottom:18},avatarLarge:{width:58,height:58,borderRadius:29,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},avatarLargeText:{fontWeight:"900"},menuRow:{backgroundColor:"#fff",minHeight:54,borderBottomWidth:1,borderBottomColor:"#eee",flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingHorizontal:15},menuText:{fontWeight:"700"},signOut:{backgroundColor:"#fff1f0",padding:14,borderRadius:14,alignItems:"center",marginTop:18},signOutText:{color:"#a12f2a",fontWeight:"900"},empty:{backgroundColor:"#fff",padding:26,borderRadius:18,alignItems:"center"},emptyTitle:{fontWeight:"900",marginBottom:4},
-});
+const styles=StyleSheet.create({safe:{flex:1,backgroundColor:"#f7f7f7"},center:{flex:1,alignItems:"center",justifyContent:"center",gap:10},scroll:{padding:18,paddingBottom:34},authSafe:{flex:1,backgroundColor:"#f7f7f7"},authWrap:{flexGrow:1,justifyContent:"center",padding:26},brand:{fontSize:25,fontWeight:"900"},yellow:{color:"#f4c400"},kicker:{fontSize:10,fontWeight:"900",color:"#8b7000",letterSpacing:1.4,marginTop:7},authTitle:{fontSize:30,fontWeight:"900",marginVertical:22},input:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e1e1e1",borderRadius:13,padding:13,marginBottom:9},message:{backgroundColor:"#fff5d2",color:"#695400",padding:11,borderRadius:11,marginBottom:8},notice:{backgroundColor:"#fff5d2",color:"#695400",padding:12,borderRadius:12,marginVertical:12},darkButton:{backgroundColor:"#111",padding:15,borderRadius:13,alignItems:"center"},darkButtonText:{color:"#fff",fontWeight:"900"},switchText:{textAlign:"center",fontWeight:"800",color:"#8b7000",padding:17},disabled:{opacity:.5},header:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:18},avatar:{width:44,height:44,borderRadius:22,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},searchBox:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:16,marginBottom:16},hero:{backgroundColor:"#111",borderRadius:20,padding:18,flexDirection:"row",alignItems:"center"},heroKicker:{color:"#f4c400",fontWeight:"900",fontSize:10},heroTitle:{color:"#fff",fontSize:22,fontWeight:"900",marginTop:6},heroText:{color:"#aaa",fontSize:11,marginTop:7},heroEmoji:{fontSize:48},section:{fontSize:19,fontWeight:"900",marginTop:22,marginBottom:10},pageTitle:{fontSize:28,fontWeight:"900",marginBottom:18},storeCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:16,padding:13,flexDirection:"row",alignItems:"center",gap:12,marginBottom:9},storeIcon:{width:50,height:50,borderRadius:14,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},storeTitle:{fontSize:28,fontWeight:"900",marginTop:8},productRow:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:14,marginBottom:9,flexDirection:"row",alignItems:"center",gap:10},productName:{fontWeight:"900",fontSize:15},meta:{color:"#777",fontSize:11,marginTop:4},price:{fontWeight:"900",color:"#8d7000",marginTop:6},addButton:{width:42,height:42,borderRadius:13,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},addText:{fontSize:24,fontWeight:"900"},cartRow:{backgroundColor:"#fff",borderRadius:14,padding:13,marginBottom:8,flexDirection:"row",alignItems:"center"},qty:{flexDirection:"row",gap:14,alignItems:"center",borderWidth:1,borderColor:"#ddd",borderRadius:10,paddingVertical:8,paddingHorizontal:10},segment:{flexDirection:"row",gap:7,marginTop:18},segmentButton:{flex:1,borderWidth:1,borderColor:"#ddd",padding:12,borderRadius:12,alignItems:"center"},segmentActive:{backgroundColor:"#111",borderColor:"#111"},segmentActiveText:{color:"#fff",fontWeight:"900"},addressCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e2e2e2",borderRadius:13,padding:12,marginBottom:7},addressSelected:{borderColor:"#d4ae00",backgroundColor:"#fffbea"},addressForm:{backgroundColor:"#eeeae0",borderRadius:16,padding:14,marginTop:10},formTitle:{fontWeight:"900",marginBottom:10},secondaryButton:{backgroundColor:"#fff",borderWidth:1,borderColor:"#ccc",padding:13,borderRadius:12,alignItems:"center"},secondaryText:{fontWeight:"900"},totalBox:{backgroundColor:"#fff",padding:16,borderRadius:15,marginTop:12},total:{fontSize:25,fontWeight:"900",marginTop:4},paymentHint:{fontSize:10,color:"#777",marginTop:10,lineHeight:14},checkout:{backgroundColor:"#f4c400",padding:16,borderRadius:14,alignItems:"center",marginTop:10},checkoutText:{fontWeight:"900"},back:{fontWeight:"900",color:"#856a00",fontSize:15},empty:{color:"#777",paddingVertical:20,textAlign:"center"},orderCard:{backgroundColor:"#fff",borderRadius:14,padding:14,marginBottom:8,flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:10},rowBetween:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},link:{color:"#8d7000",fontWeight:"900"},profile:{backgroundColor:"#fff",padding:15,borderRadius:16,flexDirection:"row",alignItems:"center",gap:12},signOut:{borderWidth:1,borderColor:"#e3b7b7",borderRadius:13,padding:14,marginTop:24,alignItems:"center"},signOutText:{color:"#9d2c2c",fontWeight:"900"},bottom:{height:70,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e5e5e5",flexDirection:"row"},tab:{flex:1,alignItems:"center",justifyContent:"center"},tabIcon:{fontSize:19,color:"#777"},tabLabel:{fontSize:9,color:"#777",fontWeight:"700",marginTop:3},tabActive:{color:"#8d7000",fontWeight:"900"}});
