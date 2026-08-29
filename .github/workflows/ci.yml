@@ -1,0 +1,36 @@
+name: CLICK-FOOD CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Build Painel Matriz
+        run: npm run build:admin
+
+      - name: Build Painel Lojista
+        run: npm run build:lojista
+
+      - name: Type-check App Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+
+      - name: Type-check App Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
