@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./shortcut.css";
+import "./operational.css";
 
 export const metadata: Metadata = {
   title: "CLICK-FOOD | Lojista",
