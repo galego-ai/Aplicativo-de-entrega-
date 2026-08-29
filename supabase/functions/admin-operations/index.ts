@@ -4,7 +4,8 @@ type Body =
   | { action: "CREATE_STORE"; legalName: string; tradeName?: string; document?: string; email?: string; phone?: string; storeName: string; slug: string; cityId?: string; description?: string }
   | { action: "STORE_STATUS"; storeId: string; status: "ACTIVE" | "SUSPENDED" | "BLOCKED" }
   | { action: "DRIVER_STATUS"; driverId: string; status: "ACTIVE" | "BLOCKED" | "PENDING" }
-  | { action: "REISSUE_STORE_CODE"; storeId: string };
+  | { action: "REISSUE_STORE_CODE"; storeId: string }
+  | { action: "CREATE_CITY"; name: string; state: string };
 
 async function sha256(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -26,6 +27,40 @@ export default {
     let body: Body;
     try { body = await req.json(); } catch { return Response.json({ error: "INVALID_JSON" }, { status: 400 }); }
     const actorId = ctx.userClaims!.id;
+
+    if (body.action === "CREATE_CITY") {
+      const name = body.name?.trim();
+      const state = body.state?.trim().toUpperCase();
+      if (!name || !/^[A-Z]{2}$/.test(state)) return Response.json({ error: "CITY_AND_STATE_REQUIRED" }, { status: 400 });
+      const { data: existing, error: lookupError } = await ctx.supabaseAdmin
+        .from("cities")
+        .select("id,name,state,active")
+        .ilike("name", name)
+        .eq("state", state)
+        .limit(1)
+        .maybeSingle();
+      if (lookupError) return Response.json({ error: "CITY_LOOKUP_FAILED" }, { status: 500 });
+      if (existing) {
+        if (!existing.active) await ctx.supabaseAdmin.from("cities").update({ active: true }).eq("id", existing.id);
+        return Response.json({ city: { ...existing, active: true }, alreadyExists: true });
+      }
+      const { data: city, error: cityError } = await ctx.supabaseAdmin
+        .from("cities")
+        .insert({ name, state, country: "BR", active: true })
+        .select("id,name,state,active")
+        .single();
+      if (cityError) return Response.json({ error: "CITY_CREATE_FAILED" }, { status: 500 });
+      const [pricingResult, dispatchResult] = await Promise.all([
+        ctx.supabaseAdmin.from("city_delivery_pricing").upsert({ city_id: city.id, driver_base_earning: 4, driver_per_km: 1, driver_minimum_earning: 6 }, { onConflict: "city_id" }),
+        ctx.supabaseAdmin.from("delivery_dispatch_settings").upsert({ city_id: city.id, offer_timeout_seconds: 15, initial_radius_km: 5, max_radius_km: 20, batch_size: 3 }, { onConflict: "city_id" }),
+      ]);
+      if (pricingResult.error || dispatchResult.error) {
+        await ctx.supabaseAdmin.from("cities").delete().eq("id", city.id);
+        return Response.json({ error: "CITY_CONFIGURATION_FAILED" }, { status: 500 });
+      }
+      await ctx.supabaseAdmin.from("audit_logs").insert({ actor_id: actorId, action: "CITY_CREATED", entity_type: "city", entity_id: city.id, after_data: { name, state } });
+      return Response.json({ city }, { status: 201 });
+    }
 
     if (body.action === "CREATE_STORE") {
       const storeName = body.storeName?.trim();
