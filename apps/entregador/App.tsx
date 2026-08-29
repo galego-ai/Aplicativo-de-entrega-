@@ -1,102 +1,128 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Modal,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  View,
+  Modal, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet,
+  Text, TextInput, View,
 } from "react-native";
+import * as Location from "expo-location";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "./supabase";
 
-type Screen = "home" | "history" | "wallet" | "goals" | "profile";
-type DeliveryStep = "IDLE" | "TO_STORE" | "AT_STORE" | "TO_CUSTOMER" | "AT_CUSTOMER";
+type Screen = "home" | "history" | "wallet" | "profile";
+type Driver = { id: string; status: string; online: boolean; rating: number; acceptance_rate: number; city_id: string | null };
+type City = { id: string; name: string; state: string };
+type Offer = { id: string; deliveryId: string; storeName: string; pickupDistanceKm: number | null; deliveryDistanceKm: number | null; earning: number; expiresAt: string };
+type ActiveDelivery = {
+  id: string; status: string; earning: number; orderNumber: number; orderStatus: string;
+  pickup: { storeName: string; latitude: number | null; longitude: number | null };
+  destination: { street: string; number: string | null; complement: string | null; district: string | null; reference: string | null; latitude: number | null; longitude: number | null } | null;
+};
+type HistoryItem = { id: string; driver_earning: number; delivered_at: string | null };
 
-function Home({ online, setOnline }: { online: boolean; setOnline: (value: boolean) => void }) {
-  const [offerVisible, setOfferVisible] = useState(false);
-  const [step, setStep] = useState<DeliveryStep>("IDLE");
+const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
 
-  const accept = () => {
-    setOfferVisible(false);
-    setStep("TO_STORE");
-  };
+function AuthScreen() {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  return (
-    <View style={styles.flex}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.header}>
-          <View><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.subtitle}>ENTREGADOR</Text></View>
-          <View style={[styles.dot, online && styles.dotOnline]} />
-        </View>
+  async function submit() {
+    setBusy(true); setMessage("");
+    if (mode === "register") {
+      if (!name.trim() || !phone.trim() || password.length < 6) {
+        setMessage("Informe nome, telefone e senha com pelo menos 6 caracteres."); setBusy(false); return;
+      }
+      const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { full_name: name.trim(), phone: phone.trim() } } });
+      if (error) setMessage(error.message);
+      else if (!data.session) setMessage("Conta criada. Confirme seu e-mail para continuar o cadastro.");
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (error) setMessage("E-mail ou senha inválidos.");
+    }
+    setBusy(false);
+  }
 
-        <View style={styles.earningsCard}>
-          <Text style={styles.earningsLabel}>GANHOS HOJE</Text>
-          <Text style={styles.earningsValue}>R$ 126,50</Text>
-          <View style={styles.stats}><View><Text style={styles.statValue}>14</Text><Text style={styles.statLabel}>entregas</Text></View><View><Text style={styles.statValue}>4,9 ★</Text><Text style={styles.statLabel}>avaliação</Text></View><View><Text style={styles.statValue}>92%</Text><Text style={styles.statLabel}>aceitação</Text></View></View>
-        </View>
-
-        <Pressable style={[styles.onlineButton, online && styles.offlineButton]} onPress={() => { if (step === "IDLE") setOnline(!online); }}>
-          <Text style={[styles.onlineText, online && styles.offlineText]}>{online ? "FICAR OFFLINE" : "FICAR ONLINE"}</Text>
-        </Pressable>
-        {step !== "IDLE" && <Text style={styles.lockHint}>Finalize a entrega atual antes de ficar offline.</Text>}
-
-        <View style={styles.map}>
-          <Text style={styles.mapTitle}>{step === "IDLE" ? (online ? "Você está disponível" : "Fique online para receber entregas") : "Entrega ativa"}</Text>
-          <Text style={styles.mapEmoji}>{step === "TO_STORE" || step === "TO_CUSTOMER" ? "🛵" : "📍"}</Text>
-          <Text style={styles.mapText}>{step === "TO_STORE" ? "A caminho da Pizza Mais • 1,2 km" : step === "AT_STORE" ? "Na loja • aguardando retirada" : step === "TO_CUSTOMER" ? "A caminho do cliente • 4,3 km" : step === "AT_CUSTOMER" ? "Você chegou ao destino" : "Mapa e localização em tempo real"}</Text>
-        </View>
-
-        {online && step === "IDLE" && <Pressable style={styles.demoOffer} onPress={() => setOfferVisible(true)}><Text style={styles.demoOfferText}>SIMULAR NOVO CHAMADO</Text></Pressable>}
-
-        {step !== "IDLE" && <View style={styles.deliveryCard}>
-          <Text style={styles.deliveryBadge}>PEDIDO #1842</Text>
-          <Text style={styles.deliveryTitle}>{step === "TO_STORE" || step === "AT_STORE" ? "Pizza Mais" : "Entrega ao cliente"}</Text>
-          <Text style={styles.deliveryMeta}>{step === "TO_STORE" ? "1,2 km até a retirada" : step === "AT_STORE" ? "Pedido pronto para retirada" : step === "TO_CUSTOMER" ? "4,3 km até o cliente" : "Confirme o código do cliente"}</Text>
-          <Pressable style={styles.actionButton} onPress={() => setStep(step === "TO_STORE" ? "AT_STORE" : step === "AT_STORE" ? "TO_CUSTOMER" : step === "TO_CUSTOMER" ? "AT_CUSTOMER" : "IDLE")}><Text style={styles.actionText}>{step === "TO_STORE" ? "CONFIRMAR CHEGADA À LOJA" : step === "AT_STORE" ? "CONFIRMAR RETIRADA" : step === "TO_CUSTOMER" ? "CONFIRMAR CHEGADA" : "VALIDAR CÓDIGO E CONCLUIR"}</Text></Pressable>
-          <Pressable style={styles.helpButton}><Text style={styles.helpText}>Preciso de ajuda</Text></Pressable>
-        </View>}
-
-        <Text style={styles.sectionTitle}>Meta do fim de semana</Text>
-        <View style={styles.goalCard}><View style={styles.rowBetween}><Text style={styles.goalTitle}>20 entregas</Text><Text style={styles.goalBonus}>+ R$ 30</Text></View><View style={styles.progress}><View style={styles.progressFill} /></View><Text style={styles.goalText}>14 de 20 concluídas</Text></View>
-      </ScrollView>
-
-      <Modal visible={offerVisible} transparent animationType="fade" onRequestClose={() => setOfferVisible(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.offerCard}>
-            <View style={styles.offerHeader}><Text style={styles.offerLabel}>NOVA ENTREGA</Text><View style={styles.timer}><Text style={styles.timerText}>14s</Text></View></View>
-            <Text style={styles.offerStore}>Pizza Mais</Text>
-            <View style={styles.offerRoute}><View><Text style={styles.offerSmall}>ATÉ A LOJA</Text><Text style={styles.offerBig}>1,2 km</Text></View><Text style={styles.arrow}>→</Text><View><Text style={styles.offerSmall}>ENTREGA</Text><Text style={styles.offerBig}>4,3 km</Text></View></View>
-            <View style={styles.offerPay}><Text style={styles.offerSmall}>SEU GANHO</Text><Text style={styles.offerAmount}>R$ 9,20</Text></View>
-            <View style={styles.offerActions}><Pressable style={styles.reject} onPress={() => setOfferVisible(false)}><Text style={styles.rejectText}>RECUSAR</Text></Pressable><Pressable style={styles.accept} onPress={accept}><Text style={styles.acceptText}>ACEITAR</Text></Pressable></View>
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
+  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.authWrap} keyboardShouldPersistTaps="handled">
+    <Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.subtitle}>ENTREGADOR</Text>
+    <Text style={styles.authTitle}>{mode === "login" ? "Entrar" : "Quero ser entregador"}</Text>
+    {mode === "register" && <><TextInput style={styles.input} placeholder="Nome completo" value={name} onChangeText={setName}/><TextInput style={styles.input} placeholder="Telefone" keyboardType="phone-pad" value={phone} onChangeText={setPhone}/></>}
+    <TextInput style={styles.input} placeholder="E-mail" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail}/>
+    <TextInput style={styles.input} placeholder="Senha" secureTextEntry value={password} onChangeText={setPassword}/>
+    {!!message && <Text style={styles.notice}>{message}</Text>}
+    <Pressable style={[styles.primary, busy && styles.disabled]} onPress={submit} disabled={busy}><Text style={styles.primaryText}>{busy ? "AGUARDE..." : mode === "login" ? "ENTRAR" : "CRIAR CONTA"}</Text></Pressable>
+    <Pressable onPress={()=>{setMode(mode === "login" ? "register" : "login");setMessage("");}}><Text style={styles.switchText}>{mode === "login" ? "Quero me cadastrar como entregador" : "Já tenho uma conta"}</Text></Pressable>
+  </ScrollView></SafeAreaView>;
 }
 
-function History() { return <ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Minhas entregas</Text>{[["#1842","Pizza Mais","R$ 9,20"],["#1837","Burger House","R$ 8,40"],["#1821","Doces da Ana","R$ 7,50"]].map(([id,store,value]) => <View style={styles.listRow} key={id}><View><Text style={styles.listTitle}>{id} • {store}</Text><Text style={styles.listMeta}>Concluída</Text></View><Text style={styles.listValue}>{value}</Text></View>)}</ScrollView>; }
-function Wallet() { return <ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Carteira</Text><View style={styles.walletCard}><Text style={styles.earningsLabel}>SALDO DISPONÍVEL</Text><Text style={styles.earningsValue}>R$ 485,90</Text><Pressable style={styles.actionButton}><Text style={styles.actionText}>SOLICITAR REPASSE</Text></Pressable></View><Text style={styles.sectionTitle}>Extrato</Text>{["Entrega #1842   + R$ 9,20","Entrega #1837   + R$ 8,40","Repasse PIX   - R$ 350,00"].map((item) => <View style={styles.listRow} key={item}><Text style={styles.listTitle}>{item}</Text></View>)}</ScrollView>; }
-function Goals() { return <ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Metas e nível</Text><View style={styles.levelCard}><Text style={styles.earningsLabel}>NÍVEL ATUAL</Text><Text style={styles.level}>OURO</Text><View style={styles.progress}><View style={[styles.progressFill,{width:"92%"}]} /></View><Text style={styles.goalText}>184 / 200 entregas • faltam 16 para Diamante</Text></View><Text style={styles.sectionTitle}>Bônus ativos</Text><View style={styles.goalCard}><Text style={styles.goalTitle}>+ R$ 2 por entrega</Text><Text style={styles.goalText}>Hoje, das 18h às 22h • Região Centro</Text></View></ScrollView>; }
-function Profile() { return <ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Minha conta</Text>{["Meus documentos","Meu veículo","Minha cidade","Avaliações","Notificações","Suporte","Termos e privacidade"].map((item) => <Pressable style={styles.menuRow} key={item}><Text style={styles.listTitle}>{item}</Text><Text>›</Text></Pressable>)}</ScrollView>; }
+function DriverRegistration({ cities, onDone }: { cities: City[]; onDone: () => void }) {
+  const [cityId, setCityId] = useState(cities[0]?.id ?? "");
+  const [vehicleType, setVehicleType] = useState<"MOTORCYCLE"|"CAR"|"BICYCLE">("MOTORCYCLE");
+  const [brand, setBrand] = useState(""); const [model, setModel] = useState(""); const [plate, setPlate] = useState("");
+  const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!cityId) { setMessage("Nenhuma cidade foi liberada para cadastro ainda."); return; }
+    setBusy(true); setMessage("");
+    const { data, error } = await supabase.functions.invoke("register-driver", { body: { cityId, vehicleType, brand, model, plate } });
+    if (error || data?.error) setMessage("Não foi possível enviar o cadastro."); else onDone();
+    setBusy(false);
+  }
+
+  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.content}>
+    <Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.pageTitle}>Cadastro de entregador</Text>
+    <Text style={styles.label}>Cidade de atuação</Text>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.choices}>{cities.length ? cities.map(city=><Pressable key={city.id} onPress={()=>setCityId(city.id)} style={[styles.chip,cityId===city.id&&styles.chipActive]}><Text style={cityId===city.id?styles.chipTextActive:styles.chipText}>{city.name} - {city.state}</Text></Pressable>) : <Text style={styles.notice}>A Matriz ainda não liberou cidades para novos entregadores.</Text>}</ScrollView>
+    <Text style={styles.label}>Veículo</Text><View style={styles.choiceRow}>{[["MOTORCYCLE","Moto"],["CAR","Carro"],["BICYCLE","Bicicleta"]].map(([value,label])=><Pressable key={value} onPress={()=>setVehicleType(value as any)} style={[styles.chip,vehicleType===value&&styles.chipActive]}><Text style={vehicleType===value?styles.chipTextActive:styles.chipText}>{label}</Text></Pressable>)}</View>
+    <TextInput style={styles.input} placeholder="Marca" value={brand} onChangeText={setBrand}/><TextInput style={styles.input} placeholder="Modelo" value={model} onChangeText={setModel}/>{vehicleType!=="BICYCLE"&&<TextInput style={styles.input} placeholder="Placa" autoCapitalize="characters" value={plate} onChangeText={setPlate}/>} 
+    {!!message&&<Text style={styles.notice}>{message}</Text>}<Pressable style={[styles.primary,busy&&styles.disabled]} onPress={submit} disabled={busy}><Text style={styles.primaryText}>{busy?"ENVIANDO...":"ENVIAR PARA APROVAÇÃO"}</Text></Pressable>
+    <Pressable onPress={()=>supabase.auth.signOut()}><Text style={styles.switchText}>Sair da conta</Text></Pressable>
+  </ScrollView></SafeAreaView>;
+}
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("home");
-  const [online, setOnline] = useState(false);
-  const current = screen === "home" ? <Home online={online} setOnline={setOnline} /> : screen === "history" ? <History /> : screen === "wallet" ? <Wallet /> : screen === "goals" ? <Goals /> : <Profile />;
-  const tabs: Array<[Screen,string,string]> = [["home","⌂","Início"],["history","▤","Entregas"],["wallet","$","Carteira"],["goals","★","Metas"],["profile","○","Perfil"]];
-  return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content" backgroundColor="#f6f6f6"/><View style={styles.flex}>{current}</View><View style={styles.bottom}>{tabs.map(([key,icon,label]) => <Pressable key={key} onPress={() => setScreen(key)} style={styles.tab}><Text style={[styles.tabIcon,screen===key&&styles.tabActive]}>{icon}</Text><Text style={[styles.tabText,screen===key&&styles.tabActive]}>{label}</Text></Pressable>)}</View></SafeAreaView>;
+  const [session,setSession]=useState<Session|null>(null); const [driver,setDriver]=useState<Driver|null>(null); const [cities,setCities]=useState<City[]>([]);
+  const [screen,setScreen]=useState<Screen>("home"); const [offer,setOffer]=useState<Offer|null>(null); const [active,setActive]=useState<ActiveDelivery|null>(null);
+  const [history,setHistory]=useState<HistoryItem[]>([]); const [code,setCode]=useState(""); const [message,setMessage]=useState(""); const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)});const {data}=supabase.auth.onAuthStateChange((_e,s)=>setSession(s));return()=>data.subscription.unsubscribe();},[]);
+  useEffect(()=>{if(session) bootstrap(); else {setDriver(null);setActive(null);setOffer(null)}},[session]);
+  useEffect(()=>{if(!driver?.online||driver.status!=="ACTIVE") return; const timer=setInterval(()=>{loadOffers();loadActive();},6000);loadOffers();loadActive();return()=>clearInterval(timer);},[driver?.online,driver?.status]);
+  useEffect(()=>{if(!driver?.online||driver.status!=="ACTIVE") return; let subscription:Location.LocationSubscription|undefined; (async()=>{const permission=await Location.requestForegroundPermissionsAsync();if(permission.status!=="granted"){setMessage("Ative a localização para receber entregas próximas.");return;}subscription=await Location.watchPositionAsync({accuracy:Location.Accuracy.High,distanceInterval:20,timeInterval:10000},async position=>{await supabase.from("driver_locations").upsert({driver_id:driver.id,latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,speed:position.coords.speed,accuracy:position.coords.accuracy,recorded_at:new Date().toISOString()},{onConflict:"driver_id"});});})();return()=>subscription?.remove();},[driver?.online,driver?.id,driver?.status]);
+
+  async function bootstrap(){setLoading(true);const [{data:cityData},{data:driverData}]=await Promise.all([supabase.from("cities").select("id,name,state").eq("active",true).order("name"),supabase.from("drivers").select("id,status,online,rating,acceptance_rate,city_id").maybeSingle()]);setCities(cityData??[]);if(driverData){setDriver({...driverData,rating:Number(driverData.rating),acceptance_rate:Number(driverData.acceptance_rate)} as Driver);await Promise.all([loadActive(),loadHistory(driverData.id)]);}else setDriver(null);setLoading(false);}
+  async function loadOffers(){const {data}=await supabase.functions.invoke("driver-offers",{body:{}});const next=(data?.offers??[])[0] as Offer|undefined;setOffer(next??null);}
+  async function loadActive(){const {data}=await supabase.functions.invoke("driver-active-delivery",{body:{}});setActive(data?.delivery??null);}
+  async function loadHistory(driverId=driver?.id){if(!driverId)return;const {data}=await supabase.from("deliveries").select("id,driver_earning,delivered_at").eq("driver_id",driverId).eq("status","DELIVERED").order("delivered_at",{ascending:false}).limit(30);setHistory((data??[]).map((x:any)=>({...x,driver_earning:Number(x.driver_earning)})));}
+  async function toggleOnline(){if(!driver)return;setMessage("");const next=!driver.online;const {data,error}=await supabase.functions.invoke("driver-status",{body:{online:next}});if(error||data?.error){setMessage(data?.error==="ACTIVE_DELIVERY_PREVENTS_OFFLINE"?"Finalize a entrega atual antes de ficar offline.":"Não foi possível alterar seu status.");return;}setDriver({...driver,online:Boolean(data.driver.online)});if(next) await loadOffers();}
+  async function acceptOffer(){if(!offer)return;const {data,error}=await supabase.functions.invoke("accept-delivery",{body:{offerId:offer.id}});if(error||data?.error){setMessage("Este chamado não está mais disponível.");setOffer(null);return;}setOffer(null);await loadActive();}
+  async function rejectOffer(){if(!offer)return;await supabase.functions.invoke("reject-delivery",{body:{offerId:offer.id}});setOffer(null);}
+  async function deliveryAction(action:string){if(!active)return;setMessage("");const body:any={deliveryId:active.id,action};if(action==="CONFIRM_PICKUP"||action==="CONFIRM_DELIVERY")body.code=code;const {data,error}=await supabase.functions.invoke("driver-delivery-action",{body});if(error||data?.error){setMessage(data?.error==="INVALID_DELIVERY_CODE"?"Código incorreto.":"Não foi possível atualizar a entrega.");return;}setCode("");await loadActive();if(action==="CONFIRM_DELIVERY"){await loadHistory();setMessage("Entrega concluída com sucesso.");}}
+
+  const completedTotal=useMemo(()=>history.reduce((sum,item)=>sum+item.driver_earning,0),[history]);
+  if(loading)return<SafeAreaView style={styles.center}><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text>Carregando...</Text></SafeAreaView>;
+  if(!session)return<AuthScreen/>;
+  if(!driver)return<DriverRegistration cities={cities} onDone={bootstrap}/>;
+  if(driver.status!=="ACTIVE")return<SafeAreaView style={styles.safe}><View style={styles.pending}><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.pendingIcon}>⌛</Text><Text style={styles.pageTitle}>Cadastro em análise</Text><Text style={styles.pendingText}>Status: {driver.status}. Você poderá ficar online assim que a Matriz aprovar seus documentos e cadastro.</Text><Pressable style={styles.secondary} onPress={bootstrap}><Text style={styles.secondaryText}>ATUALIZAR STATUS</Text></Pressable><Pressable onPress={()=>supabase.auth.signOut()}><Text style={styles.switchText}>Sair</Text></Pressable></View></SafeAreaView>;
+
+  const nextAction=active?.status==="DRIVER_ASSIGNED"?["START_TO_STORE","IR PARA A LOJA"]:active?.status==="DRIVER_TO_STORE"?["ARRIVED_STORE","CONFIRMAR CHEGADA À LOJA"]:active?.status==="DRIVER_AT_STORE"?["CONFIRM_PICKUP","VALIDAR CÓDIGO DE RETIRADA"]:active?.status==="PICKUP_CONFIRMED"?["START_TO_CUSTOMER","INICIAR ENTREGA"]:active?.status==="DRIVER_TO_CUSTOMER"?["ARRIVED_CUSTOMER","CONFIRMAR CHEGADA AO CLIENTE"]:active?.status==="DRIVER_AT_CUSTOMER"?["CONFIRM_DELIVERY","VALIDAR CÓDIGO E CONCLUIR"]:null;
+  const needsCode=nextAction?.[0]==="CONFIRM_PICKUP"||nextAction?.[0]==="CONFIRM_DELIVERY";
+
+  const home=<ScrollView contentContainerStyle={styles.content}><View style={styles.header}><View><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.subtitle}>ENTREGADOR</Text></View><View style={[styles.dot,driver.online&&styles.dotOnline]}/></View>
+    <View style={styles.earningsCard}><Text style={styles.earningsLabel}>GANHOS CONCLUÍDOS</Text><Text style={styles.earningsValue}>{brl(completedTotal)}</Text><View style={styles.stats}><View><Text style={styles.statValue}>{history.length}</Text><Text style={styles.statLabel}>entregas</Text></View><View><Text style={styles.statValue}>{driver.rating.toFixed(1)} ★</Text><Text style={styles.statLabel}>avaliação</Text></View><View><Text style={styles.statValue}>{Math.round(driver.acceptance_rate)}%</Text><Text style={styles.statLabel}>aceitação</Text></View></View></View>
+    {!!message&&<Text style={styles.notice}>{message}</Text>}<Pressable style={[styles.onlineButton,driver.online&&styles.offlineButton]} onPress={toggleOnline}><Text style={styles.onlineText}>{driver.online?"FICAR OFFLINE":"FICAR ONLINE"}</Text></Pressable>
+    <View style={styles.map}><Text style={styles.mapTitle}>{active?"Entrega ativa":driver.online?"Você está disponível":"Fique online para receber entregas"}</Text><Text style={styles.mapEmoji}>{active?"🛵":"📍"}</Text><Text style={styles.mapText}>{active?`${active.pickup.storeName} • Pedido #${active.orderNumber}`:"Sua localização será enviada somente enquanto você estiver online."}</Text></View>
+    {active&&<View style={styles.deliveryCard}><Text style={styles.deliveryBadge}>PEDIDO #{active.orderNumber}</Text><Text style={styles.deliveryTitle}>{active.status.includes("CUSTOMER")||active.status==="PICKUP_CONFIRMED"?"Entrega ao cliente":active.pickup.storeName}</Text><Text style={styles.deliveryMeta}>Status: {active.status}</Text>{active.destination&&active.status!=="DRIVER_ASSIGNED"&&active.status!=="DRIVER_TO_STORE"&&active.status!=="DRIVER_AT_STORE"&&<Text style={styles.address}>{active.destination.street}, {active.destination.number??"s/n"}{active.destination.district?` • ${active.destination.district}`:""}</Text>}{needsCode&&<TextInput style={styles.codeInput} placeholder="Código de 4 dígitos" keyboardType="number-pad" maxLength={4} value={code} onChangeText={setCode}/>} {nextAction&&<Pressable style={styles.actionButton} onPress={()=>deliveryAction(nextAction[0])}><Text style={styles.actionText}>{nextAction[1]}</Text></Pressable>}<Text style={styles.earning}>Ganho desta entrega: {brl(active.earning)}</Text></View>}
+  </ScrollView>;
+
+  const historyView=<ScrollView contentContainerStyle={styles.content}><View style={styles.rowBetween}><Text style={styles.pageTitle}>Minhas entregas</Text><Pressable onPress={()=>loadHistory()}><Text style={styles.link}>Atualizar</Text></Pressable></View>{history.length?history.map(item=><View style={styles.listRow} key={item.id}><View><Text style={styles.listTitle}>Entrega {item.id.slice(0,8)}</Text><Text style={styles.listMeta}>{item.delivered_at?new Date(item.delivered_at).toLocaleDateString("pt-BR"):"Concluída"}</Text></View><Text style={styles.listValue}>{brl(item.driver_earning)}</Text></View>):<Text style={styles.notice}>Nenhuma entrega concluída ainda.</Text>}</ScrollView>;
+  const wallet=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Ganhos</Text><View style={styles.earningsCard}><Text style={styles.earningsLabel}>TOTAL DE ENTREGAS CONCLUÍDAS</Text><Text style={styles.earningsValue}>{brl(completedTotal)}</Text></View><Text style={styles.notice}>Repasses PIX serão exibidos aqui quando o módulo financeiro for habilitado pela Matriz.</Text></ScrollView>;
+  const profile=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Minha conta</Text><View style={styles.profileCard}><Text style={styles.listTitle}>{session.user.user_metadata?.full_name??"Entregador CLICK-FOOD"}</Text><Text style={styles.listMeta}>{session.user.email}</Text><Text style={styles.listMeta}>Status: {driver.status}</Text></View><Pressable style={styles.secondary} onPress={()=>supabase.auth.signOut()}><Text style={styles.secondaryText}>SAIR</Text></Pressable></ScrollView>;
+  const current=screen==="home"?home:screen==="history"?historyView:screen==="wallet"?wallet:profile;
+  const tabs:Array<[Screen,string,string]>=[["home","⌂","Início"],["history","▤","Entregas"],["wallet","$","Ganhos"],["profile","○","Perfil"]];
+  return<SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content" backgroundColor="#f6f6f6"/><View style={styles.flex}>{current}</View><View style={styles.bottom}>{tabs.map(([key,icon,label])=><Pressable key={key} onPress={()=>setScreen(key)} style={styles.tab}><Text style={[styles.tabIcon,screen===key&&styles.tabActive]}>{icon}</Text><Text style={[styles.tabText,screen===key&&styles.tabActive]}>{label}</Text></Pressable>)}</View><Modal visible={!!offer} transparent animationType="fade"><View style={styles.modalBackdrop}>{offer&&<View style={styles.offerCard}><View style={styles.offerHeader}><Text style={styles.offerLabel}>NOVA ENTREGA</Text><Text style={styles.timerText}>{Math.max(0,Math.ceil((new Date(offer.expiresAt).getTime()-Date.now())/1000))}s</Text></View><Text style={styles.offerStore}>{offer.storeName}</Text><View style={styles.offerRoute}><View><Text style={styles.offerSmall}>ATÉ A LOJA</Text><Text style={styles.offerBig}>{offer.pickupDistanceKm==null?"—":`${offer.pickupDistanceKm.toFixed(1)} km`}</Text></View><Text style={styles.arrow}>→</Text><View><Text style={styles.offerSmall}>ENTREGA</Text><Text style={styles.offerBig}>{offer.deliveryDistanceKm==null?"—":`${offer.deliveryDistanceKm.toFixed(1)} km`}</Text></View></View><Text style={styles.offerSmall}>SEU GANHO</Text><Text style={styles.offerAmount}>{brl(offer.earning)}</Text><View style={styles.offerActions}><Pressable style={styles.reject} onPress={rejectOffer}><Text style={styles.rejectText}>RECUSAR</Text></Pressable><Pressable style={styles.accept} onPress={acceptOffer}><Text style={styles.acceptText}>ACEITAR</Text></Pressable></View></View>}</View></Modal></SafeAreaView>;
 }
 
-const styles = StyleSheet.create({
-  safe:{flex:1,backgroundColor:"#f6f6f6"},flex:{flex:1},content:{padding:18,paddingBottom:32},header:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:20},brand:{fontSize:23,fontWeight:"900"},yellow:{color:"#f4c400"},subtitle:{fontSize:9,fontWeight:"900",letterSpacing:2,color:"#777",marginTop:3},dot:{width:12,height:12,borderRadius:6,backgroundColor:"#bbb"},dotOnline:{backgroundColor:"#21a366"},
-  earningsCard:{backgroundColor:"#111",borderRadius:22,padding:20},earningsLabel:{fontSize:10,fontWeight:"900",letterSpacing:1,color:"#9a9a9a"},earningsValue:{fontSize:34,fontWeight:"900",color:"#fff",marginTop:5},stats:{flexDirection:"row",justifyContent:"space-between",marginTop:20},statValue:{color:"#fff",fontSize:16,fontWeight:"900"},statLabel:{color:"#8d8d8d",fontSize:10,marginTop:3},
-  onlineButton:{backgroundColor:"#f4c400",paddingVertical:17,borderRadius:16,alignItems:"center",marginTop:16},offlineButton:{backgroundColor:"#fff",borderWidth:2,borderColor:"#111"},onlineText:{fontWeight:"900",fontSize:13},offlineText:{color:"#111"},lockHint:{textAlign:"center",fontSize:11,color:"#777",marginTop:7},
-  map:{height:220,borderRadius:22,backgroundColor:"#e8e8e8",marginTop:18,alignItems:"center",justifyContent:"center",padding:20},mapTitle:{fontSize:16,fontWeight:"900"},mapEmoji:{fontSize:45,marginVertical:18},mapText:{fontSize:12,color:"#666",textAlign:"center"},demoOffer:{marginTop:12,paddingVertical:12,alignItems:"center"},demoOfferText:{fontSize:11,fontWeight:"900",color:"#8b6d00"},
-  deliveryCard:{backgroundColor:"#fff",borderRadius:20,padding:18,marginTop:16,borderWidth:1,borderColor:"#e8e8e8"},deliveryBadge:{fontSize:10,fontWeight:"900",color:"#a27e00"},deliveryTitle:{fontSize:20,fontWeight:"900",marginTop:7},deliveryMeta:{color:"#666",fontSize:12,marginVertical:8},actionButton:{backgroundColor:"#f4c400",paddingVertical:15,borderRadius:14,alignItems:"center",marginTop:12},actionText:{fontWeight:"900",fontSize:11},helpButton:{paddingVertical:12,alignItems:"center"},helpText:{fontWeight:"800",fontSize:11,color:"#555"},
-  sectionTitle:{fontSize:18,fontWeight:"900",marginTop:24,marginBottom:12},goalCard:{backgroundColor:"#fff",borderRadius:18,padding:16,borderWidth:1,borderColor:"#e9e9e9"},rowBetween:{flexDirection:"row",justifyContent:"space-between"},goalTitle:{fontWeight:"900"},goalBonus:{fontWeight:"900",color:"#16784b"},progress:{height:7,borderRadius:4,backgroundColor:"#e5e5e5",overflow:"hidden",marginTop:14},progressFill:{height:"100%",width:"70%",backgroundColor:"#f4c400"},goalText:{fontSize:11,color:"#666",marginTop:8},
-  modalBackdrop:{flex:1,backgroundColor:"rgba(0,0,0,.65)",justifyContent:"center",padding:20},offerCard:{backgroundColor:"#fff",borderRadius:26,padding:22},offerHeader:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},offerLabel:{fontSize:12,fontWeight:"900",letterSpacing:1},timer:{width:44,height:44,borderRadius:22,backgroundColor:"#111",alignItems:"center",justifyContent:"center"},timerText:{color:"#f4c400",fontWeight:"900"},offerStore:{fontSize:27,fontWeight:"900",marginTop:18},offerRoute:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:"#f4f4f4",borderRadius:18,padding:16,marginTop:16},offerSmall:{fontSize:9,fontWeight:"900",color:"#777"},offerBig:{fontSize:18,fontWeight:"900",marginTop:3},arrow:{fontSize:25,color:"#999"},offerPay:{marginTop:18},offerAmount:{fontSize:31,fontWeight:"900",color:"#16784b",marginTop:3},offerActions:{flexDirection:"row",gap:10,marginTop:20},reject:{flex:1,borderWidth:1,borderColor:"#ddd",paddingVertical:16,borderRadius:14,alignItems:"center"},rejectText:{fontWeight:"900",color:"#555"},accept:{flex:1,backgroundColor:"#f4c400",paddingVertical:16,borderRadius:14,alignItems:"center"},acceptText:{fontWeight:"900"},
-  bottom:{minHeight:72,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e3e3e3",flexDirection:"row",paddingVertical:7},tab:{flex:1,alignItems:"center",justifyContent:"center"},tabIcon:{fontSize:19,color:"#777"},tabText:{fontSize:9,fontWeight:"700",color:"#777",marginTop:3},tabActive:{color:"#9c7900",fontWeight:"900"},
-  pageTitle:{fontSize:28,fontWeight:"900",marginBottom:20},listRow:{backgroundColor:"#fff",borderRadius:16,padding:16,marginBottom:9,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},listTitle:{fontWeight:"800"},listMeta:{fontSize:11,color:"#777",marginTop:4},listValue:{fontWeight:"900",color:"#16784b"},walletCard:{backgroundColor:"#111",borderRadius:22,padding:20},levelCard:{backgroundColor:"#111",borderRadius:22,padding:20},level:{color:"#f4c400",fontSize:32,fontWeight:"900",marginVertical:8},menuRow:{backgroundColor:"#fff",minHeight:56,paddingHorizontal:16,borderBottomWidth:1,borderBottomColor:"#eee",flexDirection:"row",alignItems:"center",justifyContent:"space-between"},
-});
+const styles=StyleSheet.create({safe:{flex:1,backgroundColor:"#f6f6f6"},flex:{flex:1},center:{flex:1,alignItems:"center",justifyContent:"center",gap:10},content:{padding:18,paddingBottom:32},authWrap:{flexGrow:1,justifyContent:"center",padding:26},brand:{fontSize:24,fontWeight:"900"},yellow:{color:"#f4c400"},subtitle:{fontSize:9,fontWeight:"900",letterSpacing:2,color:"#777",marginTop:3},authTitle:{fontSize:30,fontWeight:"900",marginVertical:22},pageTitle:{fontSize:28,fontWeight:"900",marginBottom:20},input:{backgroundColor:"#fff",borderWidth:1,borderColor:"#ddd",borderRadius:14,padding:14,marginBottom:10},label:{fontSize:12,fontWeight:"900",marginTop:12,marginBottom:8},notice:{backgroundColor:"#fff4c6",color:"#6d5900",padding:12,borderRadius:12,marginVertical:10},primary:{backgroundColor:"#111",padding:15,borderRadius:14,alignItems:"center",marginTop:8},primaryText:{color:"#fff",fontWeight:"900"},disabled:{opacity:.5},switchText:{textAlign:"center",color:"#8e7000",fontWeight:"800",padding:18},choices:{marginBottom:12},choiceRow:{flexDirection:"row",gap:8,marginBottom:14},chip:{borderWidth:1,borderColor:"#ddd",backgroundColor:"#fff",paddingVertical:9,paddingHorizontal:12,borderRadius:20,marginRight:8},chipActive:{backgroundColor:"#111",borderColor:"#111"},chipText:{fontSize:11,fontWeight:"700"},chipTextActive:{fontSize:11,fontWeight:"800",color:"#fff"},pending:{flex:1,justifyContent:"center",alignItems:"center",padding:28},pendingIcon:{fontSize:55,marginVertical:18},pendingText:{textAlign:"center",color:"#666",lineHeight:20},secondary:{borderWidth:1,borderColor:"#ddd",backgroundColor:"#fff",padding:14,borderRadius:14,alignItems:"center",marginTop:18},secondaryText:{fontWeight:"900"},header:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:20},dot:{width:12,height:12,borderRadius:6,backgroundColor:"#bbb"},dotOnline:{backgroundColor:"#21a366"},earningsCard:{backgroundColor:"#111",borderRadius:22,padding:20},earningsLabel:{fontSize:10,fontWeight:"900",letterSpacing:1,color:"#9a9a9a"},earningsValue:{fontSize:34,fontWeight:"900",color:"#fff",marginTop:5},stats:{flexDirection:"row",justifyContent:"space-between",marginTop:20},statValue:{color:"#fff",fontSize:16,fontWeight:"900"},statLabel:{color:"#8d8d8d",fontSize:10,marginTop:3},onlineButton:{backgroundColor:"#f4c400",paddingVertical:17,borderRadius:16,alignItems:"center",marginTop:16},offlineButton:{backgroundColor:"#fff",borderWidth:2,borderColor:"#111"},onlineText:{fontWeight:"900",fontSize:13},map:{height:220,borderRadius:22,backgroundColor:"#e8e8e8",marginTop:18,alignItems:"center",justifyContent:"center",padding:20},mapTitle:{fontSize:16,fontWeight:"900"},mapEmoji:{fontSize:45,marginVertical:18},mapText:{fontSize:12,color:"#666",textAlign:"center"},deliveryCard:{backgroundColor:"#fff",borderRadius:20,padding:18,marginTop:16,borderWidth:1,borderColor:"#e8e8e8"},deliveryBadge:{fontSize:10,fontWeight:"900",color:"#a27e00"},deliveryTitle:{fontSize:20,fontWeight:"900",marginTop:7},deliveryMeta:{color:"#666",fontSize:12,marginVertical:8},address:{fontSize:13,fontWeight:"800",marginVertical:8},codeInput:{borderWidth:1,borderColor:"#ddd",borderRadius:12,padding:13,fontSize:18,textAlign:"center",letterSpacing:5,marginTop:10},actionButton:{backgroundColor:"#f4c400",paddingVertical:15,borderRadius:14,alignItems:"center",marginTop:12},actionText:{fontWeight:"900",fontSize:11},earning:{textAlign:"center",color:"#16784b",fontWeight:"900",marginTop:12},rowBetween:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},link:{color:"#9c7900",fontWeight:"900"},listRow:{backgroundColor:"#fff",borderRadius:16,padding:16,marginBottom:9,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},listTitle:{fontWeight:"800"},listMeta:{fontSize:11,color:"#777",marginTop:4},listValue:{fontWeight:"900",color:"#16784b"},profileCard:{backgroundColor:"#fff",padding:18,borderRadius:18},bottom:{minHeight:72,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e3e3e3",flexDirection:"row",paddingVertical:7},tab:{flex:1,alignItems:"center",justifyContent:"center"},tabIcon:{fontSize:19,color:"#777"},tabText:{fontSize:9,fontWeight:"700",color:"#777",marginTop:3},tabActive:{color:"#9c7900",fontWeight:"900"},modalBackdrop:{flex:1,backgroundColor:"rgba(0,0,0,.65)",justifyContent:"center",padding:20},offerCard:{backgroundColor:"#fff",borderRadius:26,padding:22},offerHeader:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},offerLabel:{fontSize:12,fontWeight:"900",letterSpacing:1},timerText:{backgroundColor:"#111",color:"#f4c400",fontWeight:"900",padding:11,borderRadius:22},offerStore:{fontSize:27,fontWeight:"900",marginTop:18},offerRoute:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:"#f4f4f4",borderRadius:18,padding:16,marginVertical:16},offerSmall:{fontSize:9,fontWeight:"900",color:"#777"},offerBig:{fontSize:18,fontWeight:"900",marginTop:3},arrow:{fontSize:25,color:"#999"},offerAmount:{fontSize:31,fontWeight:"900",color:"#16784b",marginTop:3},offerActions:{flexDirection:"row",gap:10,marginTop:20},reject:{flex:1,borderWidth:1,borderColor:"#ddd",paddingVertical:16,borderRadius:14,alignItems:"center"},rejectText:{fontWeight:"900",color:"#555"},accept:{flex:1,backgroundColor:"#f4c400",paddingVertical:16,borderRadius:14,alignItems:"center"},acceptText:{fontWeight:"900"}});
