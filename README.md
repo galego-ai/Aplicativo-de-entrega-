@@ -22,14 +22,14 @@ Projeto exclusivo criado e ativo:
 
 O CLICK-FOOD **não reutiliza** banco, usuários ou autenticação do CLICK-GO.
 
-## Vercel
+## Vercel — produção
 
-Os projetos Vercel são independentes:
+Os dois painéis estão publicados em projetos independentes e apontando para o Supabase exclusivo do CLICK-FOOD:
 
 - Matriz: https://click-food-admin.vercel.app
 - Lojista/PDV: https://click-food-lojista.vercel.app
 
-> Os projetos Vercel ainda precisam receber o deploy da versão mais recente do GitHub para refletir toda a integração Supabase descrita abaixo.
+A versão publicada foi validada pelo CI com build do Painel Matriz, build do Painel Lojista e type-check dos aplicativos Cliente e Entregador.
 
 ## Backend implementado
 
@@ -49,7 +49,14 @@ Os projetos Vercel são independentes:
 - chat moderado com bloqueio de telefone, e-mail, links e contatos externos;
 - suporte, fidelidade do cliente e CLICK Pontos do lojista;
 - cadastro de entregador com status `PENDING` para aprovação;
-- métricas agregadas no banco para Matriz e Lojista.
+- métricas agregadas no banco para Matriz e Lojista;
+- cadastro de cidades pela Matriz;
+- criação e ativação de lojas por código de uso único;
+- configuração de GPS, pedido mínimo e frete pelo lojista;
+- PDV com abertura/fechamento de caixa e venda transacional;
+- cancelamento do cliente e avaliações por estrelas;
+- rastreamento do entregador com localização protegida por RLS;
+- canais de chat seguros por pedido.
 
 ## Segurança
 
@@ -68,11 +75,11 @@ Identificadores:
 - Cliente Android/iOS: `br.com.clickfood.cliente`
 - Entregador Android/iOS: `br.com.clickfood.entregador`
 
-O App Cliente já usa autenticação real, lojas ativas e histórico real de pedidos. O App Entregador já usa autenticação, cadastro por cidade, aprovação, localização, online/offline, chamados, aceite/recusa e fluxo de entrega.
+O App Cliente já usa autenticação real, lojas ativas, carrinho, endereço com GPS, frete, checkout, histórico, rastreamento, cancelamento e avaliação. O App Entregador já usa autenticação, cadastro por cidade, aprovação, localização, online/offline, chamados, aceite/recusa e fluxo de entrega.
 
 ## CI
 
-`.github/workflows/ci.yml` valida painéis web e type-check dos apps móveis quando GitHub Actions estiver habilitado no repositório.
+`.github/workflows/ci.yml` compila os dois painéis web e executa type-check dos dois apps móveis a cada push.
 
 ## Regra de isolamento
 
