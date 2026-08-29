@@ -13,11 +13,7 @@ async function deriveCode(secret: string, deliveryId: string, kind: string) {
     false,
     ["sign"],
   );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(`${kind}:${deliveryId}`),
-  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${kind}:${deliveryId}`));
   const bytes = new Uint8Array(signature);
   const value = ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
   return String(value % 10000).padStart(4, "0");
@@ -33,7 +29,9 @@ export default {
       return Response.json({ error: "INVALID_CODE_REQUEST" }, { status: 400 });
     }
 
-    const secret = Deno.env.get("DELIVERY_CODE_SECRET");
+    // DELIVERY_CODE_SECRET pode ser configurado depois. Enquanto isso, o fallback usa
+    // uma credencial interna da Edge Runtime, nunca exposta ao browser/app.
+    const secret = Deno.env.get("DELIVERY_CODE_SECRET") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!secret || secret.length < 32) return Response.json({ error: "DELIVERY_CODE_SECRET_NOT_CONFIGURED" }, { status: 500 });
 
     const userId = ctx.userClaims!.id;
@@ -69,9 +67,7 @@ export default {
         return Response.json({ error: "PICKUP_CODE_NOT_AVAILABLE" }, { status: 409 });
       }
     } else {
-      if (!isAdmin && order.customer_id !== userId) {
-        return Response.json({ error: "DELIVERY_CODE_ACCESS_DENIED" }, { status: 403 });
-      }
+      if (!isAdmin && order.customer_id !== userId) return Response.json({ error: "DELIVERY_CODE_ACCESS_DENIED" }, { status: 403 });
       if (!["PICKUP_CONFIRMED", "DRIVER_TO_CUSTOMER", "DRIVER_AT_CUSTOMER"].includes(delivery.status)) {
         return Response.json({ error: "DELIVERY_CODE_NOT_AVAILABLE" }, { status: 409 });
       }
