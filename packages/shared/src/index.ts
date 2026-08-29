@@ -38,7 +38,11 @@ export type DeliveryStatus =
   | "DELIVERED"
   | "DELIVERY_CANCELLED"
   | "CUSTOMER_UNAVAILABLE"
+  | "RETURN_REQUIRED"
   | "INCIDENT";
 
-export type PaymentMethod = "PIX" | "CREDIT_CARD" | "DEBIT_CARD" | "CASH" | "WALLET";
+export type PaymentMethod = "PIX" | "CREDIT_CARD" | "DEBIT_CARD" | "CASH" | "WALLET" | "OTHER";
 export type OrderSource = "APP" | "POS" | "PHONE" | "MANUAL";
+
+export * from "./order-engine";
+export * from "./delivery-engine";
