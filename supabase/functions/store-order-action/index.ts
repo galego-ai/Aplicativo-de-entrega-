@@ -13,13 +13,23 @@ const transitionByAction = {
   MARK_READY: ["PREPARING", "READY"],
 } as const;
 
+const allowedRolesByAction: Record<ActionBody["action"], string[]> = {
+  ACCEPT: ["OWNER", "MANAGER"],
+  REJECT: ["OWNER", "MANAGER"],
+  START_PREPARING: ["OWNER", "MANAGER", "KITCHEN"],
+  MARK_READY: ["OWNER", "MANAGER", "KITCHEN", "EXPEDITION"],
+  CANCEL: ["OWNER", "MANAGER"],
+};
+
 export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
     if (req.method !== "POST") return Response.json({ error: "METHOD_NOT_ALLOWED" }, { status: 405 });
 
     let body: ActionBody;
     try { body = await req.json(); } catch { return Response.json({ error: "INVALID_JSON" }, { status: 400 }); }
-    if (!body.orderId || !body.action) return Response.json({ error: "ORDER_AND_ACTION_REQUIRED" }, { status: 400 });
+    if (!body.orderId || !body.action || !allowedRolesByAction[body.action]) {
+      return Response.json({ error: "ORDER_AND_VALID_ACTION_REQUIRED" }, { status: 400 });
+    }
 
     const userId = ctx.userClaims!.id;
     const role = String(ctx.userClaims!.appMetadata?.clickfood_role ?? "");
@@ -42,7 +52,8 @@ export default {
         .eq("user_id", userId)
         .eq("active", true)
         .maybeSingle();
-      if (!membership || !["OWNER", "MANAGER", "KITCHEN", "EXPEDITION"].includes(membership.role)) {
+
+      if (!membership || !allowedRolesByAction[body.action].includes(membership.role)) {
         return Response.json({ error: "STORE_ACTION_DENIED" }, { status: 403 });
       }
     }
@@ -61,7 +72,9 @@ export default {
       }
     } else {
       [expected, next] = transitionByAction[body.action];
-      if (order.status !== expected) return Response.json({ error: "ORDER_STATUS_CHANGED", currentStatus: order.status }, { status: 409 });
+      if (order.status !== expected) {
+        return Response.json({ error: "ORDER_STATUS_CHANGED", currentStatus: order.status }, { status: 409 });
+      }
     }
 
     const { data: updatedOrder, error: transitionError } = await ctx.supabaseAdmin.rpc("transition_order_atomic", {
@@ -77,16 +90,9 @@ export default {
       return Response.json({ error: conflict ? "ORDER_STATUS_CHANGED" : "ORDER_ACTION_FAILED" }, { status: conflict ? 409 : 500 });
     }
 
-    if (next === "READY" && order.delivery_type === "DELIVERY") {
-      await ctx.supabaseAdmin.from("notifications").insert({
-        user_id: null,
-        notification_type: "INTERNAL_DISPATCH_REQUIRED",
-        title: "Pedido pronto para despacho",
-        body: `Pedido ${order.id} pronto`,
-        data: { orderId: order.id },
-      }).then(() => undefined).catch(() => undefined);
-    }
-
-    return Response.json({ order: updatedOrder });
+    return Response.json({
+      order: updatedOrder,
+      dispatchRequired: next === "READY" && order.delivery_type === "DELIVERY",
+    });
   }),
 };
