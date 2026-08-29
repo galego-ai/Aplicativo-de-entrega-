@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "CLICK-FOOD Entregador",
+    "slug": "click-food-entregador",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "android": {
+      "package": "br.com.clickfood.entregador"
+    },
+    "ios": {
+      "bundleIdentifier": "br.com.clickfood.entregador",
+      "supportsTablet": false
+    }
+  }
+}
