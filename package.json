@@ -8,6 +8,8 @@
   "scripts": {
     "dev:admin": "npm run dev --workspace=@clickfood/admin",
     "dev:lojista": "npm run dev --workspace=@clickfood/lojista",
+    "dev:cliente": "npm run start --workspace=@clickfood/cliente",
+    "dev:entregador": "npm run start --workspace=@clickfood/entregador",
     "build:admin": "npm run build --workspace=@clickfood/admin",
     "build:lojista": "npm run build --workspace=@clickfood/lojista"
   }
