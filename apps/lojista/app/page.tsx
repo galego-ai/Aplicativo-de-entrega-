@@ -8,6 +8,7 @@ type Tab = "Dashboard" | "Pedidos" | "PDV" | "Produtos" | "Estoque" | "Entregas"
 type Store = { id: string; name: string; status: string; role: string };
 type Product = { id: string; name: string; price: number; promotional_price: number | null; active: boolean };
 type Order = { id: string; order_number: number; customer_id: string | null; total: number; status: string; payment_status: string; delivery_type: string; source: string; created_at: string };
+type RefundInfo = { payment_id: string; status: string; amount: number; created_at: string; completed_at: string | null };
 type Metrics = { sales_today: number; orders_today: number; average_ticket_today: number; delivery_orders_today: number; pos_orders_today: number; cancelled_today: number; open_orders: number; products: number; low_stock: number };
 type CashSession = { id: string; opening_balance: number; opened_at: string; status: string };
 type CartItem = Product & { quantity: number };
@@ -23,6 +24,8 @@ const tabs: Tab[] = ["Dashboard", "Pedidos", "PDV", "Produtos", "Estoque", "Entr
 const emptyMetrics: Metrics = { sales_today: 0, orders_today: 0, average_ticket_today: 0, delivery_orders_today: 0, pos_orders_today: 0, cancelled_today: 0, open_orders: 0, products: 0, low_stock: 0 };
 const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
 const dateTime = (value: string) => new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+const paymentLabels: Record<string,string> = { PENDING:"Pagamento pendente", PAID:"Pago", FAILED:"Pagamento falhou", CANCELLED:"Pagamento cancelado", PARTIALLY_REFUNDED:"Estorno parcial", REFUNDED:"Estornado" };
+const refundLabels: Record<string,string> = { PENDING:"Estorno solicitado", PROCESSING:"Estorno em processamento", COMPLETED:"PIX devolvido", FAILED:"Falha no estorno", CANCELLED:"Estorno cancelado" };
 
 export default function Home() {
   const [loading, setLoading] = useState(true);
@@ -38,6 +41,8 @@ export default function Home() {
   const [metrics, setMetrics] = useState<Metrics>(emptyMetrics);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [refundByOrder, setRefundByOrder] = useState<Record<string, RefundInfo>>({});
+  const [refundBusyOrderId, setRefundBusyOrderId] = useState<string | null>(null);
   const [inventory, setInventory] = useState<Inventory[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [finance, setFinance] = useState<Finance[]>([]);
@@ -99,6 +104,22 @@ export default function Home() {
     setLoading(false);
   }
 
+  async function loadStoreRefunds(orderRows: any[]) {
+    const orderIds = orderRows.map((order) => String(order.id));
+    if (!orderIds.length) { setRefundByOrder({}); return; }
+    const { data: payments, error: paymentError } = await supabase.from("payments").select("id,order_id").in("order_id", orderIds).eq("method", "PIX");
+    if (paymentError || !payments?.length) { setRefundByOrder({}); return; }
+    const paymentToOrder = new Map(payments.map((payment: any) => [String(payment.id), String(payment.order_id)]));
+    const { data: refunds, error: refundError } = await supabase.from("refunds").select("payment_id,status,amount,created_at,completed_at").in("payment_id", payments.map((payment: any) => payment.id)).order("created_at", { ascending: false });
+    if (refundError) { setRefundByOrder({}); return; }
+    const next: Record<string, RefundInfo> = {};
+    for (const raw of refunds ?? []) {
+      const orderId = paymentToOrder.get(String((raw as any).payment_id));
+      if (orderId && !next[orderId]) next[orderId] = { ...(raw as any), amount: Number((raw as any).amount) } as RefundInfo;
+    }
+    setRefundByOrder(next);
+  }
+
   async function loadStoreData(currentStore = store) {
     if (!currentStore) return;
     const [metricsResult, productsResult, ordersResult, cashResult, inventoryResult, couponsResult, financeResult, deliveriesResult, bonusWalletResult, bonusTxResult, loyaltyResult] = await Promise.all([
@@ -117,7 +138,7 @@ export default function Home() {
 
     if (metricsResult.data) setMetrics({ ...emptyMetrics, ...(metricsResult.data as Metrics) });
     if (productsResult.data) setProducts(productsResult.data.map((item: any) => ({ ...item, price: Number(item.price), promotional_price: item.promotional_price == null ? null : Number(item.promotional_price) })));
-    if (ordersResult.data) setOrders(ordersResult.data.map((item: any) => ({ ...item, total: Number(item.total) })));
+    if (ordersResult.data) { const normalizedOrders=ordersResult.data.map((item: any) => ({ ...item, total: Number(item.total) })); setOrders(normalizedOrders); await loadStoreRefunds(normalizedOrders); }
     setCashSession(cashResult.data?.session ? { ...cashResult.data.session, opening_balance: Number(cashResult.data.session.opening_balance) } : null);
     if (inventoryResult.data) setInventory(inventoryResult.data.map((item: any) => ({ ...item, quantity: Number(item.quantity), minimum_quantity: Number(item.minimum_quantity) })));
     if (couponsResult.data) setCoupons(couponsResult.data.map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));
@@ -245,10 +266,20 @@ export default function Home() {
       const dispatch = await supabase.functions.invoke("dispatch-delivery", { body: { orderId: order.id } });
       setMessage(dispatch.error || dispatch.data?.error ? "Pedido pronto, mas nenhum entregador disponível agora." : "Pedido pronto e chamado enviado.");
     } else {
-      setMessage(error || data?.error ? "Não foi possível atualizar o pedido." : "Pedido atualizado.");
+      if (error || data?.error) setMessage("Não foi possível atualizar o pedido.");
+      else if (data?.refundRequired) { const status=String(data?.refundStatus??"PENDING"); setMessage(status==="COMPLETED"?"Pedido recusado e PIX devolvido ao cliente.":status==="FAILED"?"Pedido recusado. A devolução PIX falhou e precisa ser reconciliada.":"Pedido recusado. A devolução PIX foi solicitada e está em processamento."); }
+      else setMessage("Pedido atualizado.");
     }
     setProcessingOrder(null);
     await loadStoreData(store);
+  }
+
+  async function reconcileStoreRefund(order: Order) {
+    setRefundBusyOrderId(order.id); setMessage("");
+    const { data, error } = await supabase.functions.invoke("efi-pix-refund", { body: { orderId: order.id, reason: "Reconciliação de estorno pelo Painel Lojista" } });
+    if (error || data?.error) setMessage("Não foi possível consultar a devolução PIX agora.");
+    else { const status=String(data?.refundStatus??""); setMessage(status==="COMPLETED"?"PIX devolvido ao cliente.":status==="FAILED"?"A devolução falhou na Efí e pode ser tentada novamente.":"A devolução continua em processamento."); }
+    await loadStoreData(store); setRefundBusyOrderId(null);
   }
 
   async function retryDispatch(order: Order) {
@@ -336,7 +367,9 @@ export default function Home() {
         {marketplaceOrders.length ? <div className="queueGrid">{marketplaceOrders.map((order) => (
           <article className={`queueCard status-${order.status.toLowerCase()}`} key={order.id}>
             <div className="queueTop"><b>#{order.order_number}</b><span>{order.delivery_type}</span></div>
-            <strong>{brl(order.total)}</strong><p>{order.status} • {order.payment_status}</p>
+            <strong>{brl(order.total)}</strong><p>{order.status} • {paymentLabels[order.payment_status] ?? order.payment_status}</p>
+            {refundByOrder[order.id] && <div style={{margin:"8px 0",padding:"9px 10px",borderRadius:10,background:refundByOrder[order.id].status==="COMPLETED"?"#e5f7ea":refundByOrder[order.id].status==="FAILED"?"#fde9e7":"#fff7d9",fontSize:12,fontWeight:800}}>{refundLabels[refundByOrder[order.id].status] ?? refundByOrder[order.id].status} • {brl(refundByOrder[order.id].amount)}{["PENDING","PROCESSING","FAILED"].includes(refundByOrder[order.id].status) && <button style={{marginLeft:8}} disabled={refundBusyOrderId===order.id} onClick={() => reconcileStoreRefund(order)}>{refundBusyOrderId===order.id?"Consultando...":"Atualizar estorno"}</button>}</div>}
+            {!refundByOrder[order.id] && ["CANCELLED","REJECTED"].includes(order.status) && ["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status) && <button style={{marginBottom:8}} disabled={refundBusyOrderId===order.id} onClick={() => reconcileStoreRefund(order)}>{refundBusyOrderId===order.id?"Consultando...":"Consultar estorno PIX"}</button>}
             <div className="queueActions">
               {order.status === "WAITING_STORE" && <><button disabled={processingOrder === order.id} onClick={() => orderAction(order, "ACCEPT")}>Aceitar</button><button className="dangerAction" disabled={processingOrder === order.id} onClick={() => orderAction(order, "REJECT")}>Recusar</button></>}
               {order.status === "ACCEPTED" && <button onClick={() => orderAction(order, "START_PREPARING")}>Iniciar preparo</button>}
