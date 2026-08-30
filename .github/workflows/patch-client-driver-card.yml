@@ -1,0 +1,70 @@
+name: Patch Client Driver Card
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-client-driver-card.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Add driver identity card
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/cliente/App.tsx')
+          s=p.read_text()
+
+          old='type Tracking = { orderId:string; deliveryId:string; deliveryStatus:string; driverId:string|null; driverLat:number|null; driverLng:number|null; storeLat:number|null; storeLng:number|null; destinationLat:number|null; destinationLng:number|null };'
+          new=old+'\ntype DriverCard = { id:string; name:string; avatarUrl:string|null; rating:number; vehicle:{type:string;brand:string|null;model:string|null;plate:string|null}|null };'
+          if old not in s: raise SystemExit('Tracking type marker not found')
+          s=s.replace(old,new,1)
+
+          old='  const[tracking,setTracking]=useState<Tracking|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set());'
+          new='  const[tracking,setTracking]=useState<Tracking|null>(null); const[driverCard,setDriverCard]=useState<DriverCard|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set());'
+          if old not in s: raise SystemExit('Tracking state marker not found')
+          s=s.replace(old,new,1)
+
+          old='useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();}else{setTracking(null);setOrders([]);setPixCharge(null);}},[session]);'
+          new='useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();}else{setTracking(null);setDriverCard(null);setOrders([]);setPixCharge(null);}},[session]);'
+          if old not in s: raise SystemExit('Session effect marker not found')
+          s=s.replace(old,new,1)
+
+          old='    if(!activeOrder){setTracking(null);return;}\n    const{data:delivery}=await supabase.from("deliveries").select("id,status,driver_id").eq("order_id",activeOrder.id).maybeSingle();\n    if(!delivery){setTracking(null);return;}'
+          new='    if(!activeOrder){setTracking(null);setDriverCard(null);return;}\n    const{data:delivery}=await supabase.from("deliveries").select("id,status,driver_id").eq("order_id",activeOrder.id).maybeSingle();\n    if(!delivery){setTracking(null);setDriverCard(null);return;}'
+          if old not in s: raise SystemExit('Tracking empty marker not found')
+          s=s.replace(old,new,1)
+
+          old='    if(delivery.driver_id){\n      const{data:location}=await supabase.from("driver_locations").select("latitude,longitude").eq("driver_id",delivery.driver_id).maybeSingle();\n      if(location){driverLat=Number(location.latitude);driverLng=Number(location.longitude);}\n    }'
+          new='    if(delivery.driver_id){\n      const[locationResult,cardResult]=await Promise.all([\n        supabase.from("driver_locations").select("latitude,longitude").eq("driver_id",delivery.driver_id).maybeSingle(),\n        supabase.functions.invoke("customer-driver-card",{body:{orderId:activeOrder.id}}),\n      ]);\n      if(locationResult.data){driverLat=Number(locationResult.data.latitude);driverLng=Number(locationResult.data.longitude);}\n      if(!cardResult.error&&cardResult.data?.driver)setDriverCard(cardResult.data.driver as DriverCard);else setDriverCard(null);\n    }else setDriverCard(null);'
+          if old not in s: raise SystemExit('Driver location marker not found')
+          s=s.replace(old,new,1)
+
+          old='      <Text style={styles.trackingKicker}>ACOMPANHAMENTO EM TEMPO REAL</Text><Text style={styles.trackingTitle}>Pedido #{trackedOrder.order_number}</Text><Text style={styles.trackingStatus}>{statusLabel[trackedOrder.status]??trackedOrder.status}</Text>\n      {mapCenter?<MapView'
+          new='      <Text style={styles.trackingKicker}>ACOMPANHAMENTO EM TEMPO REAL</Text><Text style={styles.trackingTitle}>Pedido #{trackedOrder.order_number}</Text><Text style={styles.trackingStatus}>{statusLabel[trackedOrder.status]??trackedOrder.status}</Text>\n      {driverCard&&<View style={styles.driverCardBox}>{driverCard.avatarUrl?<Image source={{uri:driverCard.avatarUrl}} style={styles.driverAvatar}/>:<View style={styles.driverAvatarFallback}><Text style={styles.driverAvatarInitials}>{driverCard.name.slice(0,2).toUpperCase()}</Text></View>}<View style={styles.driverCardBody}><Text style={styles.driverCardName}>{driverCard.name}</Text><Text style={styles.driverCardMeta}>★ {driverCard.rating.toFixed(1)}{driverCard.vehicle?` • ${driverCard.vehicle.type==="MOTORCYCLE"?"Moto":driverCard.vehicle.type==="CAR"?"Carro":driverCard.vehicle.type==="BICYCLE"?"Bicicleta":driverCard.vehicle.type}${driverCard.vehicle.brand||driverCard.vehicle.model?` • ${[driverCard.vehicle.brand,driverCard.vehicle.model].filter(Boolean).join(" ")}`:""}${driverCard.vehicle.plate?` • ${driverCard.vehicle.plate}`:""}`:""}</Text></View></View>}\n      {mapCenter?<MapView'
+          if old not in s: raise SystemExit('Tracking UI marker not found')
+          s=s.replace(old,new,1)
+
+          old='  trackingCard:{backgroundColor:"#111",borderRadius:20,padding:14,marginBottom:16,overflow:"hidden"},trackingKicker:{color:"#f4c400",fontWeight:"900",fontSize:9,letterSpacing:1.2},trackingTitle:{color:"#fff",fontSize:20,fontWeight:"900",marginTop:5},trackingStatus:{color:"#ccc",fontSize:12,marginTop:4,marginBottom:12},trackingMap:{height:250,borderRadius:15,overflow:"hidden"},'
+          new='  trackingCard:{backgroundColor:"#111",borderRadius:20,padding:14,marginBottom:16,overflow:"hidden"},trackingKicker:{color:"#f4c400",fontWeight:"900",fontSize:9,letterSpacing:1.2},trackingTitle:{color:"#fff",fontSize:20,fontWeight:"900",marginTop:5},trackingStatus:{color:"#ccc",fontSize:12,marginTop:4,marginBottom:12},driverCardBox:{backgroundColor:"#242424",borderRadius:14,padding:11,marginBottom:12,flexDirection:"row",alignItems:"center",gap:10},driverAvatar:{width:48,height:48,borderRadius:24,backgroundColor:"#444"},driverAvatarFallback:{width:48,height:48,borderRadius:24,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},driverAvatarInitials:{fontWeight:"900",color:"#111"},driverCardBody:{flex:1},driverCardName:{color:"#fff",fontSize:15,fontWeight:"900"},driverCardMeta:{color:"#ccc",fontSize:10,marginTop:4},trackingMap:{height:250,borderRadius:15,overflow:"hidden"},'
+          if old not in s: raise SystemExit('Tracking styles marker not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - run: npm install --ignore-scripts
+      - run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+      - name: Commit patch
+        run: |
+          git config user.name "galego-ai"
+          git config user.email "elismarribeiro298@gmail.com"
+          git add apps/cliente/App.tsx
+          git commit -m "feat: mostrar entregador aprovado no acompanhamento" || exit 0
+          git push
