@@ -30,7 +30,7 @@ type SnapshotItem = {
 };
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
-const allowedPaymentMethods = new Set(["PIX", "CREDIT_CARD", "DEBIT_CARD", "CASH", "WALLET"]);
+const allowedPaymentMethods = new Set(["PIX", "CREDIT_CARD", "CASH"]);
 
 export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
@@ -44,6 +44,18 @@ export default {
       return Response.json({ error: "INVALID_CHECKOUT" }, { status: 400 });
     }
     if (body.items.length > 100) return Response.json({ error: "TOO_MANY_ITEMS" }, { status: 400 });
+
+    if (body.paymentMethod !== "CASH") {
+      const { data: efiConfig, error: paymentConfigError } = await ctx.supabaseAdmin
+        .from("payment_provider_configs")
+        .select("enabled,credentials_configured,supported_methods")
+        .eq("provider", "EFI")
+        .maybeSingle();
+      if (paymentConfigError) return Response.json({ error: "PAYMENT_CONFIG_LOOKUP_FAILED" }, { status: 500 });
+      if (!efiConfig?.enabled || !efiConfig.credentials_configured || !(efiConfig.supported_methods ?? []).includes(body.paymentMethod)) {
+        return Response.json({ error: "PAYMENT_METHOD_UNAVAILABLE", method: body.paymentMethod }, { status: 409 });
+      }
+    }
 
     const { data: store, error: storeError } = await ctx.supabaseAdmin
       .from("stores").select("id,status,minimum_order").eq("id", body.storeId).maybeSingle();
@@ -298,7 +310,7 @@ export default {
     const isOfflinePayment = body.paymentMethod === "CASH";
     const initialStatus = isOfflinePayment ? "WAITING_STORE" : "PENDING_PAYMENT";
     const initialPaymentStatus = "PENDING";
-    const paymentProvider = isOfflinePayment ? null : (Deno.env.get("PAYMENT_PROVIDER") ?? "UNCONFIGURED");
+    const paymentProvider = isOfflinePayment ? null : "EFI";
 
     const { data: orderId, error: checkoutError } = await ctx.supabaseAdmin.rpc("checkout_order_atomic", {
       p_store_id: body.storeId,
