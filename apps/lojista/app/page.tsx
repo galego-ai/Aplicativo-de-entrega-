@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import StoreSetup from "./StoreSetup";
+import OrderDetailsPanel from "./OrderDetailsPanel";
 import { supabase } from "../lib/supabase";
 
 type Tab = "Dashboard" | "Pedidos" | "PDV" | "Produtos" | "Estoque" | "Entregas" | "Clientes" | "Cupons" | "Financeiro" | "Bônus" | "Configurações";
@@ -413,6 +414,7 @@ export default function Home() {
             <strong>{brl(order.total)}</strong><p>{order.status} • {paymentLabels[order.payment_status] ?? order.payment_status}</p>
             {refundByOrder[order.id] && <div style={{margin:"8px 0",padding:"9px 10px",borderRadius:10,background:refundByOrder[order.id].status==="COMPLETED"?"#e5f7ea":refundByOrder[order.id].status==="FAILED"?"#fde9e7":"#fff7d9",fontSize:12,fontWeight:800}}>{refundLabels[refundByOrder[order.id].status] ?? refundByOrder[order.id].status} • {brl(refundByOrder[order.id].amount)}{["PENDING","PROCESSING","FAILED"].includes(refundByOrder[order.id].status) && <button style={{marginLeft:8}} disabled={refundBusyOrderId===order.id} onClick={() => reconcileStoreRefund(order)}>{refundBusyOrderId===order.id?"Consultando...":"Atualizar estorno"}</button>}</div>}
             {!refundByOrder[order.id] && ["CANCELLED","REJECTED"].includes(order.status) && ["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status) && <button style={{marginBottom:8}} disabled={refundBusyOrderId===order.id} onClick={() => reconcileStoreRefund(order)}>{refundBusyOrderId===order.id?"Consultando...":"Consultar estorno"}</button>}
+            <OrderDetailsPanel orderId={order.id} />
             <div className="queueActions">
               {order.status === "WAITING_STORE" && <><button disabled={processingOrder === order.id} onClick={() => orderAction(order, "ACCEPT")}>Aceitar</button><button className="dangerAction" disabled={processingOrder === order.id} onClick={() => orderAction(order, "REJECT")}>Recusar</button></>}
               {order.status === "ACCEPTED" && <button onClick={() => orderAction(order, "START_PREPARING")}>Iniciar preparo</button>}
