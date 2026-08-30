@@ -315,7 +315,7 @@ export default function Home() {
 
   async function saveLoyalty() {
     if (!store) return;
-    const { data, error } = await supabase.functions.invoke("store-management", { body: { action: "UPDATE_LOYALTY", storeId: store.id, pointsPerCurrency: Number(loyaltyPoints.replace(",", ".")), active: true } });
+    const { data, error } = await supabase.functions.invoke("store-loyalty", { body: { action: "SET_PROGRAM", storeId: store.id, pointsPerCurrency: Number(loyaltyPoints.replace(",", ".")), active: true } });
     setMessage(error || data?.error ? "Não foi possível salvar a fidelidade." : "Fidelidade atualizada.");
     await loadStoreData(store);
   }
@@ -323,7 +323,7 @@ export default function Home() {
   async function createReward(event: FormEvent) {
     event.preventDefault();
     if (!store) return;
-    const { data, error } = await supabase.functions.invoke("store-management", { body: { action: "CREATE_LOYALTY_REWARD", storeId: store.id, name: rewardForm.name, pointsCost: Number(rewardForm.pointsCost), rewardType: rewardForm.rewardType, rewardValue: rewardForm.rewardValue ? Number(rewardForm.rewardValue.replace(",", ".")) : null } });
+    const { data, error } = await supabase.functions.invoke("store-loyalty", { body: { action: "SAVE_REWARD", storeId: store.id, reward: { name: rewardForm.name, pointsCost: Number(rewardForm.pointsCost), rewardType: rewardForm.rewardType, rewardValue: rewardForm.rewardValue ? Number(rewardForm.rewardValue.replace(",", ".")) : null } } });
     setMessage(error || data?.error ? "Não foi possível criar a recompensa." : "Recompensa criada.");
     if (!error && !data?.error) setRewardForm({ ...rewardForm, name: "" });
     await loadStoreData(store);
