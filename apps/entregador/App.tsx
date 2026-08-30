@@ -1,11 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Modal, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet,
+  Alert, Modal, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet,
   Text, TextInput, View,
 } from "react-native";
 import * as Location from "expo-location";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import {
+  disableBackgroundTracking,
+  enableBackgroundTracking,
+  resumeBackgroundTrackingIfAuthorized,
+} from "./BackgroundLocation";
 import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
 
 type Screen = "home" | "history" | "wallet" | "profile";
@@ -95,11 +100,42 @@ export default function App() {
   useEffect(()=>{if(!driver?.online||driver.status!=="ACTIVE") return; const timer=setInterval(()=>{loadOffers();loadActive();},6000);loadOffers();loadActive();return()=>clearInterval(timer);},[driver?.online,driver?.status]);
   useEffect(()=>{if(!driver?.online||driver.status!=="ACTIVE") return; let subscription:Location.LocationSubscription|undefined; (async()=>{const permission=await Location.requestForegroundPermissionsAsync();if(permission.status!=="granted"){setMessage("Ative a localização para receber entregas próximas.");return;}subscription=await Location.watchPositionAsync({accuracy:Location.Accuracy.High,distanceInterval:20,timeInterval:10000},async position=>{await supabase.from("driver_locations").upsert({driver_id:driver.id,latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,speed:position.coords.speed,accuracy:position.coords.accuracy,recorded_at:new Date().toISOString()},{onConflict:"driver_id"});});})();return()=>subscription?.remove();},[driver?.online,driver?.id,driver?.status]);
 
+  useEffect(()=>{
+    if(driver?.id&&driver.online&&driver.status==="ACTIVE")void resumeBackgroundTrackingIfAuthorized(driver.id);
+    else void disableBackgroundTracking();
+  },[driver?.id,driver?.online,driver?.status]);
+
   async function bootstrap(){setLoading(true);const [{data:cityData},{data:driverData}]=await Promise.all([supabase.from("cities").select("id,name,state").eq("active",true).order("name"),supabase.from("drivers").select("id,status,online,rating,acceptance_rate,city_id").maybeSingle()]);setCities(cityData??[]);if(driverData){setDriver({...driverData,rating:Number(driverData.rating),acceptance_rate:Number(driverData.acceptance_rate)} as Driver);await Promise.all([loadActive(),loadHistory(driverData.id)]);}else setDriver(null);setLoading(false);}
   async function loadOffers(){const {data}=await supabase.functions.invoke("driver-offers",{body:{}});const next=(data?.offers??[])[0] as Offer|undefined;setOffer(next??null);}
   async function loadActive(){const {data}=await supabase.functions.invoke("driver-active-delivery",{body:{}});setActive(data?.delivery??null);}
   async function loadHistory(driverId=driver?.id){if(!driverId)return;const {data}=await supabase.from("deliveries").select("id,driver_earning,delivered_at").eq("driver_id",driverId).eq("status","DELIVERED").order("delivered_at",{ascending:false}).limit(30);setHistory((data??[]).map((x:any)=>({...x,driver_earning:Number(x.driver_earning)})));}
-  async function toggleOnline(){if(!driver)return;setMessage("");const next=!driver.online;const {data,error}=await supabase.functions.invoke("driver-status",{body:{online:next}});if(error||data?.error){setMessage(data?.error==="ACTIVE_DELIVERY_PREVENTS_OFFLINE"?"Finalize a entrega atual antes de ficar offline.":"Não foi possível alterar seu status.");return;}setDriver({...driver,online:Boolean(data.driver.online)});if(next) await loadOffers();}
+  async function toggleOnline(){
+    if(!driver)return;
+    setMessage("");
+    const next=!driver.online;
+    const {data,error}=await supabase.functions.invoke("driver-status",{body:{online:next}});
+    if(error||data?.error){
+      setMessage(data?.error==="ACTIVE_DELIVERY_PREVENTS_OFFLINE"?"Finalize a entrega atual antes de ficar offline.":"Não foi possível alterar seu status.");
+      return;
+    }
+    setDriver({...driver,online:Boolean(data.driver.online)});
+    if(!next){
+      await disableBackgroundTracking();
+      return;
+    }
+    await loadOffers();
+    Alert.alert(
+      "Rastreamento durante entregas",
+      "Para receber chamadas e manter o acompanhamento mesmo com a tela bloqueada, permita ao CLICK-FOOD usar sua localização em segundo plano enquanto você estiver online.",
+      [
+        {text:"AGORA NÃO",style:"cancel"},
+        {text:"ATIVAR",onPress:async()=>{
+          const enabled=await enableBackgroundTracking(driver.id);
+          setMessage(enabled?"Localização em segundo plano ativada enquanto você estiver online.":"A localização em segundo plano não foi autorizada. O app continuará atualizando sua posição enquanto estiver aberto.");
+        }},
+      ],
+    );
+  }
   async function acceptOffer(){if(!offer)return;const {data,error}=await supabase.functions.invoke("accept-delivery",{body:{offerId:offer.id}});if(error||data?.error){setMessage("Este chamado não está mais disponível.");setOffer(null);return;}setOffer(null);await loadActive();}
   async function rejectOffer(){if(!offer)return;await supabase.functions.invoke("reject-delivery",{body:{offerId:offer.id}});setOffer(null);}
   async function deliveryAction(action:string){if(!active)return;setMessage("");const body:any={deliveryId:active.id,action};if(action==="CONFIRM_PICKUP"||action==="CONFIRM_DELIVERY")body.code=code;const {data,error}=await supabase.functions.invoke("driver-delivery-action",{body});if(error||data?.error){setMessage(data?.error==="INVALID_DELIVERY_CODE"?"Código incorreto.":"Não foi possível atualizar a entrega.");return;}setCode("");await loadActive();if(action==="CONFIRM_DELIVERY"){await loadHistory();setMessage("Entrega concluída com sucesso.");}}
