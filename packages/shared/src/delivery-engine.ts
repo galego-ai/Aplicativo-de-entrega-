@@ -1,3 +1,5 @@
+import type { DeliveryStatus } from "./index";
+
 export type DriverCandidate = {
   driverId: string;
   distanceToStoreKm: number;
@@ -67,4 +69,29 @@ export function offerExpiresAt(offeredAt: Date, timeoutSeconds = 15): Date {
     throw new Error("INVALID_OFFER_TIMEOUT");
   }
   return new Date(offeredAt.getTime() + timeoutSeconds * 1000);
+}
+
+const driverControlledTransitions: Partial<Record<DeliveryStatus, readonly DeliveryStatus[]>> = {
+  DRIVER_ASSIGNED: ["DRIVER_TO_STORE", "INCIDENT"],
+  DRIVER_TO_STORE: ["DRIVER_AT_STORE", "INCIDENT"],
+  DRIVER_AT_STORE: ["PICKUP_CONFIRMED", "INCIDENT"],
+  PICKUP_CONFIRMED: ["DRIVER_TO_CUSTOMER", "INCIDENT"],
+  DRIVER_TO_CUSTOMER: ["DRIVER_AT_CUSTOMER", "INCIDENT"],
+  DRIVER_AT_CUSTOMER: ["DELIVERED", "CUSTOMER_UNAVAILABLE", "INCIDENT"],
+  CUSTOMER_UNAVAILABLE: ["RETURN_REQUIRED", "DELIVERED"],
+  RETURN_REQUIRED: ["DELIVERED", "INCIDENT"],
+};
+
+export function allowedDriverDeliveryTransitions(status: DeliveryStatus): readonly DeliveryStatus[] {
+  return driverControlledTransitions[status] ?? [];
+}
+
+export function canDriverTransitionDelivery(from: DeliveryStatus, to: DeliveryStatus): boolean {
+  return allowedDriverDeliveryTransitions(from).includes(to);
+}
+
+export function assertDriverDeliveryTransition(from: DeliveryStatus, to: DeliveryStatus): void {
+  if (!canDriverTransitionDelivery(from, to)) {
+    throw new Error(`INVALID_DELIVERY_TRANSITION:${from}->${to}`);
+  }
 }
