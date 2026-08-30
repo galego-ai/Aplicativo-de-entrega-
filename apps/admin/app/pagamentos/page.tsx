@@ -7,6 +7,17 @@ type Provider={id:string;provider:string;display_name:string;environment:"SANDBO
 const methods=["PIX","CREDIT_CARD","DEBIT_CARD"] as const;
 const labels:Record<string,string>={PIX:"PIX",CREDIT_CARD:"Cartão de crédito",DEBIT_CARD:"Cartão de débito"};
 
+function efiErrorMessage(code:string,status?:number){
+ if(code.startsWith("MISSING_SECRET_"))return `Falta um Secret no Supabase: ${code.replace("MISSING_SECRET_","")}.`;
+ if(code==="INVALID_SECRET_EFI_PIX_CERT_B64"||code==="EFI_MTLS_CERT_INVALID")return "O certificado Efí em B64 está inválido. Vamos refazer apenas o certificado.";
+ if(code==="INVALID_SECRET_EFI_PIX_KEY_B64"||code==="EFI_MTLS_KEY_INVALID")return "A chave privada Efí em B64 está inválida. Vamos refazer apenas a chave privada.";
+ if(code==="EFI_MTLS_PAIR_INVALID"||code==="EFI_MTLS_CONNECTION_FAILED")return "O certificado e a chave privada não formaram uma conexão mTLS válida com a Efí.";
+ if(code.startsWith("EFI_OAUTH_"))return `A Efí recusou a autenticação OAuth (${code.replace("EFI_OAUTH_","")}). Confira Client ID e Client Secret de homologação.`;
+ if(code==="EFI_WEBHOOK_SETUP_FAILED")return `A autenticação passou, mas a Efí recusou o cadastro do webhook${status?` (HTTP ${status})`:""}. Confira a chave PIX de homologação.`;
+ if(code==="EFI_WEBHOOK_NETWORK_FAILED")return "A autenticação passou, mas houve falha de rede ao registrar o webhook na Efí.";
+ return `A Efí não pôde ser validada. Diagnóstico: ${code||"EFI_SETUP_FAILED"}.`;
+}
+
 export default function PaymentsPage(){
  const[allowed,setAllowed]=useState<boolean|null>(null);const[providers,setProviders]=useState<Provider[]>([]);const[message,setMessage]=useState("");const[saving,setSaving]=useState(false);const[validatingEfi,setValidatingEfi]=useState(false);
  const[form,setForm]=useState({provider:"",displayName:"",environment:"SANDBOX" as "SANDBOX"|"PRODUCTION",supportedMethods:["PIX"] as string[],notes:"",credentialsConfigured:false,enabled:false});
@@ -18,7 +29,7 @@ export default function PaymentsPage(){
  function toggleMethod(method:string){setForm({...form,supportedMethods:form.supportedMethods.includes(method)?form.supportedMethods.filter(x=>x!==method):[...form.supportedMethods,method]});}
  async function save(e:FormEvent){e.preventDefault();if(form.provider==="EFI"){setMessage("A Efí não pode ser ativada manualmente. Instale os Secrets e use o botão Validar e ativar Efí.");return;}setSaving(true);setMessage("");const{data,error}=await supabase.functions.invoke("admin-payment-config",{body:{action:"UPSERT",provider:form.provider,displayName:form.displayName,environment:form.environment,supportedMethods:form.supportedMethods,notes:form.notes,credentialsConfigured:form.credentialsConfigured,enabled:form.enabled}});if(error||data?.error){setMessage("Não foi possível salvar o provedor.");setSaving(false);return;}setMessage(data.warning==="CREDENTIALS_REQUIRED_TO_ENABLE"?"Configuração salva, mas o provedor ficou desativado porque as credenciais reais ainda não foram instaladas como segredo do backend.":"Configuração do provedor salva.");setForm({provider:"",displayName:"",environment:"SANDBOX",supportedMethods:["PIX"],notes:"",credentialsConfigured:false,enabled:false});await load();setSaving(false);}
  function edit(p:Provider){if(p.provider==="EFI"){setMessage("A Efí é gerenciada pelo fluxo seguro abaixo. O ambiente e a ativação são confirmados pela própria integração.");return;}setForm({provider:p.provider,displayName:p.display_name,environment:p.environment,supportedMethods:p.supported_methods??[],notes:p.notes??"",credentialsConfigured:p.credentials_configured,enabled:p.enabled});window.scrollTo({top:0,behavior:"smooth"});}
- async function setupEfi(){setValidatingEfi(true);setMessage("");const{data,error}=await supabase.functions.invoke("efi-pix-setup",{body:{}});if(error||data?.error){const code=String(data?.error??"");if(code.startsWith("MISSING_SECRET_"))setMessage("Ainda faltam credenciais da Efí nos Secrets do Supabase. Não cole nenhuma chave nesta tela.");else setMessage("A Efí não pôde ser validada. Confira credenciais, certificado, chave PIX e ambiente de homologação.");setValidatingEfi(false);return;}setMessage(`Efí validada e webhook registrado com sucesso em ${data.environment==="PRODUCTION"?"PRODUÇÃO":"HOMOLOGAÇÃO"}. O PIX está liberado no App Cliente.`);await load();setValidatingEfi(false);}
+ async function setupEfi(){setValidatingEfi(true);setMessage("");const{data,error}=await supabase.functions.invoke("efi-pix-setup",{body:{}});if(error||data?.error||data?.ok===false){const code=String(data?.error??"EFI_SETUP_FAILED");setMessage(efiErrorMessage(code,Number(data?.providerStatus)||undefined));setValidatingEfi(false);return;}setMessage(`Efí validada e webhook registrado com sucesso em ${data.environment==="PRODUCTION"?"PRODUÇÃO":"HOMOLOGAÇÃO"}. O PIX está liberado no App Cliente.`);await load();setValidatingEfi(false);}
  const efi=providers.find(p=>p.provider==="EFI");
  if(allowed===null)return <main className="adminPage"><div className="adminPanel">Carregando...</div></main>;
  if(!allowed)return <main className="adminPage"><div className="adminPanel"><h1>Acesso restrito</h1><p>Entre na Matriz com perfil Super Admin ou Admin.</p></div></main>;
@@ -27,7 +38,7 @@ export default function PaymentsPage(){
   {message&&<div className="adminNotice">{message}</div>}
   <section className="adminPanel" style={{marginBottom:18}}><h2>PIX • Efí Bank</h2><p className="muted">As credenciais ficam somente nos Secrets do Supabase. O CLICK-FOOD só libera PIX depois que esta tela consegue autenticar na Efí e registrar o webhook.</p>
    <div className="adminList"><div><div><b>{efi?.enabled?"PIX EFÍ ATIVO":"PIX EFÍ AGUARDANDO CONFIGURAÇÃO"}</b><small>{efi?.environment??"SANDBOX"} • {efi?.credentials_configured?"credenciais validadas":"credenciais ainda não validadas"}</small></div></div></div>
-   <div style={{marginTop:14}}><b>Secrets necessários no projeto CLICK-FOOD</b><p className="muted">EFI_PIX_CLIENT_ID • EFI_PIX_CLIENT_SECRET • EFI_PIX_CERT_PEM • EFI_PIX_KEY_PEM • EFI_PIX_KEY • EFI_PIX_SANDBOX • EFI_WEBHOOK_HMAC</p></div>
+   <div style={{marginTop:14}}><b>Secrets necessários no projeto CLICK-FOOD</b><p className="muted">EFI_PIX_CLIENT_ID • EFI_PIX_CLIENT_SECRET • EFI_PIX_CERT_B64 • EFI_PIX_KEY_B64 • EFI_PIX_KEY • EFI_PIX_SANDBOX • EFI_WEBHOOK_HMAC</p></div>
    <button className="primaryAction" onClick={setupEfi} disabled={validatingEfi}>{validatingEfi?"VALIDANDO NA EFÍ...":efi?.enabled?"REVALIDAR EFÍ E WEBHOOK":"VALIDAR E ATIVAR EFÍ"}</button>
    <p className="muted">Comece com <b>EFI_PIX_SANDBOX=true</b>. Nenhuma dessas credenciais deve ser digitada ou armazenada no navegador.</p>
   </section>
