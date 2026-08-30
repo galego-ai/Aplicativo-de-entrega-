@@ -32,7 +32,12 @@ export default{fetch:async(req:Request)=>{
   if(prep?.reused){const check=await api(client,access,`/v2/gn/pix/enviados/id-envio/${encodeURIComponent(idEnvio)}`,{method:"GET"});if(check.ok){const status=String(check.data?.status??"EM_PROCESSAMENTO").toUpperCase();const settled=await sync(status,String(check.data?.endToEndId??check.data?.e2eId??"")||null,check.data,status==="NAO_REALIZADO"?providerError(check.data):null);return Response.json({ok:true,reconciled:true,payout:settled,providerStatus:status});}if(check.status!==404){await sync("UNKNOWN",null,check.data,providerError(check.data));return Response.json({ok:true,pending:true,providerStatus:check.status});}}
   const requestBody={valor:Number(payout.amount).toFixed(2),pagador:{chave:required("EFI_PIX_KEY"),infoPagador:`CLICK-FOOD repasse ${payoutId.slice(0,8)}`},favorecido:{chave:String(payout.destination_value).trim()}};
   let result=await api(client,access,`/v3/gn/pix/${encodeURIComponent(idEnvio)}`,{method:"PUT",body:JSON.stringify(requestBody)});
-  if(result.status===409){result=await api(client,access,`/v2/gn/pix/enviados/id-envio/${encodeURIComponent(idEnvio)}`,{method:"GET"});}
+  if(result.status===409){
+   const query=await api(client,access,`/v2/gn/pix/enviados/id-envio/${encodeURIComponent(idEnvio)}`,{method:"GET"});
+   if(query.ok)result=query;
+   else if(query.status===404){await sync("UNKNOWN",null,query.data,"Conflito no envio; aguardando reconciliação pelo mesmo idEnvio");return Response.json({ok:true,pending:true,providerStatus:409});}
+   else result=query;
+  }
   if(result.ok){const status=String(result.data?.status??"EM_PROCESSAMENTO").toUpperCase();const settled=await sync(status,String(result.data?.endToEndId??result.data?.e2eId??"")||null,result.data,status==="NAO_REALIZADO"?providerError(result.data):null);return Response.json({ok:true,payout:settled,providerStatus:status});}
   const err=providerError(result.data);
   if([400,404,422].includes(result.status)){const settled=await sync("NAO_REALIZADO",null,result.data,err);return Response.json({ok:false,definitive:true,payout:settled,providerStatus:result.status});}

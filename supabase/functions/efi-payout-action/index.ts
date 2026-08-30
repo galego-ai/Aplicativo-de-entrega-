@@ -40,7 +40,12 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   await sync(activeId,"CREATED",null,{environment:config.environment},null);
   const bodyPix={valor:Number(payout.amount).toFixed(2),pagador:{chave:required("EFI_PIX_KEY"),infoPagador:`CLICK-FOOD repasse ${String(payout.id).slice(0,8)}`},favorecido:{chave:String(payout.destination_value).trim()}};
   let result=await api(client,access,`/v3/gn/pix/${encodeURIComponent(activeId)}`,{method:"PUT",body:JSON.stringify(bodyPix)});
-  if(result.status===409){const query=await reconcile(client,access,activeId);if(query.ok)return Response.json({ok:true,reused:true,payout:query.settled,providerStatus:String(query.data?.status??"")});result=query;}
+  if(result.status===409){
+   const query=await reconcile(client,access,activeId);
+   if(query.ok)return Response.json({ok:true,reused:true,payout:query.settled,providerStatus:String(query.data?.status??"")});
+   if(query.status===404){const uncertain=await sync(activeId,"UNKNOWN",null,query.data,"Conflito no envio; aguardando reconciliação pelo mesmo idEnvio");return Response.json({ok:false,error:"EFI_PAYOUT_CONFIRMATION_PENDING",uncertain:true,payout:uncertain,providerStatus:409},{status:202});}
+   result=query;
+  }
   if(result.ok){const status=String(result.data?.status??"EM_PROCESSAMENTO").toUpperCase();const settled=await sync(activeId,status,String(result.data?.e2eId??result.data?.endToEndId??"")||null,result.data,status==="NAO_REALIZADO"?providerError(result.data):null);return Response.json({ok:true,payout:settled,providerStatus:status},{status:status==="REALIZADO"?200:202});}
   const err=providerError(result.data);
   if([400,404,422].includes(result.status)){const settled=await sync(activeId,"NAO_REALIZADO",null,result.data,err);return Response.json({error:"EFI_PAYOUT_REJECTED",providerStatus:result.status,payout:settled},{status:409});}
