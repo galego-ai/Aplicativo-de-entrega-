@@ -14,7 +14,7 @@ import ProductCustomizer, {
 } from "./ProductCustomizer";
 
 type Tab = "home" | "search" | "orders" | "profile";
-type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number };
+type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean };
 type ProductWithMedia = Product & { image_url:string|null };
 type Address = { id:string; label:string|null; street:string; number:string|null; district:string|null; reference:string|null };
 type StoreRelation = { name:string; latitude:number|null; longitude:number|null };
@@ -87,10 +87,14 @@ export default function App(){
   useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false);});const{data}=supabase.auth.onAuthStateChange((_event,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[]);
   useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();}else{setTracking(null);setOrders([]);}},[session]);
   useEffect(()=>{if(!session||tab!=="orders")return;const timer=setInterval(()=>loadOrders(),6000);return()=>clearInterval(timer);},[session?.user.id,tab]);
+  useEffect(()=>{if(!session)return;const timer=setInterval(()=>loadStores(),60000);return()=>clearInterval(timer);},[session?.user.id]);
 
   async function loadStores(){
-    const{data}=await supabase.from("stores").select("id,name,description,logo_url,cover_url,minimum_order,average_preparation_time").eq("status","ACTIVE").order("name").limit(50);
-    setStores((data??[]).map((s:any)=>({...s,minimum_order:Number(s.minimum_order),average_preparation_time:Number(s.average_preparation_time)})));
+    const{data,error}=await supabase.functions.invoke("store-catalog");
+    if(error||data?.error)return;
+    const rows=(data?.stores??[]) as Store[];
+    setStores(rows);
+    setSelectedStore(current=>current?(rows.find(s=>s.id===current.id)??current):current);
   }
 
   async function loadOrders(){
@@ -205,6 +209,7 @@ export default function App(){
 
   async function placeOrder(){
     if(!session||!selectedStore||!cart.length)return;
+    if(!selectedStore.open_now){setMessage("Esta loja está fechada agora. Você pode consultar o cardápio, mas o pedido só poderá ser enviado quando ela abrir.");return;}
     if(cartSubtotal<selectedStore.minimum_order){setMessage(`Pedido mínimo: ${brl(selectedStore.minimum_order)}.`);return;}
     if(deliveryType==="DELIVERY"&&!selectedAddressId){setMessage("Cadastre e selecione um endereço para entrega.");return;}
     setPlacing(true);setMessage("");
@@ -292,6 +297,7 @@ export default function App(){
       {selectedStore.cover_url?<Image source={{uri:selectedStore.cover_url}} style={styles.storeCover}/>:<View style={styles.storeCoverFallback}><Text style={styles.storeCoverFallbackText}>CLICK-FOOD</Text></View>}
       <View style={styles.storeHeading}>{selectedStore.logo_url?<Image source={{uri:selectedStore.logo_url}} style={styles.storeLogo}/>:<View style={styles.storeLogoFallback}><Text style={styles.storeLogoFallbackText}>CF</Text></View>}<View style={{flex:1}}><Text style={styles.storeTitle}>{selectedStore.name}</Text><Text style={styles.meta}>{selectedStore.description||"Cardápio CLICK-FOOD"}</Text></View></View>
       <Text style={styles.meta}>Pedido mínimo {brl(selectedStore.minimum_order)} • preparo médio {selectedStore.average_preparation_time} min</Text>
+      <Text style={[styles.storeStatusBanner,selectedStore.open_now?styles.storeOpenBanner:styles.storeClosedBanner]}>{selectedStore.open_now?"ABERTA AGORA":"FECHADA AGORA"}</Text>
       {promotions.some(p=>p.promotion_type==="FREE_DELIVERY")&&<Text style={styles.promoBanner}>🚚 Entrega grátis em promoção</Text>}
       {!!message&&<Text style={styles.notice}>{message}</Text>}
 
@@ -362,7 +368,7 @@ export default function App(){
       <Text style={styles.section}>Cupom</Text>
       <TextInput style={styles.input} placeholder="Digite o código do cupom" autoCapitalize="characters" value={coupon} onChangeText={setCoupon}/>
       <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. Pagamento operacional disponível agora: dinheiro.</Text></View>
-      <Pressable style={[styles.checkout,!cart.length&&styles.disabled]} disabled={!cart.length||placing} onPress={placeOrder}><Text style={styles.checkoutText}>{placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
+      <Pressable style={[styles.checkout,(!cart.length||!selectedStore.open_now)&&styles.disabled]} disabled={!cart.length||placing||!selectedStore.open_now} onPress={placeOrder}><Text style={styles.checkoutText}>{!selectedStore.open_now?"LOJA FECHADA":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
     </ScrollView></SafeAreaView>;
   }
 
@@ -371,12 +377,12 @@ export default function App(){
     <Pressable style={styles.searchBox} onPress={()=>setTab("search")}><Text>⌕  O que você quer pedir hoje?</Text></Pressable>
     <View style={styles.hero}><View style={{flex:1}}><Text style={styles.heroKicker}>CLICK-FOOD</Text><Text style={styles.heroTitle}>Peça, acompanhe e aproveite.</Text><Text style={styles.heroText}>Seu pedido é calculado e validado com segurança no servidor.</Text></View><Text style={styles.heroEmoji}>🍔</Text></View>
     <Text style={styles.section}>Lojas</Text>
-    {stores.length?stores.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}>{store.logo_url?<Image source={{uri:store.logo_url}} style={styles.storeLogoCard}/>:<View style={styles.storeIcon}><Text style={{fontSize:32}}>🍽️</Text></View>}<View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text><Text style={styles.meta}>Mínimo {brl(store.minimum_order)}</Text></View><Text>›</Text></Pressable>):<Text style={styles.empty}>Ainda não há lojas ativas.</Text>}
+    {stores.length?stores.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}>{store.logo_url?<Image source={{uri:store.logo_url}} style={styles.storeLogoCard}/>:<View style={styles.storeIcon}><Text style={{fontSize:32}}>🍽️</Text></View>}<View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text><Text style={styles.meta}>Mínimo {brl(store.minimum_order)}</Text><Text style={[styles.storeStatus,store.open_now?styles.storeOpen:styles.storeClosed]}>{store.open_now?"ABERTA":"FECHADA"}</Text></View><Text>›</Text></Pressable>):<Text style={styles.empty}>Ainda não há lojas ativas.</Text>}
   </ScrollView>;
 
   const search=<ScrollView contentContainerStyle={styles.scroll}>
     <Text style={styles.pageTitle}>Buscar</Text><TextInput style={styles.input} autoFocus placeholder="Nome da loja" value={query} onChangeText={setQuery}/>
-    {filtered.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}>{store.logo_url?<Image source={{uri:store.logo_url}} style={styles.storeLogoCard}/>:<View style={styles.storeIcon}><Text style={{fontSize:30}}>🍽️</Text></View>}<View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text></View><Text>›</Text></Pressable>)}
+    {filtered.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}>{store.logo_url?<Image source={{uri:store.logo_url}} style={styles.storeLogoCard}/>:<View style={styles.storeIcon}><Text style={{fontSize:30}}>🍽️</Text></View>}<View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text><Text style={[styles.storeStatus,store.open_now?styles.storeOpen:styles.storeClosed]}>{store.open_now?"ABERTA":"FECHADA"}</Text></View><Text>›</Text></Pressable>)}
   </ScrollView>;
 
   const trackedOrder=tracking?orders.find(order=>order.id===tracking.orderId):null;
@@ -426,6 +432,7 @@ const styles=StyleSheet.create({
   header:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:18},avatar:{width:44,height:44,borderRadius:22,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},
   searchBox:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:16,marginBottom:16},hero:{backgroundColor:"#111",borderRadius:20,padding:18,flexDirection:"row",alignItems:"center"},heroKicker:{color:"#f4c400",fontWeight:"900",fontSize:10},heroTitle:{color:"#fff",fontSize:22,fontWeight:"900",marginTop:6},heroText:{color:"#aaa",fontSize:11,marginTop:7},heroEmoji:{fontSize:48},
   section:{fontSize:19,fontWeight:"900",marginTop:22,marginBottom:10},pageTitle:{fontSize:28,fontWeight:"900",marginBottom:18},storeCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:16,padding:13,flexDirection:"row",alignItems:"center",gap:12,marginBottom:9},storeIcon:{width:50,height:50,borderRadius:14,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},storeLogoCard:{width:50,height:50,borderRadius:14,backgroundColor:"#f1f1f1"},storeTitle:{fontSize:28,fontWeight:"900",marginTop:4},storeCover:{width:"100%",height:160,borderRadius:18,marginTop:12,marginBottom:12,backgroundColor:"#ddd"},storeCoverFallback:{height:130,borderRadius:18,marginTop:12,marginBottom:12,backgroundColor:"#111",alignItems:"center",justifyContent:"center"},storeCoverFallbackText:{color:"#f4c400",fontSize:24,fontWeight:"900"},storeHeading:{flexDirection:"row",alignItems:"center",gap:12,marginBottom:4},storeLogo:{width:58,height:58,borderRadius:16,backgroundColor:"#eee"},storeLogoFallback:{width:58,height:58,borderRadius:16,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},storeLogoFallbackText:{fontWeight:"900",fontSize:18},
+  storeStatus:{fontSize:9,fontWeight:"900",paddingHorizontal:7,paddingVertical:4,borderRadius:999,alignSelf:"flex-start",marginTop:6,overflow:"hidden"},storeOpen:{backgroundColor:"#ddf6e6",color:"#1d7342"},storeClosed:{backgroundColor:"#fde5e1",color:"#992f29"},storeStatusBanner:{padding:10,borderRadius:12,fontSize:11,fontWeight:"900",marginTop:10,textAlign:"center"},storeOpenBanner:{backgroundColor:"#ddf6e6",color:"#1d7342"},storeClosedBanner:{backgroundColor:"#fde5e1",color:"#992f29"},
   productRow:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:12,marginBottom:9,flexDirection:"row",alignItems:"center",gap:10},productImage:{width:74,height:74,borderRadius:12,backgroundColor:"#eee"},productImageFallback:{width:74,height:74,borderRadius:12,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},productImageFallbackText:{fontSize:28},productName:{fontWeight:"900",fontSize:15},meta:{color:"#777",fontSize:11,marginTop:4},price:{fontWeight:"900",color:"#8d7000",marginTop:6},addButton:{width:42,height:42,borderRadius:13,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},addText:{fontSize:24,fontWeight:"900"},
   customHint:{fontSize:10,color:"#555",fontWeight:"800",marginTop:4},discountHint:{fontSize:10,color:"#26804a",fontWeight:"800",marginTop:3},promoBanner:{backgroundColor:"#dcf7e7",color:"#17673b",padding:10,borderRadius:11,fontWeight:"800",fontSize:11,marginTop:12},
   cartRow:{backgroundColor:"#fff",borderRadius:14,padding:13,marginBottom:8,flexDirection:"row",alignItems:"center"},cartOptions:{fontSize:10,color:"#666",marginTop:4,lineHeight:14},qty:{flexDirection:"row",gap:14,alignItems:"center",borderWidth:1,borderColor:"#ddd",borderRadius:10,paddingVertical:8,paddingHorizontal:10},
