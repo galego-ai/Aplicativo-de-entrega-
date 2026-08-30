@@ -1,9 +1,9 @@
-# one-time workflow: remove itself after a successful patch
 name: Patch POS split payments
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/patch-pos-split-payments.yml']
+    paths:
+      - .github/workflows/patch-pos-split-payments.yml
 permissions:
   contents: write
 jobs:
@@ -20,86 +20,21 @@ jobs:
           from pathlib import Path
           p=Path('apps/lojista/app/page.tsx')
           s=p.read_text()
-          replacements=[]
-          replacements.append((
-            'type PaymentMethod = "CASH" | "PIX" | "CREDIT_CARD" | "DEBIT_CARD";',
-            'type PaymentMethod = "CASH" | "PIX" | "CREDIT_CARD" | "DEBIT_CARD";\ntype PosPayment = { method: PaymentMethod; amount: string };'
-          ))
-          replacements.append((
-            '  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");\n  const [processingSale, setProcessingSale] = useState(false);',
-            '  const [posPayments, setPosPayments] = useState<PosPayment[]>([{ method: "CASH", amount: "" }]);\n  const [lastSaleOrderId, setLastSaleOrderId] = useState("");\n  const [processingSale, setProcessingSale] = useState(false);'
-          ))
-          replacements.append((
-            '  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + Number(item.promotional_price ?? item.price) * item.quantity, 0), [cart]);',
-            '  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + Number(item.promotional_price ?? item.price) * item.quantity, 0), [cart]);\n  const posPaymentTotal = useMemo(() => posPayments.length === 1 && !posPayments[0].amount.trim() ? cartTotal : posPayments.reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0), [posPayments, cartTotal]);\n  const posPaymentDifference = Math.round((cartTotal - posPaymentTotal) * 100) / 100;'
-          ))
-          old_fn='''  async function finalizeSale() {
-    if (!store || !cashSession || !cart.length) return;
-    setProcessingSale(true);
-    const { data, error } = await supabase.functions.invoke("create-pos-sale", { body: { storeId: store.id, cashSessionId: cashSession.id, items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })), payments: [{ method: paymentMethod, amount: cartTotal }], discount: 0 } });
-    setProcessingSale(false);
-    if (error || data?.error) return setMessage(data?.error === "INSUFFICIENT_STOCK" ? "Estoque insuficiente." : "Não foi possível concluir a venda.");
-    setCart([]);
-    setMessage("Venda concluída com sucesso.");
-    await loadStoreData(store);
-  }'''
-          new_fn='''  function updatePosPayment(index: number, patch: Partial<PosPayment>) {
-    setPosPayments((current) => current.map((payment, paymentIndex) => paymentIndex === index ? { ...payment, ...patch } : payment));
-  }
-
-  function updatePosPaymentAmount(index: number, amount: string) {
-    setPosPayments((current) => {
-      const next = current.map((payment, paymentIndex) => paymentIndex === index ? { ...payment, amount } : payment);
-      if (next.length > 1 && index < next.length - 1) {
-        const usedBeforeLast = next.slice(0, -1).reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0);
-        next[next.length - 1] = { ...next[next.length - 1], amount: Math.max(0, Math.round((cartTotal - usedBeforeLast) * 100) / 100).toFixed(2) };
-      }
-      return next;
-    });
-  }
-
-  function addPosPayment() {
-    setPosPayments((current) => {
-      if (current.length >= 4 || cartTotal <= 0) return current;
-      if (current.length === 1 && !current[0].amount.trim()) {
-        const first = Math.floor(cartTotal * 50) / 100;
-        const second = Math.round((cartTotal - first) * 100) / 100;
-        return [{ ...current[0], amount: first.toFixed(2) }, { method: "PIX", amount: second.toFixed(2) }];
-      }
-      const used = current.reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0);
-      const remaining = Math.max(0, Math.round((cartTotal - used) * 100) / 100);
-      return [...current, { method: "PIX", amount: remaining.toFixed(2) }];
-    });
-  }
-
-  function removePosPayment(index: number) {
-    setPosPayments((current) => current.length <= 1 ? current : current.filter((_, paymentIndex) => paymentIndex !== index));
-  }
-
-  async function finalizeSale() {
-    if (!store || !cashSession || !cart.length) return;
-    const payments = posPayments.map((payment) => ({ method: payment.method, amount: posPayments.length === 1 && !payment.amount.trim() ? cartTotal : Number(payment.amount.replace(",", ".")) }));
-    if (payments.some((payment) => !Number.isFinite(payment.amount) || payment.amount <= 0)) return setMessage("Informe valores válidos para todas as formas de pagamento.");
-    const paymentSum = Math.round(payments.reduce((sum, payment) => sum + payment.amount, 0) * 100) / 100;
-    if (Math.abs(paymentSum - Math.round(cartTotal * 100) / 100) > 0.009) return setMessage(`A soma dos pagamentos deve ser ${brl(cartTotal)}. Falta ou excede ${brl(Math.abs(cartTotal - paymentSum))}.`);
-    setProcessingSale(true);
-    const { data, error } = await supabase.functions.invoke("create-pos-sale", { body: { storeId: store.id, cashSessionId: cashSession.id, items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })), payments, discount: 0 } });
-    setProcessingSale(false);
-    if (error || data?.error) return setMessage(data?.error === "INSUFFICIENT_STOCK" ? "Estoque insuficiente." : data?.error === "PAYMENT_TOTAL_MISMATCH" ? "A soma dos pagamentos não confere com o total da venda." : "Não foi possível concluir a venda.");
-    setCart([]);
-    setPosPayments([{ method: "CASH", amount: "" }]);
-    setLastSaleOrderId(String(data.orderId ?? ""));
-    setMessage("Venda concluída com sucesso. Recibo pronto para imprimir.");
-    await loadStoreData(store);
-  }'''
-          replacements.append((old_fn,new_fn))
-          old_ui='<div className="paymentMethods">{[["CASH", "Dinheiro"], ["PIX", "PIX"], ["DEBIT_CARD", "Débito"], ["CREDIT_CARD", "Crédito"]].map(([value, label]) => <button key={value} className={paymentMethod === value ? "payActive" : ""} onClick={() => setPaymentMethod(value as PaymentMethod)}>{label}</button>)}</div><div className="totals"><div className="grand"><span>Total</span><strong>{brl(cartTotal)}</strong></div></div><button className="checkout" disabled={!cart.length || !cashSession || processingSale} onClick={finalizeSale}>{cashSession ? "FINALIZAR VENDA" : "ABRA O CAIXA"}</button>'
-          new_ui='<div style={{marginTop:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}><b>Pagamento</b><button onClick={addPosPayment} disabled={!cart.length||posPayments.length>=4} style={{fontSize:11}}>+ DIVIDIR PAGAMENTO</button></div>{posPayments.map((payment,index)=><div key={index} style={{display:"grid",gridTemplateColumns:"1fr 110px auto",gap:7,marginBottom:7}}><select value={payment.method} onChange={(event)=>updatePosPayment(index,{method:event.target.value as PaymentMethod})}><option value="CASH">Dinheiro</option><option value="PIX">PIX</option><option value="DEBIT_CARD">Débito</option><option value="CREDIT_CARD">Crédito</option></select><input inputMode="decimal" placeholder={posPayments.length===1?cartTotal.toFixed(2):"0,00"} value={payment.amount} onChange={(event)=>updatePosPaymentAmount(index,event.target.value)} />{posPayments.length>1?<button onClick={()=>removePosPayment(index)} aria-label="Remover pagamento">×</button>:<span />}</div>)}<small style={{display:"block",color:Math.abs(posPaymentDifference)<0.01?"#267a44":"#9a2828",marginTop:5}}>{posPayments.length===1&&!posPayments[0].amount.trim()?`Valor total: ${brl(cartTotal)}`:`Informado: ${brl(posPaymentTotal)} • ${posPaymentDifference>0?`Falta ${brl(posPaymentDifference)}`:posPaymentDifference<0?`Excede ${brl(Math.abs(posPaymentDifference))}`:"Total conferido"}`}</small></div><div className="totals"><div className="grand"><span>Total</span><strong>{brl(cartTotal)}</strong></div></div><button className="checkout" disabled={!cart.length || !cashSession || processingSale || Math.abs(posPaymentDifference)>=0.01} onClick={finalizeSale}>{cashSession ? processingSale?"PROCESSANDO...":"FINALIZAR VENDA" : "ABRA O CAIXA"}</button>{lastSaleOrderId&&<a href={`/recibo?orderId=${encodeURIComponent(lastSaleOrderId)}`} style={{display:"block",textAlign:"center",marginTop:9,padding:11,borderRadius:10,background:"#111",color:"#fff",fontWeight:900,textDecoration:"none"}}>IMPRIMIR ÚLTIMO RECIBO</a>}'
-          replacements.append((old_ui,new_ui))
-          for old,new in replacements:
+          def once(old,new):
+              global s
               if old not in s:
                   raise SystemExit('patch marker not found: '+old[:80])
               s=s.replace(old,new,1)
+          once('type PaymentMethod = "CASH" | "PIX" | "CREDIT_CARD" | "DEBIT_CARD";','type PaymentMethod = "CASH" | "PIX" | "CREDIT_CARD" | "DEBIT_CARD";\ntype PosPayment = { method: PaymentMethod; amount: string };')
+          once('  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");\n  const [processingSale, setProcessingSale] = useState(false);','  const [posPayments, setPosPayments] = useState<PosPayment[]>([{ method: "CASH", amount: "" }]);\n  const [lastSaleOrderId, setLastSaleOrderId] = useState("");\n  const [processingSale, setProcessingSale] = useState(false);')
+          once('  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + Number(item.promotional_price ?? item.price) * item.quantity, 0), [cart]);','  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + Number(item.promotional_price ?? item.price) * item.quantity, 0), [cart]);\n  const posPaymentTotal = useMemo(() => posPayments.length === 1 && !posPayments[0].amount.trim() ? cartTotal : posPayments.reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0), [posPayments, cartTotal]);\n  const posPaymentDifference = Math.round((cartTotal - posPaymentTotal) * 100) / 100;')
+          start=s.index('  async function finalizeSale() {')
+          end=s.index('\n\n  async function orderAction',start)
+          new_fn='  function updatePosPayment(index: number, patch: Partial<PosPayment>) {\n    setPosPayments((current) => current.map((payment, paymentIndex) => paymentIndex === index ? { ...payment, ...patch } : payment));\n  }\n\n  function updatePosPaymentAmount(index: number, amount: string) {\n    setPosPayments((current) => {\n      const next = current.map((payment, paymentIndex) => paymentIndex === index ? { ...payment, amount } : payment);\n      if (next.length > 1 && index < next.length - 1) {\n        const usedBeforeLast = next.slice(0, -1).reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0);\n        next[next.length - 1] = { ...next[next.length - 1], amount: Math.max(0, Math.round((cartTotal - usedBeforeLast) * 100) / 100).toFixed(2) };\n      }\n      return next;\n    });\n  }\n\n  function addPosPayment() {\n    setPosPayments((current) => {\n      if (current.length >= 4 || cartTotal <= 0) return current;\n      if (current.length === 1 && !current[0].amount.trim()) {\n        const first = Math.floor(cartTotal * 50) / 100;\n        const second = Math.round((cartTotal - first) * 100) / 100;\n        return [{ ...current[0], amount: first.toFixed(2) }, { method: "PIX", amount: second.toFixed(2) }];\n      }\n      const used = current.reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0);\n      const remaining = Math.max(0, Math.round((cartTotal - used) * 100) / 100);\n      return [...current, { method: "PIX", amount: remaining.toFixed(2) }];\n    });\n  }\n\n  function removePosPayment(index: number) {\n    setPosPayments((current) => current.length <= 1 ? current : current.filter((_, paymentIndex) => paymentIndex !== index));\n  }\n\n  async function finalizeSale() {\n    if (!store || !cashSession || !cart.length) return;\n    const payments = posPayments.map((payment) => ({ method: payment.method, amount: posPayments.length === 1 && !payment.amount.trim() ? cartTotal : Number(payment.amount.replace(",", ".")) }));\n    if (payments.some((payment) => !Number.isFinite(payment.amount) || payment.amount <= 0)) return setMessage("Informe valores válidos para todas as formas de pagamento.");\n    const paymentSum = Math.round(payments.reduce((sum, payment) => sum + payment.amount, 0) * 100) / 100;\n    if (Math.abs(paymentSum - Math.round(cartTotal * 100) / 100) > 0.009) return setMessage(`A soma dos pagamentos deve ser ${brl(cartTotal)}. Falta ou excede ${brl(Math.abs(cartTotal - paymentSum))}.`);\n    setProcessingSale(true);\n    const { data, error } = await supabase.functions.invoke("create-pos-sale", { body: { storeId: store.id, cashSessionId: cashSession.id, items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })), payments, discount: 0 } });\n    setProcessingSale(false);\n    if (error || data?.error) return setMessage(data?.error === "INSUFFICIENT_STOCK" ? "Estoque insuficiente." : data?.error === "PAYMENT_TOTAL_MISMATCH" ? "A soma dos pagamentos não confere com o total da venda." : "Não foi possível concluir a venda.");\n    setCart([]);\n    setPosPayments([{ method: "CASH", amount: "" }]);\n    setLastSaleOrderId(String(data.orderId ?? ""));\n    setMessage("Venda concluída com sucesso. Recibo pronto para imprimir.");\n    await loadStoreData(store);\n  }'
+          s=s[:start]+new_fn+s[end:]
+          old_ui='<div className="paymentMethods">{[["CASH", "Dinheiro"], ["PIX", "PIX"], ["DEBIT_CARD", "Débito"], ["CREDIT_CARD", "Crédito"]].map(([value, label]) => <button key={value} className={paymentMethod === value ? "payActive" : ""} onClick={() => setPaymentMethod(value as PaymentMethod)}>{label}</button>)}</div><div className="totals"><div className="grand"><span>Total</span><strong>{brl(cartTotal)}</strong></div></div><button className="checkout" disabled={!cart.length || !cashSession || processingSale} onClick={finalizeSale}>{cashSession ? "FINALIZAR VENDA" : "ABRA O CAIXA"}</button>'
+          new_ui='<div style={{marginTop:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}><b>Pagamento</b><button onClick={addPosPayment} disabled={!cart.length||posPayments.length>=4} style={{fontSize:11}}>+ DIVIDIR PAGAMENTO</button></div>{posPayments.map((payment,index)=><div key={index} style={{display:"grid",gridTemplateColumns:"1fr 110px auto",gap:7,marginBottom:7}}><select value={payment.method} onChange={(event)=>updatePosPayment(index,{method:event.target.value as PaymentMethod})}><option value="CASH">Dinheiro</option><option value="PIX">PIX</option><option value="DEBIT_CARD">Débito</option><option value="CREDIT_CARD">Crédito</option></select><input inputMode="decimal" placeholder={posPayments.length===1?cartTotal.toFixed(2):"0,00"} value={payment.amount} onChange={(event)=>updatePosPaymentAmount(index,event.target.value)} />{posPayments.length>1?<button onClick={()=>removePosPayment(index)} aria-label="Remover pagamento">×</button>:<span />}</div>)}<small style={{display:"block",color:Math.abs(posPaymentDifference)<0.01?"#267a44":"#9a2828",marginTop:5}}>{posPayments.length===1&&!posPayments[0].amount.trim()?`Valor total: ${brl(cartTotal)}`:`Informado: ${brl(posPaymentTotal)} • ${posPaymentDifference>0?`Falta ${brl(posPaymentDifference)}`:posPaymentDifference<0?`Excede ${brl(Math.abs(posPaymentDifference))}`:"Total conferido"}`}</small></div><div className="totals"><div className="grand"><span>Total</span><strong>{brl(cartTotal)}</strong></div></div><button className="checkout" disabled={!cart.length || !cashSession || processingSale || Math.abs(posPaymentDifference)>=0.01} onClick={finalizeSale}>{cashSession ? processingSale?"PROCESSANDO...":"FINALIZAR VENDA" : "ABRA O CAIXA"}</button>{lastSaleOrderId&&<a href={`/recibo?orderId=${encodeURIComponent(lastSaleOrderId)}`} style={{display:"block",textAlign:"center",marginTop:9,padding:11,borderRadius:10,background:"#111",color:"#fff",fontWeight:900,textDecoration:"none"}}>IMPRIMIR ÚLTIMO RECIBO</a>}'
+          once(old_ui,new_ui)
           if 'paymentMethod' in s or 'setPaymentMethod' in s:
               raise SystemExit('legacy single payment state remains')
           p.write_text(s)
