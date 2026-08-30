@@ -16,7 +16,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
       - name: Add manual driver assignment shortcut
         run: |
           python - <<'PY'
@@ -29,7 +28,7 @@ jobs:
           link='</nav><a href="/entregadores" style={{display:"block",margin:"10px 0",padding:"12px 14px",borderRadius:10,background:"#f4c400",color:"#111",fontWeight:900,textDecoration:"none",textAlign:"center"}}>Atribuir entregador</a>'
           p.write_text(s.replace(needle,link,1))
           PY
-      - run: npm ci
+      - run: npm install --ignore-scripts
       - run: npm run build --workspace=@clickfood/lojista
       - name: Commit patch
         run: |
