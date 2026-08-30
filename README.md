@@ -64,7 +64,7 @@ O CI valida build do Painel Matriz, build do Painel Lojista e type-check dos apl
 - cancelamento do cliente e avaliações por estrelas;
 - rastreamento do entregador com localização protegida por RLS;
 - canais de chat seguros por pedido;
-- repasses com reserva transacional do saldo;
+- repasses de lojas e entregadores com reserva transacional do saldo;
 - cobrança/inadimplência automática por agendador;
 - camada neutra de configuração de gateway para PIX/cartões, sem armazenar segredos no navegador ou em tabelas públicas.
 
@@ -74,7 +74,24 @@ A arquitetura aceita provedores configuráveis para `PIX`, `CREDIT_CARD` e `DEBI
 
 A integração Efí PIX possui geração e reutilização segura de cobrança, QR Code e Pix Copia e Cola, reconciliação direta de status, confirmação idempotente por webhook, validação de valor recebido, expiração automática de cobranças abandonadas e devolução PIX idempotente. Cancelamentos/rejeições elegíveis podem solicitar devolução automaticamente; o webhook também reconcilia o estado da devolução e a liquidação atualiza atomicamente estorno, pagamento, pedido e cobrança. O App Cliente exibe o estado do pagamento e da devolução e permite reconciliar uma devolução pendente sem criar estorno duplicado.
 
-**API keys, client secrets, certificados e tokens nunca são armazenados nessa configuração.** Credenciais reais permanecem exclusivamente em Secrets do backend/Edge Functions. Cartões continuam previstos pela camada de gateway, mas não são anunciados como ativos enquanto uma integração real de cartão não estiver concluída.
+**API keys, client secrets, certificados e tokens nunca são armazenados nessa configuração.** Credenciais reais permanecem exclusivamente em Secrets do backend/Edge Functions. A infraestrutura de cartão Efí existe no código, mas cartão permanece oculto ao cliente enquanto a validação específica não for concluída e o método não for explicitamente habilitado.
+
+## Repasses Pix pela Efí
+
+O CLICK-FOOD possui uma camada separada para **envio de repasses Pix** a lojas e entregadores. Ela reutiliza as credenciais Efí protegidas do backend, mas tem configuração operacional própria (`EFI_PIX_SEND`) para que cobrança de clientes e repasses não sejam ligados/desligados juntos.
+
+- nasce `DESATIVADA` e não envia dinheiro apenas porque o PIX de cobrança está ativo;
+- a Matriz precisa validar explicitamente os escopos de envio e consulta antes de liberar o recurso;
+- uma solicitação precisa ser **APROVADA** antes de poder entrar no envio Efí;
+- cada tentativa usa `idEnvio` idempotente e é persistida para auditoria;
+- respostas incertas não geram outro Pix: o mesmo `idEnvio` é reconciliado por consulta/webhook;
+- somente um envio Efí fica em processamento por vez;
+- `REALIZADO` liquida o repasse como `PAGO`; `NAO_REALIZADO` devolve o repasse para `FALHOU` e libera a reserva para nova tentativa;
+- a chave Pix do favorecido é mascarada no Painel Matriz;
+- existe modo automático opcional, **OFF por padrão**; quando ativado pela Matriz, o worker processa somente repasses PIX já aprovados, um por vez;
+- o worker é chamado por `pg_cron` e usa autenticação interna gerada no banco, sem segredo fixo no frontend ou repositório.
+
+A implementação do envio está pronta no backend, mas deve permanecer desativada até a validação administrativa em homologação. Nenhum teste de repasse deve ser confundido com a cobrança PIX já validada.
 
 ## Segurança
 
@@ -84,7 +101,8 @@ A integração Efí PIX possui geração e reutilização segura de cobrança, Q
 - regras de entrega e horários não aceitam escrita direta do navegador;
 - frontend tem somente leitura das configurações de gateway, limitada por RLS à Matriz;
 - documentos do entregador ficam em bucket privado; mídia pública da loja fica em bucket separado;
-- Edge Functions operacionais exigem JWT;
+- tabelas técnicas de gateway/worker usam RLS e ficam acessíveis apenas ao backend/service role;
+- Edge Functions operacionais exigem JWT; webhooks/workers sem JWT usam autenticação própria e validação de segredo/token;
 - nenhuma chave `service_role` está no browser ou nos apps;
 - todos os recursos são separados do CLICK-GO.
 
@@ -95,13 +113,17 @@ Identificadores:
 - Cliente Android/iOS: `br.com.clickfood.cliente`
 - Entregador Android/iOS: `br.com.clickfood.entregador`
 
-O App Cliente usa autenticação real, vitrine com status de funcionamento, logos/fotos, cardápio, personalização de produtos, carrinho, endereço com GPS, frete, checkout, histórico, rastreamento, cancelamento, status de pagamento/estorno PIX, chat e avaliação. Loja fechada pode ser consultada, mas o envio de pedido é bloqueado visualmente e novamente pelo servidor.
+O App Cliente usa autenticação real, vitrine com status de funcionamento, logos/fotos, cardápio, personalização de produtos, carrinho, endereço com GPS, frete, checkout, histórico, rastreamento, cancelamento, status de pagamento/estorno PIX, chat, suporte, fidelidade e avaliação. Loja fechada pode ser consultada, mas o envio de pedido é bloqueado visualmente e novamente pelo servidor.
 
-O App Entregador usa autenticação, cadastro por cidade, aprovação, documentos, localização, online/offline, chamados, aceite/recusa, chat, notificações e fluxo de entrega.
+O App Entregador usa autenticação, cadastro por cidade, aprovação, documentos, localização, online/offline, chamados, aceite/recusa, chat, notificações, suporte e solicitação/acompanhamento de repasses.
 
 ## CI
 
 `.github/workflows/ci.yml` compila os dois painéis web e executa type-check dos dois apps móveis a cada push.
+
+## Mapas
+
+A estrutura de localização e rastreamento já existe, porém a configuração definitiva de **Google Maps / Mapbox** fica deliberadamente para a etapa final, depois que os módulos funcionais e financeiros forem concluídos e validados.
 
 ## Regra de isolamento
 
