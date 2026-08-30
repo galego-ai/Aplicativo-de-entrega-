@@ -10,7 +10,7 @@ Plataforma independente de **delivery + PDV + logística + fidelidade + bônus**
 - `apps/entregador` — App Entregador (Expo / React Native + Supabase + GPS)
 - `packages/shared` — tipos, máquina de estados, cálculo de pedidos e regras de delivery
 - `supabase/migrations` — schema, RLS, índices e operações transacionais
-- `supabase/functions` — backend seguro para checkout, frete, despacho, delivery, chat e cadastro do entregador
+- `supabase/functions` — backend seguro para checkout, frete, despacho, delivery, chat, estoque, horários e configurações operacionais
 
 ## Supabase de produção
 
@@ -24,19 +24,24 @@ O CLICK-FOOD **não reutiliza** banco, usuários ou autenticação do CLICK-GO.
 
 ## Vercel — produção
 
-Os dois painéis estão publicados em projetos independentes e apontando para o Supabase exclusivo do CLICK-FOOD:
+Projetos web independentes:
 
 - Matriz: https://click-food-admin.vercel.app
 - Lojista/PDV: https://click-food-lojista.vercel.app
 
-A versão publicada foi validada pelo CI com build do Painel Matriz, build do Painel Lojista e type-check dos aplicativos Cliente e Entregador.
+O CI valida build do Painel Matriz, build do Painel Lojista e type-check dos aplicativos Cliente e Entregador a cada push. A publicação web é feita somente quando o deploy pode ser direcionado inequivocamente ao projeto CLICK-FOOD correspondente.
 
 ## Backend implementado
 
 - cálculo e cotação de frete emitida pelo servidor;
 - checkout com preços recalculados no backend;
-- validação de produtos, adicionais, pedido mínimo e cupons;
+- validação de produtos, variações, adicionais, promoções, pedido mínimo e cupons;
 - criação atômica de pedido, itens e pagamento;
+- verificação de horário da loja usando o fuso configurado para cada cidade;
+- vitrine com estado `ABERTA/FECHADA` calculado pelo backend;
+- reserva e devolução transacional de estoque em pedidos;
+- movimentos de estoque auditáveis, estoque mínimo e alerta automático de estoque baixo;
+- atualização atômica dos sete dias de horário da loja;
 - máquina de estados de pedido e entrega;
 - despacho automático por distância, carga, avaliação e taxa de aceitação;
 - aceite atômico para impedir dois entregadores no mesmo pedido;
@@ -47,23 +52,36 @@ A versão publicada foi validada pelo CI com build do Painel Matriz, build do Pa
 - códigos de 4 dígitos derivados por HMAC para retirada e entrega;
 - financeiro baseado em ledger e proteção contra postagem duplicada;
 - chat moderado com bloqueio de telefone, e-mail, links e contatos externos;
+- notificações internas, Realtime e infraestrutura de push;
 - suporte, fidelidade do cliente e CLICK Pontos do lojista;
-- cadastro de entregador com status `PENDING` para aprovação;
+- cadastro de entregador com status `PENDING`, documentos privados e revisão pela Matriz;
 - métricas agregadas no banco para Matriz e Lojista;
-- cadastro de cidades pela Matriz;
+- cadastro de cidades e configuração de fuso horário pela Matriz;
 - criação e ativação de lojas por código de uso único;
-- configuração de GPS, pedido mínimo e frete pelo lojista;
+- configuração de GPS, pedido mínimo, horários e frete pelo lojista;
+- regras de entrega alteradas somente por backend autorizado e auditado;
 - PDV com abertura/fechamento de caixa e venda transacional;
 - cancelamento do cliente e avaliações por estrelas;
 - rastreamento do entregador com localização protegida por RLS;
-- canais de chat seguros por pedido.
+- canais de chat seguros por pedido;
+- repasses com reserva transacional do saldo;
+- cobrança/inadimplência automática por agendador;
+- camada neutra de configuração de gateway para PIX/cartões, sem armazenar segredos no navegador ou em tabelas públicas.
+
+## Pagamentos online
+
+A arquitetura aceita provedores configuráveis para `PIX`, `CREDIT_CARD` e `DEBIT_CARD`. A Matriz possui uma configuração administrativa que registra somente nome do provedor, ambiente, métodos e estado operacional.
+
+**API keys, client secrets, certificados e tokens nunca são armazenados nessa configuração.** Credenciais reais devem ser instaladas exclusivamente como Secrets do backend/Edge Functions. Enquanto nenhum gateway real estiver conectado, o checkout do App Cliente permanece operacional com dinheiro.
 
 ## Segurança
 
 - RLS habilitado nas tabelas públicas;
 - operações financeiras e checkout passam pelo backend;
 - frontend não define preço, frete, cupom, comissão ou ganho do entregador;
-- documentos e rotas privadas seguem escopo de acesso;
+- regras de entrega e horários não aceitam escrita direta do navegador;
+- frontend tem somente leitura das configurações de gateway, limitada por RLS à Matriz;
+- documentos do entregador ficam em bucket privado; mídia pública da loja fica em bucket separado;
 - Edge Functions operacionais exigem JWT;
 - nenhuma chave `service_role` está no browser ou nos apps;
 - todos os recursos são separados do CLICK-GO.
@@ -75,7 +93,9 @@ Identificadores:
 - Cliente Android/iOS: `br.com.clickfood.cliente`
 - Entregador Android/iOS: `br.com.clickfood.entregador`
 
-O App Cliente já usa autenticação real, lojas ativas, carrinho, endereço com GPS, frete, checkout, histórico, rastreamento, cancelamento e avaliação. O App Entregador já usa autenticação, cadastro por cidade, aprovação, localização, online/offline, chamados, aceite/recusa e fluxo de entrega.
+O App Cliente usa autenticação real, vitrine com status de funcionamento, logos/fotos, cardápio, personalização de produtos, carrinho, endereço com GPS, frete, checkout, histórico, rastreamento, cancelamento, chat e avaliação. Loja fechada pode ser consultada, mas o envio de pedido é bloqueado visualmente e novamente pelo servidor.
+
+O App Entregador usa autenticação, cadastro por cidade, aprovação, documentos, localização, online/offline, chamados, aceite/recusa, chat, notificações e fluxo de entrega.
 
 ## CI
 
