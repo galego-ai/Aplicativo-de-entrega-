@@ -1,0 +1,43 @@
+name: Remove temporary Efi external validation UI
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/remove-efi-external-validation-ui.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Remove one-time validation UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/admin/app/pagamentos/page.tsx')
+          s=p.read_text()
+          s=s.replace(';const[externalBusy,setExternalBusy]=useState(false);const[externalResult,setExternalResult]=useState<any|null>(null);',';')
+          fn=' async function validateExternalEfi(){setExternalBusy(true);setExternalResult(null);setMessage("");const{data,error}=await supabase.functions.invoke("efi-external-validation",{body:{}});if(error||data?.ok===false){setMessage(`Validação externa Efí falhou${data?.stage?` na etapa ${data.stage}`:""}${data?.providerStatus?` (HTTP ${data.providerStatus})`:""}. Diagnóstico: ${data?.error??"EFI_EXTERNAL_VALIDATION_FAILED"}.`);setExternalBusy(false);return;}setExternalResult(data);setMessage(`Validação externa Efí concluída com sucesso em ${data.environment==="PRODUCTION"?"PRODUÇÃO":"HOMOLOGAÇÃO"}. OAuth, webhook, cobrança, consulta e QR Code responderam corretamente.`);setExternalBusy(false);}\n'
+          s=s.replace(fn,'')
+          external='<button style={{marginLeft:10}} onClick={validateExternalEfi} disabled={externalBusy}>{externalBusy?"TESTANDO NA EFÍ...":"VALIDAÇÃO EXTERNA EFÍ"}</button>{externalResult&&<div className="adminList" style={{marginTop:14}}><div><div><b>Teste externo aprovado</b><small>OAuth: OK • Webhook: {externalResult.webhookRegistered?"OK":"FALHOU"} • Cobrança: {externalResult.chargeCreated?"OK":"FALHOU"} • Consulta: {externalResult.chargeConsulted?"OK":"FALHOU"} • QR Code: {externalResult.qrCodeGenerated?"OK":"FALHOU"}</small><small>Status da cobrança: {externalResult.chargeStatus||"-"} • txid de teste: {externalResult.txid||"-"} • expira em {externalResult.expiresInSeconds||120}s</small></div></div></div>}'
+          s=s.replace(external,'')
+          if 'validateExternalEfi' in s or 'VALIDAÇÃO EXTERNA EFÍ' in s or 'externalBusy' in s or 'externalResult' in s:
+              raise SystemExit('temporary external validation UI still present')
+          p.write_text(s)
+          PY
+      - name: Validate admin build
+        run: |
+          cd apps/admin
+          npm ci
+          npm run build
+      - name: Commit cleanup
+        run: |
+          git config user.name 'galego-ai'
+          git config user.email 'elismarribeiro298@gmail.com'
+          git rm .github/workflows/remove-efi-external-validation-ui.yml
+          git add apps/admin/app/pagamentos/page.tsx
+          git commit -m 'chore: encerrar validação externa temporária da Efí'
+          git push
