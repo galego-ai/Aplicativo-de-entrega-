@@ -118,3 +118,5 @@ type ProductGroupLink = { product_id:string; option_group_id:string };'''
           git commit -m "feat: conectar fidelidade e resgates aos apps" || exit 0
           git pull --rebase origin main
           git push
+
+# trigger existing workflow
