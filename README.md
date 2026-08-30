@@ -72,7 +72,9 @@ O CI valida build do Painel Matriz, build do Painel Lojista e type-check dos apl
 
 A arquitetura aceita provedores configuráveis para `PIX`, `CREDIT_CARD` e `DEBIT_CARD`. A Matriz possui uma configuração administrativa que registra somente nome do provedor, ambiente, métodos e estado operacional.
 
-**API keys, client secrets, certificados e tokens nunca são armazenados nessa configuração.** Credenciais reais devem ser instaladas exclusivamente como Secrets do backend/Edge Functions. Enquanto nenhum gateway real estiver conectado, o checkout do App Cliente permanece operacional com dinheiro.
+A integração Efí PIX possui geração e reutilização segura de cobrança, QR Code e Pix Copia e Cola, reconciliação direta de status, confirmação idempotente por webhook, validação de valor recebido, expiração automática de cobranças abandonadas e devolução PIX idempotente. Cancelamentos/rejeições elegíveis podem solicitar devolução automaticamente; o webhook também reconcilia o estado da devolução e a liquidação atualiza atomicamente estorno, pagamento, pedido e cobrança. O App Cliente exibe o estado do pagamento e da devolução e permite reconciliar uma devolução pendente sem criar estorno duplicado.
+
+**API keys, client secrets, certificados e tokens nunca são armazenados nessa configuração.** Credenciais reais permanecem exclusivamente em Secrets do backend/Edge Functions. Cartões continuam previstos pela camada de gateway, mas não são anunciados como ativos enquanto uma integração real de cartão não estiver concluída.
 
 ## Segurança
 
@@ -93,7 +95,7 @@ Identificadores:
 - Cliente Android/iOS: `br.com.clickfood.cliente`
 - Entregador Android/iOS: `br.com.clickfood.entregador`
 
-O App Cliente usa autenticação real, vitrine com status de funcionamento, logos/fotos, cardápio, personalização de produtos, carrinho, endereço com GPS, frete, checkout, histórico, rastreamento, cancelamento, chat e avaliação. Loja fechada pode ser consultada, mas o envio de pedido é bloqueado visualmente e novamente pelo servidor.
+O App Cliente usa autenticação real, vitrine com status de funcionamento, logos/fotos, cardápio, personalização de produtos, carrinho, endereço com GPS, frete, checkout, histórico, rastreamento, cancelamento, status de pagamento/estorno PIX, chat e avaliação. Loja fechada pode ser consultada, mas o envio de pedido é bloqueado visualmente e novamente pelo servidor.
 
 O App Entregador usa autenticação, cadastro por cidade, aprovação, documentos, localização, online/offline, chamados, aceite/recusa, chat, notificações e fluxo de entrega.
 
