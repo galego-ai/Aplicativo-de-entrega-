@@ -2,6 +2,7 @@
   "expo": {
     "name": "CLICK-FOOD Cliente",
     "slug": "click-food-cliente",
+    "scheme": "clickfood-cliente",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
