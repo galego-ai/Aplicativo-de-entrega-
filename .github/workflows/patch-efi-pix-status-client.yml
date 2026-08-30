@@ -31,4 +31,5 @@ jobs:
           git add apps/cliente/App.tsx
           git rm .github/workflows/patch-efi-pix-status-client.yml
           git commit -m "feat: reconciliar PIX Efí no app cliente"
+          git pull --rebase origin main
           git push
