@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-type Receipt={order:any;store:any;customer:any;address:any;items:any[];payment:any;delivery:any};
+type Receipt={order:any;store:any;customer:any;address:any;items:any[];payments?:any[];payment:any;delivery:any};
 const brl=(value:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value||0);
 const dt=(value?:string|null)=>value?new Date(value).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}):"—";
 const paymentLabel:Record<string,string>={CASH:"Dinheiro",PIX:"PIX",CREDIT_CARD:"Crédito",DEBIT_CARD:"Débito",WALLET:"Carteira",OTHER:"Outro"};
@@ -21,7 +21,7 @@ export default function ReciboPage(){
  }
  if(loading)return <main style={s.page}><div style={s.paper}>Carregando recibo...</div></main>;
  if(!receipt)return <main style={s.page}><div style={s.paper}><h1>CLICK-FOOD</h1><p>{message}</p><a href="/">Voltar ao painel</a></div></main>;
- const r=receipt,o=r.order;
+ const r=receipt,o=r.order;const receiptPayments=r.payments?.length?r.payments:r.payment?[r.payment]:[];
  return <main style={s.page}>
   <style>{`@media print{body{background:#fff!important}.noPrint{display:none!important}.receiptPaper{box-shadow:none!important;border:none!important;margin:0!important;max-width:none!important;padding:10mm!important}}`}</style>
   <div className="noPrint" style={s.actions}><a href="/" style={s.back}>← Painel</a><button onClick={()=>window.print()} style={s.print}>IMPRIMIR / SALVAR PDF</button></div>
@@ -32,7 +32,7 @@ export default function ReciboPage(){
    {r.address&&<section style={s.box}><span style={s.label}>Endereço de entrega</span><div>{r.address.street}, {r.address.number||"s/n"}{r.address.complement?` • ${r.address.complement}`:""}</div>{r.address.district&&<div>{r.address.district}{r.address.postal_code?` • CEP ${r.address.postal_code}`:""}</div>}{r.address.reference&&<div style={s.small}>Referência: {r.address.reference}</div>}</section>}
    <section><h2 style={s.sectionTitle}>Itens</h2>{r.items.map(item=><div key={item.id} style={s.item}><div style={{flex:1}}><b>{item.quantity}× {item.name}</b>{item.options?.map((opt:any,index:number)=><div key={index} style={s.small}>+ {opt.quantity}× {opt.name}{Number(opt.price)>0?` (${brl(Number(opt.price)*Number(opt.quantity))})`:""}</div>)}{item.notes&&<div style={s.small}>Obs.: {item.notes}</div>}</div><b>{brl(item.totalPrice)}</b></div>)}</section>
    <section style={s.totals}><div><span>Subtotal</span><b>{brl(o.subtotal)}</b></div><div><span>Entrega</span><b>{brl(o.delivery_fee)}</b></div>{o.discount>0&&<div><span>Desconto</span><b>- {brl(o.discount)}</b></div>}<div style={s.grand}><span>TOTAL</span><b>{brl(o.total)}</b></div></section>
-   <section style={s.box}><span style={s.label}>Pagamento</span><div><b>{paymentLabel[r.payment?.method]??r.payment?.method??"Não informado"}</b> • {r.payment?.status??o.payment_status}{r.payment?.provider?` • ${r.payment.provider}`:""}</div>{r.payment?.paidAt&&<div style={s.small}>Pago em {dt(r.payment.paidAt)}</div>}{r.payment?.transactionId&&<div style={s.code}>Ref.: {r.payment.transactionId}</div>}</section>
+   <section style={s.box}><span style={s.label}>{receiptPayments.length>1?"Pagamentos":"Pagamento"}</span>{receiptPayments.length?receiptPayments.map((payment:any,index:number)=><div key={`${payment.method}-${index}`} style={index?{marginTop:10,paddingTop:10,borderTop:"1px dashed #ddd"}:undefined}><div><b>{paymentLabel[payment.method]??payment.method??"Não informado"}</b> • {brl(Number(payment.amount??0))} • {payment.status??o.payment_status}{payment.provider?` • ${payment.provider}`:""}</div>{payment.paidAt&&<div style={s.small}>Pago em {dt(payment.paidAt)}</div>}{payment.transactionId&&<div style={s.code}>Ref.: {payment.transactionId}</div>}</div>):<div><b>Não informado</b> • {o.payment_status}</div>}</section>
    {r.delivery&&<section style={s.box}><span style={s.label}>Entrega</span><div><b>{r.delivery.status}</b>{r.delivery.driver?.name?` • ${r.delivery.driver.name}`:""}</div><div style={s.small}>Retirada: {dt(r.delivery.pickupAt)} • Entrega: {dt(r.delivery.deliveredAt)}</div></section>}
    {o.customer_notes&&<section style={s.box}><span style={s.label}>Observações do cliente</span><div>{o.customer_notes}</div></section>}
    <footer style={s.footer}>CLICK-FOOD • comprovante operacional do pedido • este documento não substitui documento fiscal quando exigido por lei.</footer>
