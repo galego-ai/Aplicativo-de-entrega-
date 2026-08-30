@@ -31,5 +31,11 @@ jobs:
       - name: Type-check App Cliente
         run: npx tsc --noEmit -p apps/cliente/tsconfig.json
 
+      - name: Validate Expo config Cliente
+        run: cd apps/cliente && npx expo config --type public >/dev/null
+
       - name: Type-check App Entregador
         run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+
+      - name: Validate Expo config Entregador
+        run: cd apps/entregador && npx expo config --type public >/dev/null
