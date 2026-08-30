@@ -2,6 +2,14 @@ import { withSupabase } from "npm:@supabase/server@1.4.1";
 
 type Body = { orderId: string; reason: string };
 
+async function requestRefund(req:Request,orderId:string,reason:string){
+  const auth=req.headers.get("Authorization")??"";
+  if(!auth)return{ok:false,data:{error:"AUTH_REQUIRED"}};
+  const response=await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/efi-pix-refund`,{method:"POST",headers:{Authorization:auth,"Content-Type":"application/json"},body:JSON.stringify({orderId,reason})});
+  let data:any={};try{data=await response.json()}catch{}
+  return{ok:response.ok,data};
+}
+
 export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
     if (req.method !== "POST") return Response.json({ error: "METHOD_NOT_ALLOWED" }, { status: 405 });
@@ -20,12 +28,9 @@ export default {
     if (!order || order.customer_id !== userId) return Response.json({ error: "ORDER_NOT_FOUND" }, { status: 404 });
 
     const cancellable = ["PENDING_PAYMENT", "WAITING_STORE", "ACCEPTED", "PREPARING", "READY", "WAITING_DRIVER"];
-    if (!cancellable.includes(order.status)) {
-      return Response.json({ error: "CANCELLATION_REQUIRES_SUPPORT", currentStatus: order.status }, { status: 409 });
-    }
-    if (["PAID", "PARTIALLY_REFUNDED"].includes(order.payment_status)) {
-      return Response.json({ error: "PAID_ORDER_REQUIRES_REFUND_FLOW" }, { status: 409 });
-    }
+    if (!cancellable.includes(order.status)) return Response.json({ error: "CANCELLATION_REQUIRES_SUPPORT", currentStatus: order.status }, { status: 409 });
+    const paidRefundRequired=["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status);
+    if(paidRefundRequired&&order.status!=="WAITING_STORE")return Response.json({error:"PAID_ORDER_REQUIRES_REFUND_FLOW",currentStatus:order.status},{status:409});
 
     const { data: updatedOrder, error: transitionError } = await ctx.supabaseAdmin.rpc("transition_order_atomic", {
       p_order_id: order.id,
@@ -48,6 +53,10 @@ export default {
     const recipients = [...new Set((members ?? []).map((m) => m.user_id))];
     if (recipients.length) await ctx.supabaseAdmin.from("notifications").insert(recipients.map((memberId) => ({ user_id: memberId, notification_type: "ORDER_CANCELLED", title: "Pedido cancelado pelo cliente", body: reason.slice(0, 160), data: { orderId: order.id } })));
 
-    return Response.json({ order: updatedOrder });
+    if(paidRefundRequired){
+      const refund=await requestRefund(req,order.id,reason);
+      return Response.json({order:updatedOrder,refundRequired:true,refundPending:!refund.ok||!["COMPLETED","FAILED"].includes(String(refund.data?.refundStatus??"")),refundStatus:refund.data?.refundStatus??"PENDING",refundError:refund.ok?null:(refund.data?.error??"EFI_PIX_REFUND_FAILED")});
+    }
+    return Response.json({ order: updatedOrder, refundRequired:false });
   }),
 };
