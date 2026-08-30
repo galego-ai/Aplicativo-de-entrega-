@@ -15,8 +15,8 @@ jobs:
         with:
           fetch-depth: 0
       - name: Patch App Cliente
-        shell: python
         run: |
+          python - <<'PY'
           from pathlib import Path
           p = Path('apps/cliente/App.tsx')
           s = p.read_text(encoding='utf-8')
@@ -30,28 +30,28 @@ jobs:
 
           anchor = '  async function refreshPix(orderId:string){\n'
           fn = '''  async function loadPendingCard(currentOrders:Order[]){
-    if(!session)return;
-    const pending=currentOrders.find(order=>order.status==="PENDING_PAYMENT"&&order.payment_status==="PENDING");
-    if(!pending){
-      setPendingCardOrder(current=>current&&currentOrders.some(order=>order.id===current.orderId&&order.status==="PENDING_PAYMENT")?current:null);
-      return;
-    }
-    const{data:payment}=await supabase.from("payments").select("method").eq("order_id",pending.id).order("created_at",{ascending:false}).limit(1).maybeSingle();
-    if(payment?.method!=="CREDIT_CARD")return;
-    const{data:charge}=await supabase.from("efi_card_charges").select("charge_id,status").eq("order_id",pending.id).maybeSingle();
-    if(charge?.charge_id){
-      const statusResult=await supabase.functions.invoke("efi-card-status",{body:{orderId:pending.id}});
-      const status=String(statusResult.data?.status??charge.status??"").toUpperCase();
-      const paid=Boolean(statusResult.data?.paid||status==="PAID");
-      const approved=Boolean(statusResult.data?.approved||status==="APPROVED");
-      setPendingCardOrder(null);
-      if(!statusResult.error&&paid)setMessage("Pagamento no cartão confirmado! Seu pedido foi enviado para a loja.");
-      else if(!statusResult.error&&approved)setMessage("Cartão aprovado pela Efí. Aguardando a confirmação final do pagamento.");
-      else if(!statusResult.error&&["WAITING","PROCESSING"].includes(status))setMessage("Pagamento no cartão em processamento. A Efí está confirmando o status.");
-      return;
-    }
-    if(cardTokenization)setPendingCardOrder(current=>current?.orderId===pending.id?current:{orderId:pending.id,total:pending.total});
-  }
+            if(!session)return;
+            const pending=currentOrders.find(order=>order.status==="PENDING_PAYMENT"&&order.payment_status==="PENDING");
+            if(!pending){
+              setPendingCardOrder(current=>current&&currentOrders.some(order=>order.id===current.orderId&&order.status==="PENDING_PAYMENT")?current:null);
+              return;
+            }
+            const{data:payment}=await supabase.from("payments").select("method").eq("order_id",pending.id).order("created_at",{ascending:false}).limit(1).maybeSingle();
+            if(payment?.method!=="CREDIT_CARD")return;
+            const{data:charge}=await supabase.from("efi_card_charges").select("charge_id,status").eq("order_id",pending.id).maybeSingle();
+            if(charge?.charge_id){
+              const statusResult=await supabase.functions.invoke("efi-card-status",{body:{orderId:pending.id}});
+              const status=String(statusResult.data?.status??charge.status??"").toUpperCase();
+              const paid=Boolean(statusResult.data?.paid||status==="PAID");
+              const approved=Boolean(statusResult.data?.approved||status==="APPROVED");
+              setPendingCardOrder(null);
+              if(!statusResult.error&&paid)setMessage("Pagamento no cartão confirmado! Seu pedido foi enviado para a loja.");
+              else if(!statusResult.error&&approved)setMessage("Cartão aprovado pela Efí. Aguardando a confirmação final do pagamento.");
+              else if(!statusResult.error&&["WAITING","PROCESSING"].includes(status))setMessage("Pagamento no cartão em processamento. A Efí está confirmando o status.");
+              return;
+            }
+            if(cardTokenization)setPendingCardOrder(current=>current?.orderId===pending.id?current:{orderId:pending.id,total:pending.total});
+          }
 
 '''
           if '  async function loadPendingCard(currentOrders:Order[]){' not in s:
@@ -67,6 +67,7 @@ jobs:
               s = s.replace(old_load, new_load, 1)
 
           p.write_text(s, encoding='utf-8')
+          PY
       - name: Commit patch
         run: |
           if git diff --quiet; then exit 0; fi
