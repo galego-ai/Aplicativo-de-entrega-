@@ -2,7 +2,9 @@ import { withSupabase } from "npm:@supabase/server@1.4.1";
 
 const required=(name:string)=>{const v=Deno.env.get(name);if(!v)throw new Error(`MISSING_SECRET_${name}`);return v;};
 const baseUrl=()=>Deno.env.get("EFI_PIX_SANDBOX")==="false"?"https://pix.api.efipay.com.br":"https://pix-h.api.efipay.com.br";
-function httpClient(){return Deno.createHttpClient({cert:required("EFI_PIX_CERT_PEM"),key:required("EFI_PIX_KEY_PEM")});}
+function decodeB64(name:string){const value=Deno.env.get(name);if(!value)return null;try{const binary=atob(value.trim());const bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));return new TextDecoder().decode(bytes);}catch{throw new Error(`INVALID_SECRET_${name}`)}}
+function tlsSecret(pemName:string,b64Name:string){return decodeB64(b64Name)??required(pemName);}
+function httpClient(){return Deno.createHttpClient({cert:tlsSecret("EFI_PIX_CERT_PEM","EFI_PIX_CERT_B64"),key:tlsSecret("EFI_PIX_KEY_PEM","EFI_PIX_KEY_B64")});}
 async function token(client:Deno.HttpClient){const id=required("EFI_PIX_CLIENT_ID"),secret=required("EFI_PIX_CLIENT_SECRET");const res=await fetch(`${baseUrl()}/oauth/token`,{method:"POST",headers:{Authorization:`Basic ${btoa(`${id}:${secret}`)}`,"Content-Type":"application/json"},body:JSON.stringify({grant_type:"client_credentials"}),client} as any);const data=await res.json();if(!res.ok||!data.access_token)throw new Error(`EFI_OAUTH_${res.status}`);return String(data.access_token);}
 async function api(client:Deno.HttpClient,access:string,path:string,init:RequestInit={}){const res=await fetch(`${baseUrl()}${path}`,{...init,headers:{Authorization:`Bearer ${access}`,"Content-Type":"application/json",...(init.headers??{})},client} as any);const text=await res.text();let data:any={};try{data=text?JSON.parse(text):{}}catch{data={raw:text}}if(!res.ok){const e:any=new Error(`EFI_API_${res.status}`);e.payload=data;throw e;}return data;}
 
@@ -21,8 +23,8 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  const{data:existing}=await ctx.supabaseAdmin.from("efi_pix_charges").select("txid,brcode,qr_image,visualization_url,status,expires_at").eq("payment_id",payment.id).maybeSingle();
  if(existing?.status==="ACTIVE"&&new Date(existing.expires_at).getTime()>Date.now()&&existing.brcode)return Response.json({charge:existing,reused:true});
  const txid=String(payment.id).replaceAll("-","").slice(0,35);const expiration=900;const amount=Number(payment.amount).toFixed(2);const pixKey=required("EFI_PIX_KEY");
- const client=httpClient();try{
-  const access=await token(client);
+ let client:Deno.HttpClient|undefined;try{
+  client=httpClient();const access=await token(client);
   const cob=await api(client,access,`/v2/cob/${encodeURIComponent(txid)}`,{method:"PUT",body:JSON.stringify({calendario:{expiracao:expiration},valor:{original:amount},chave:pixKey,solicitacaoPagador:`CLICK-FOOD pedido #${order.order_number}`})});
   const locId=Number(cob?.loc?.id??0);if(!locId)throw new Error("EFI_LOCATION_MISSING");
   const qr=await api(client,access,`/v2/loc/${locId}/qrcode`,{method:"GET"});
@@ -32,5 +34,5 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   await ctx.supabaseAdmin.from("payments").update({provider:"EFI",status:"PROCESSING",provider_transaction_id:txid}).eq("id",payment.id);
   await ctx.supabaseAdmin.from("payment_attempts").insert({payment_id:payment.id,request_reference:txid,status:"CREATED",provider_payload:{locationId:locId,environment:config.environment}});
   return Response.json({charge,reused:false},{status:201});
- }catch(e:any){await ctx.supabaseAdmin.from("payment_attempts").insert({payment_id:payment.id,request_reference:txid,status:"FAILED",error_code:String(e?.message??"EFI_ERROR").slice(0,120),error_message:"Falha ao gerar cobrança PIX Efí",provider_payload:e?.payload??null});return Response.json({error:"EFI_PIX_CREATE_FAILED"},{status:502});}finally{client.close();}
+ }catch(e:any){await ctx.supabaseAdmin.from("payment_attempts").insert({payment_id:payment.id,request_reference:txid,status:"FAILED",error_code:String(e?.message??"EFI_ERROR").slice(0,120),error_message:"Falha ao gerar cobrança PIX Efí",provider_payload:e?.payload??null});return Response.json({error:"EFI_PIX_CREATE_FAILED"},{status:502});}finally{client?.close();}
 })};
