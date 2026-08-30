@@ -14,6 +14,7 @@ import ProductCustomizer, {
 } from "./ProductCustomizer";
 import PixPaymentCard, { type PixCharge } from "./PixPaymentCard";
 import CustomerSupport from "./CustomerSupport";
+import EfiCardPayment, { type CardTokenizationConfig, type PendingCardOrder } from "./EfiCardPayment";
 
 type Tab = "home" | "search" | "orders" | "support" | "profile";
 type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean };
@@ -24,7 +25,7 @@ type Order = { id:string; order_number:number; store_id:string; address_id:strin
 type RefundInfo = { payment_id:string; status:string; amount:number; reason:string|null; created_at:string; completed_at:string|null };
 type CartItem = CustomizedItem & { cartKey:string };
 type DeliveryType = "DELIVERY"|"PICKUP";
-type PaymentMethod = "CASH"|"PIX";
+type PaymentMethod = "CASH"|"PIX"|"CREDIT_CARD";
 type Tracking = { orderId:string; deliveryId:string; deliveryStatus:string; driverId:string|null; driverLat:number|null; driverLng:number|null; storeLat:number|null; storeLng:number|null; destinationLat:number|null; destinationLng:number|null };
 type DriverCard = { id:string; name:string; avatarUrl:string|null; rating:number; vehicle:{type:string;brand:string|null;model:string|null;plate:string|null}|null };
 type LoyaltyReward = { id:string; name:string; points_cost:number; reward_type:string; reward_value:number|null; product_id:string|null; active:boolean };
@@ -37,7 +38,7 @@ const terminalStatuses=new Set(["DELIVERED","CANCELLED","REJECTED"]);
 const cancellableStatuses=new Set(["PENDING_PAYMENT","WAITING_STORE","ACCEPTED","PREPARING","READY","WAITING_DRIVER"]);
 const statusLabel:Record<string,string>={PENDING_PAYMENT:"Aguardando pagamento",WAITING_STORE:"Aguardando a loja",ACCEPTED:"Pedido aceito",PREPARING:"Em preparação",READY:"Pronto",WAITING_DRIVER:"Procurando entregador",DRIVER_ASSIGNED:"Entregador confirmado",DRIVER_TO_STORE:"Entregador indo à loja",PICKUP_CONFIRMED:"Pedido retirado",DRIVER_TO_CUSTOMER:"A caminho de você",DRIVER_AT_CUSTOMER:"Seu motorista chegou",DELIVERED:"Entregue",CANCELLED:"Cancelado",REJECTED:"Recusado"};
 const paymentStatusLabel:Record<string,string>={PENDING:"Pagamento pendente",PAID:"Pagamento confirmado",FAILED:"Pagamento falhou",CANCELLED:"Pagamento cancelado",PARTIALLY_REFUNDED:"Estorno parcial",REFUNDED:"Estornado"};
-const refundStatusLabel:Record<string,string>={PENDING:"Estorno solicitado",PROCESSING:"Estorno em processamento",COMPLETED:"PIX devolvido",FAILED:"Falha no estorno",CANCELLED:"Estorno cancelado"};
+const refundStatusLabel:Record<string,string>={PENDING:"Estorno solicitado",PROCESSING:"Estorno em processamento",COMPLETED:"Pagamento devolvido",FAILED:"Falha no estorno",CANCELLED:"Estorno cancelado"};
 
 function AuthScreen(){
   const[mode,setMode]=useState<"login"|"register">("login");
@@ -87,6 +88,7 @@ export default function App(){
   const[variants,setVariants]=useState<CustomerVariant[]>([]); const[optionGroups,setOptionGroups]=useState<CustomerOptionGroup[]>([]); const[productOptions,setProductOptions]=useState<CustomerOption[]>([]); const[productGroupLinks,setProductGroupLinks]=useState<ProductGroupLink[]>([]); const[promotions,setPromotions]=useState<CustomerPromotion[]>([]); const[selectedProduct,setSelectedProduct]=useState<ProductWithMedia|null>(null);
   const[addresses,setAddresses]=useState<Address[]>([]); const[selectedAddressId,setSelectedAddressId]=useState(""); const[deliveryType,setDeliveryType]=useState<DeliveryType>("DELIVERY"); const[coupon,setCoupon]=useState(""); const[placing,setPlacing]=useState(false);
   const[paymentMethod,setPaymentMethod]=useState<PaymentMethod>("CASH"); const[availablePaymentMethods,setAvailablePaymentMethods]=useState<PaymentMethod[]>(["CASH"]); const[pixCharge,setPixCharge]=useState<PixCharge|null>(null); const[pixBusy,setPixBusy]=useState(false);
+  const[cardTokenization,setCardTokenization]=useState<CardTokenizationConfig|null>(null); const[pendingCardOrder,setPendingCardOrder]=useState<PendingCardOrder|null>(null);
   const[refundByOrder,setRefundByOrder]=useState<Record<string,RefundInfo>>({}); const[refundBusyOrderId,setRefundBusyOrderId]=useState<string|null>(null);
   const[loyaltyWallets,setLoyaltyWallets]=useState<LoyaltyWallet[]>([]); const[loyaltyTotal,setLoyaltyTotal]=useState(0); const[loyaltyBusyReward,setLoyaltyBusyReward]=useState<string|null>(null);
   const[addressForm,setAddressForm]=useState({label:"Casa",street:"",number:"",district:"",reference:""}); const[savingAddress,setSavingAddress]=useState(false);
@@ -131,9 +133,11 @@ export default function App(){
 
   async function loadPaymentMethods(){
     const{data,error}=await supabase.functions.invoke("payment-methods",{body:{}});
-    if(error||data?.error){setAvailablePaymentMethods(["CASH"]);setPaymentMethod("CASH");return;}
-    const methods=(data?.methods??[]).filter((m:string)=>m==="CASH"||m==="PIX") as PaymentMethod[];
+    if(error||data?.error){setAvailablePaymentMethods(["CASH"]);setPaymentMethod("CASH");setCardTokenization(null);return;}
+    const methods=(data?.methods??[]).filter((m:string)=>m==="CASH"||m==="PIX"||m==="CREDIT_CARD") as PaymentMethod[];
     const next:PaymentMethod[]=methods.includes("CASH")?methods:(["CASH",...methods] as PaymentMethod[]);
+    const tokenization=data?.cardTokenization;
+    setCardTokenization(tokenization?.provider==="EFI"&&tokenization?.accountId?tokenization as CardTokenizationConfig:null);
     setAvailablePaymentMethods(next);setPaymentMethod(current=>next.includes(current)?current:"CASH");
   }
 
@@ -166,7 +170,7 @@ export default function App(){
   async function loadRefunds(currentOrders:Order[]){
     const orderIds=currentOrders.map(order=>order.id);
     if(!orderIds.length){setRefundByOrder({});return;}
-    const{data:payments,error:paymentError}=await supabase.from("payments").select("id,order_id").in("order_id",orderIds).eq("method","PIX");
+    const{data:payments,error:paymentError}=await supabase.from("payments").select("id,order_id").in("order_id",orderIds).in("method",["PIX","CREDIT_CARD"]);
     if(paymentError||!payments?.length){setRefundByOrder({});return;}
     const paymentIds=payments.map((payment:any)=>String(payment.id));
     const paymentToOrder=new Map(payments.map((payment:any)=>[String(payment.id),String(payment.order_id)]));
@@ -352,10 +356,34 @@ export default function App(){
       const charge=pixResult.data.charge;
       setPixCharge({orderId,txid:charge.txid,brcode:charge.brcode,status:charge.status,expires_at:charge.expires_at});
       setMessage(`PIX gerado! Total ${brl(total)}. Pague pelo QR Code ou Pix Copia e Cola.`);
+    }else if(paymentMethod==="CREDIT_CARD"){
+      if(!cardTokenization){
+        await supabase.functions.invoke("customer-cancel-order",{body:{orderId,reason:"Tokenização de cartão não está disponível"}});
+        setMessage("O cartão ficou indisponível antes do pagamento. O pedido foi cancelado e nenhum dado de cartão foi enviado.");
+        await loadOrders();setPlacing(false);return;
+      }
+      setPendingCardOrder({orderId,total});
+      setMessage(`Pedido criado. Finalize o pagamento seguro de ${brl(total)} com cartão.`);
+      setPlacing(false);return;
     }else{
       setMessage(`Pedido enviado! Total ${brl(total)}${deliveryFee?` • entrega calculada ${brl(deliveryFee)}`:""}${promo>0?` • economia ${brl(promo)}`:""}.`);
     }
     setCart([]);setCoupon("");setSelectedStore(null);setSelectedProduct(null);setTab("orders");await loadOrders();setPlacing(false);
+  }
+
+  async function completeCardPayment(result:{paid:boolean;approved:boolean;status:string}){
+    setPendingCardOrder(null);
+    setMessage(result.paid?"Pagamento no cartão confirmado! Seu pedido foi enviado para a loja.":"Cartão aprovado pela Efí. O pedido seguirá para a loja assim que a confirmação final chegar.");
+    setCart([]);setCoupon("");setSelectedStore(null);setSelectedProduct(null);setTab("orders");await loadOrders();
+  }
+
+  async function cancelPendingCardPayment(){
+    const pending=pendingCardOrder;if(!pending)return;
+    const{data,error}=await supabase.functions.invoke("customer-cancel-order",{body:{orderId:pending.orderId,reason:"Pagamento com cartão cancelado pelo cliente antes da conclusão"}});
+    setPendingCardOrder(null);setCart([]);setCoupon("");setSelectedStore(null);setSelectedProduct(null);setTab("orders");
+    if(error||data?.error)setMessage("Não foi possível cancelar a cobrança imediatamente. O pedido ficará em acompanhamento até a confirmação do status.");
+    else setMessage("Pagamento com cartão cancelado. Nenhum cartão foi armazenado pelo CLICK-FOOD.");
+    await loadOrders();
   }
 
   function cancelOrder(order:Order){
@@ -369,7 +397,7 @@ export default function App(){
         }
         if(data?.refundRequired){
           const refundStatus=String(data?.refundStatus??"PENDING");
-          setMessage(refundStatus==="COMPLETED"?"Pedido cancelado e PIX devolvido com sucesso.":refundStatus==="FAILED"?"Pedido cancelado. A devolução do PIX precisa ser tentada novamente.":"Pedido cancelado. A devolução do PIX foi solicitada e está sendo processada.");
+          setMessage(refundStatus==="COMPLETED"?"Pedido cancelado e pagamento devolvido com sucesso.":refundStatus==="FAILED"?"Pedido cancelado. A devolução do pagamento precisa ser tentada novamente.":"Pedido cancelado. A devolução do pagamento foi solicitada e está sendo processada.");
         }else setMessage("Pedido cancelado.");
         await loadOrders();
       }},
@@ -378,10 +406,10 @@ export default function App(){
 
   async function reconcileRefund(order:Order){
     setRefundBusyOrderId(order.id);setMessage("");
-    const{data,error}=await supabase.functions.invoke("efi-pix-refund",{body:{orderId:order.id,reason:"Reconciliação de estorno solicitada pelo cliente"}});
+    const{data,error}=await supabase.functions.invoke("payment-refund",{body:{orderId:order.id,reason:"Reconciliação de estorno solicitada pelo cliente"}});
     if(error||data?.error){setMessage("Não foi possível consultar o estorno agora. Tente novamente em alguns minutos.");setRefundBusyOrderId(null);return;}
     const status=String(data?.refundStatus??"");
-    setMessage(status==="COMPLETED"?"PIX devolvido com sucesso.":status==="FAILED"?"A Efí não concluiu a devolução. Você pode tentar novamente ou abrir o suporte.":"A devolução do PIX continua em processamento.");
+    setMessage(status==="COMPLETED"?"Pagamento devolvido com sucesso.":status==="FAILED"?"A devolução não foi concluída. Você pode tentar novamente ou abrir o suporte.":"A devolução do pagamento continua em processamento.");
     await loadOrders();setRefundBusyOrderId(null);
   }
 
@@ -480,11 +508,14 @@ export default function App(){
       <View style={styles.segment}>
         <Pressable style={[styles.segmentButton,paymentMethod==="CASH"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CASH")}><Text style={paymentMethod==="CASH"?styles.segmentActiveText:undefined}>Dinheiro</Text></Pressable>
         {availablePaymentMethods.includes("PIX")&&<Pressable style={[styles.segmentButton,paymentMethod==="PIX"&&styles.segmentActive]} onPress={()=>setPaymentMethod("PIX")}><Text style={paymentMethod==="PIX"?styles.segmentActiveText:undefined}>PIX • Efí</Text></Pressable>}
+        {availablePaymentMethods.includes("CREDIT_CARD")&&cardTokenization&&<Pressable style={[styles.segmentButton,paymentMethod==="CREDIT_CARD"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CREDIT_CARD")}><Text style={paymentMethod==="CREDIT_CARD"?styles.segmentActiveText:undefined}>Cartão • Efí</Text></Pressable>}
       </View>
       {!availablePaymentMethods.includes("PIX")&&<Text style={styles.meta}>PIX será exibido automaticamente quando a Efí Bank estiver ativada pela Matriz.</Text>}
-      <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
+      <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão, número e CVV são tokenizados pela Efí dentro de uma tela segura e não ficam armazenados no CLICK-FOOD.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
       <Pressable style={[styles.checkout,(!cart.length||!selectedStore.open_now)&&styles.disabled]} disabled={!cart.length||placing||!selectedStore.open_now} onPress={placeOrder}><Text style={styles.checkoutText}>{!selectedStore.open_now?"LOJA FECHADA":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
-    </ScrollView></SafeAreaView>;
+    </ScrollView>
+    {pendingCardOrder&&cardTokenization&&<EfiCardPayment visible config={cardTokenization} order={pendingCardOrder} defaults={{name:String(session.user.user_metadata?.full_name??""),email:String(session.user.email??""),phone:String(session.user.user_metadata?.phone??"")}} onCancel={cancelPendingCardPayment} onComplete={completeCardPayment}/>}
+    </SafeAreaView>;
   }
 
   const home=<ScrollView contentContainerStyle={styles.scroll}>
