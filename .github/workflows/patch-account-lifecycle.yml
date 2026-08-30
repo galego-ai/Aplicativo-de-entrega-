@@ -1,0 +1,63 @@
+name: Patch account lifecycle
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch mobile account UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if new in text:
+                  return text
+              if old not in text:
+                  raise SystemExit(f"anchor not found: {label}")
+              return text.replace(old, new, 1)
+
+          p=Path('apps/cliente/App.tsx')
+          s=p.read_text()
+          s=replace_once(s,
+            'import EfiCardPayment, { type CardTokenizationConfig, type PendingCardOrder } from "./EfiCardPayment";',
+            'import EfiCardPayment, { type CardTokenizationConfig, type PendingCardOrder } from "./EfiCardPayment";\nimport { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";',
+            'cliente import')
+          anchor='<Pressable onPress={()=>{setMode(mode==="login"?"register":"login");setMessage("");}}><Text style={styles.switchText}>{mode==="login"?"Ainda não tenho conta":"Já tenho uma conta"}</Text></Pressable>'
+          s=replace_once(s,anchor,anchor+'\n    {mode==="login"&&<PasswordResetLink scheme="clickfood-cliente"/>}','cliente reset')
+          sign='<Pressable style={styles.signOut} onPress={()=>supabase.auth.signOut()}><Text style={styles.signOutText}>SAIR</Text></Pressable>'
+          s=replace_once(s,sign,'<DeleteAccountButton/>\n    '+sign,'cliente delete')
+          p.write_text(s)
+
+          p=Path('apps/entregador/App.tsx')
+          s=p.read_text()
+          s=replace_once(s,
+            'import { supabase } from "./supabase";',
+            'import { supabase } from "./supabase";\nimport { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";',
+            'entregador import')
+          anchor='<Pressable onPress={()=>{setMode(mode === "login" ? "register" : "login");setMessage("");}}><Text style={styles.switchText}>{mode === "login" ? "Quero me cadastrar como entregador" : "Já tenho uma conta"}</Text></Pressable>'
+          s=replace_once(s,anchor,anchor+'\n    {mode==="login"&&<PasswordResetLink scheme="clickfood-entregador"/>}','entregador reset')
+          s=s.replace('password.length < 6','password.length < 8',1).replace('senha com pelo menos 6 caracteres','senha com pelo menos 8 caracteres',1)
+          reg_sign='<Pressable onPress={()=>supabase.auth.signOut()}><Text style={styles.switchText}>Sair da conta</Text></Pressable>'
+          s=replace_once(s,reg_sign,reg_sign+'\n    <DeleteAccountButton/>','entregador registro delete')
+          pending='<Pressable onPress={()=>supabase.auth.signOut()}><Text style={styles.switchText}>Sair</Text></Pressable></View></SafeAreaView>;'
+          s=replace_once(s,pending,'<Pressable onPress={()=>supabase.auth.signOut()}><Text style={styles.switchText}>Sair</Text></Pressable><DeleteAccountButton/></View></SafeAreaView>;','entregador pending delete')
+          profile='<View style={styles.profileCard}><Text style={styles.listTitle}>{session.user.user_metadata?.full_name??"Entregador CLICK-FOOD"}</Text><Text style={styles.listMeta}>{session.user.email}</Text><Text style={styles.listMeta}>Status: {driver.status}</Text></View><Pressable style={styles.secondary} onPress={()=>supabase.auth.signOut()}><Text style={styles.secondaryText}>SAIR</Text></Pressable>'
+          s=replace_once(s,profile,'<View style={styles.profileCard}><Text style={styles.listTitle}>{session.user.user_metadata?.full_name??"Entregador CLICK-FOOD"}</Text><Text style={styles.listMeta}>{session.user.email}</Text><Text style={styles.listMeta}>Status: {driver.status}</Text></View><DeleteAccountButton/><Pressable style={styles.secondary} onPress={()=>supabase.auth.signOut()}><Text style={styles.secondaryText}>SAIR</Text></Pressable>','entregador profile delete')
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/cliente/App.tsx apps/entregador/App.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat: integrar recuperação e exclusão de conta nos apps"
+          git push
