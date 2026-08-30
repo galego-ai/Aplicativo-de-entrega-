@@ -1,6 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rankDriverCandidates, calculateDriverEarning, offerExpiresAt } from "../src/delivery-engine.ts";
+import { readFileSync } from "node:fs";
+import {
+  rankDriverCandidates,
+  calculateDriverEarning,
+  offerExpiresAt,
+  allowedDriverDeliveryTransitions,
+  canDriverTransitionDelivery,
+  assertDriverDeliveryTransition,
+} from "../src/delivery-engine.ts";
+import type { DeliveryStatus } from "../src/index.ts";
 
 test("rankDriverCandidates prioriza melhor score e descarta candidatos inválidos", () => {
   const ranked = rankDriverCandidates([
@@ -31,4 +40,43 @@ test("offerExpiresAt aplica timeout e valida limites", () => {
   assert.equal(offerExpiresAt(offeredAt, 30).toISOString(), "2026-08-30T12:00:30.000Z");
   assert.throws(() => offerExpiresAt(offeredAt, 4), /INVALID_OFFER_TIMEOUT/);
   assert.throws(() => offerExpiresAt(offeredAt, 121), /INVALID_OFFER_TIMEOUT/);
+});
+
+test("máquina compartilhada de entrega cobre fluxo operacional e incidentes", () => {
+  assert.equal(canDriverTransitionDelivery("DRIVER_ASSIGNED", "DRIVER_TO_STORE"), true);
+  assert.equal(canDriverTransitionDelivery("DRIVER_ASSIGNED", "INCIDENT"), true);
+  assert.equal(canDriverTransitionDelivery("PICKUP_CONFIRMED", "DRIVER_TO_CUSTOMER"), true);
+  assert.equal(canDriverTransitionDelivery("DRIVER_AT_CUSTOMER", "CUSTOMER_UNAVAILABLE"), true);
+  assert.equal(canDriverTransitionDelivery("CUSTOMER_UNAVAILABLE", "RETURN_REQUIRED"), true);
+  assert.equal(canDriverTransitionDelivery("DELIVERED", "DRIVER_TO_STORE"), false);
+  assert.doesNotThrow(() => assertDriverDeliveryTransition("RETURN_REQUIRED", "INCIDENT"));
+  assert.throws(() => assertDriverDeliveryTransition("INCIDENT", "DELIVERED"), /INVALID_DELIVERY_TRANSITION/);
+});
+
+test("contrato SQL das transições dirigidas pelo entregador coincide com o TypeScript", () => {
+  const sql = readFileSync("supabase/migrations/20260830230638_delivery_incident_transition_sync.sql", "utf8");
+  const caseBlock = sql.match(/v_allowed\s*:=\s*case\s+v_delivery\.status([\s\S]*?)else\s+false/i)?.[1];
+  assert.ok(caseBlock, "Bloco de transições não encontrado na migration");
+
+  const parsed = new Map<string, string[]>();
+  const rule = /when\s+'([^']+)'\s+then\s+p_next_status\s+in\s*\(([^)]+)\)/gi;
+  for (const match of caseBlock.matchAll(rule)) {
+    parsed.set(match[1], [...match[2].matchAll(/'([^']+)'/g)].map((item) => item[1]));
+  }
+
+  const controlled: DeliveryStatus[] = [
+    "DRIVER_ASSIGNED",
+    "DRIVER_TO_STORE",
+    "DRIVER_AT_STORE",
+    "PICKUP_CONFIRMED",
+    "DRIVER_TO_CUSTOMER",
+    "DRIVER_AT_CUSTOMER",
+    "CUSTOMER_UNAVAILABLE",
+    "RETURN_REQUIRED",
+  ];
+
+  assert.equal(parsed.size, controlled.length);
+  for (const status of controlled) {
+    assert.deepEqual(parsed.get(status), [...allowedDriverDeliveryTransitions(status)], `Divergência em ${status}`);
+  }
 });
