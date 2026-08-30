@@ -117,8 +117,12 @@ export default function App(){
 
   async function refreshPix(orderId:string){
     setPixBusy(true);
+    const statusResult=await supabase.functions.invoke("efi-pix-status",{body:{orderId}});
+    if(!statusResult.error&&statusResult.data?.paid){
+      setPixCharge(null);setMessage("Pagamento PIX confirmado! Seu pedido foi enviado para a loja.");await loadOrders();setPixBusy(false);return true;
+    }
     const{data,error}=await supabase.functions.invoke("efi-pix-create",{body:{orderId}});
-    if(error||data?.error||!data?.charge?.brcode){setMessage("Não foi possível gerar o PIX agora. Tente novamente.");setPixBusy(false);return false;}
+    if(error||data?.error||!data?.charge?.brcode){setMessage("Não foi possível consultar ou gerar o PIX agora. Tente novamente.");setPixBusy(false);return false;}
     setPixCharge({orderId,txid:data.charge.txid,brcode:data.charge.brcode,status:data.charge.status,expires_at:data.charge.expires_at});
     setMessage("PIX atualizado. Assim que o pagamento for confirmado, o pedido seguirá automaticamente para a loja.");setPixBusy(false);return true;
   }
