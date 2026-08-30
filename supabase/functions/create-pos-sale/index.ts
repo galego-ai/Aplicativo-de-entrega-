@@ -15,10 +15,15 @@ export default {
     const userId = ctx.userClaims!.id;
     const adminRole = String(ctx.userClaims!.appMetadata?.clickfood_role ?? "");
     const isAdmin = ["SUPER_ADMIN","ADMIN","SUPPORT"].includes(adminRole);
+    let membershipRole: string | null = null;
     if (!isAdmin) {
       const { data: membership } = await ctx.supabaseAdmin.from("store_memberships").select("role").eq("store_id", body.storeId).eq("user_id", userId).eq("active", true).maybeSingle();
-      if (!membership || !["OWNER","MANAGER","CASHIER"].includes(membership.role)) return Response.json({ error: "POS_ACCESS_DENIED" }, { status: 403 });
+      membershipRole = membership?.role ? String(membership.role) : null;
+      if (!membershipRole || !["OWNER","MANAGER","CASHIER"].includes(membershipRole)) return Response.json({ error: "POS_ACCESS_DENIED" }, { status: 403 });
     }
+
+    const allowedMethods = new Set(["PIX","CREDIT_CARD","DEBIT_CARD","CASH","WALLET","OTHER"]);
+    if (body.payments.some((payment) => !allowedMethods.has(payment.method) || !Number.isFinite(Number(payment.amount)) || Number(payment.amount) < 0)) return Response.json({ error: "INVALID_PAYMENT" }, { status: 400 });
 
     const productIds = [...new Set(body.items.map((item) => item.productId))];
     const { data: products, error: productError } = await ctx.supabaseAdmin.from("products").select("id,name,price,promotional_price,active,available_pos").eq("store_id", body.storeId).in("id", productIds);
@@ -33,18 +38,22 @@ export default {
       if (!product || !product.active || !product.available_pos) return Response.json({ error: "PRODUCT_NOT_AVAILABLE" }, { status: 409 });
       if (!Number.isInteger(requested.quantity) || requested.quantity < 1 || requested.quantity > 999) return Response.json({ error: "INVALID_QUANTITY" }, { status: 400 });
       const unitPrice = Number(product.promotional_price ?? product.price);
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) return Response.json({ error: "INVALID_PRODUCT_PRICE" }, { status: 409 });
       const lineTotal = money(unitPrice * requested.quantity);
       subtotal += lineTotal;
       snapshotItems.push({ product_id: product.id, name: product.name, quantity: requested.quantity, unit_price: money(unitPrice), total_price: lineTotal, options: [] });
     }
     subtotal = money(subtotal);
-    const discount = money(Math.max(0, Number(body.discount ?? 0)));
-    const total = money(Math.max(0, subtotal - discount));
-    const paymentTotal = money(body.payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
-    if (Math.abs(paymentTotal - total) > 0.009) return Response.json({ error: "PAYMENT_TOTAL_MISMATCH", total }, { status: 409 });
 
-    const allowedMethods = new Set(["PIX","CREDIT_CARD","DEBIT_CARD","CASH","WALLET","OTHER"]);
-    if (body.payments.some((payment) => !allowedMethods.has(payment.method) || !Number.isFinite(Number(payment.amount)) || Number(payment.amount) < 0)) return Response.json({ error: "INVALID_PAYMENT" }, { status: 400 });
+    const rawDiscount = Number(body.discount ?? 0);
+    if (!Number.isFinite(rawDiscount) || rawDiscount < 0) return Response.json({ error: "INVALID_DISCOUNT" }, { status: 400 });
+    if (rawDiscount > subtotal + 0.009) return Response.json({ error: "DISCOUNT_EXCEEDS_SUBTOTAL", subtotal }, { status: 409 });
+    const discount = money(rawDiscount);
+    if (!isAdmin && membershipRole === "CASHIER" && discount > 0) return Response.json({ error: "DISCOUNT_REQUIRES_MANAGER" }, { status: 403 });
+
+    const total = money(subtotal - discount);
+    const paymentTotal = money(body.payments.reduce((sum, payment) => sum + Number(payment.amount), 0));
+    if (Math.abs(paymentTotal - total) > 0.009) return Response.json({ error: "PAYMENT_TOTAL_MISMATCH", total }, { status: 409 });
 
     const { data: orderId, error: saleError } = await ctx.supabaseAdmin.rpc("create_pos_sale_atomic", {
       p_store_id: body.storeId,
@@ -62,6 +71,7 @@ export default {
       if (message.includes("INSUFFICIENT_STOCK")) return Response.json({ error: "INSUFFICIENT_STOCK" }, { status: 409 });
       if (message.includes("CASH_SESSION_NOT_OPEN")) return Response.json({ error: "CASH_NOT_OPEN" }, { status: 409 });
       if (message.includes("PRODUCT_NOT_AVAILABLE")) return Response.json({ error: "PRODUCT_NOT_AVAILABLE" }, { status: 409 });
+      if (message.includes("orders_discount_within_gross_check") || message.includes("orders_total_accounting_check")) return Response.json({ error: "INVALID_ACCOUNTING_TOTAL" }, { status: 409 });
       return Response.json({ error: "POS_SALE_FAILED" }, { status: 500 });
     }
 
