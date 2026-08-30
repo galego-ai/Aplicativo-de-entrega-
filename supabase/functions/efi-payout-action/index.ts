@@ -17,7 +17,7 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  if(!body?.payoutId||!["SEND","STATUS"].includes(body.action))return Response.json({error:"PAYOUT_AND_ACTION_REQUIRED"},{status:400});
  const userId=ctx.userClaims!.id;const role=String(ctx.userClaims!.appMetadata?.clickfood_role??"");if(!["SUPER_ADMIN","ADMIN"].includes(role))return Response.json({error:"ADMIN_REQUIRED"},{status:403});
  const{data:config}=await ctx.supabaseAdmin.from("payout_provider_configs").select("enabled,credentials_configured,environment").eq("provider","EFI_PIX_SEND").maybeSingle();if(!config?.enabled||!config?.credentials_configured)return Response.json({error:"EFI_PAYOUT_NOT_ENABLED"},{status:409});
- const{data:payout,error:lookupError}=await ctx.supabaseAdmin.from("payouts").select("id,recipient_type,amount,method,status,destination_value,provider_name,provider_id,provider_status,provider_end_to_end_id").eq("id",body.payoutId).maybeSingle();
+ const{data:payout,error:lookupError}=await ctx.supabaseAdmin.from("payouts").select("id,amount,method,status,destination_value,provider_name,provider_id").eq("id",body.payoutId).maybeSingle();
  if(lookupError)return Response.json({error:"PAYOUT_LOOKUP_FAILED"},{status:500});if(!payout)return Response.json({error:"PAYOUT_NOT_FOUND"},{status:404});if(payout.method!=="PIX"||!payout.destination_value?.trim())return Response.json({error:"PAYOUT_PIX_DESTINATION_REQUIRED"},{status:409});
  const sync=async(idEnvio:string,status:string,e2e:string|null,payload:any,error:string|null)=>{const{data,error:rpcError}=await ctx.supabaseAdmin.schema("private").rpc("sync_efi_payout_attempt_atomic",{p_id_envio:idEnvio,p_status:status,p_e2e_id:e2e,p_payload:payload,p_error:error});if(rpcError)throw rpcError;return data;};
  const reconcile=async(client:Deno.HttpClient,access:string,idEnvio:string)=>{const result=await api(client,access,`/v2/gn/pix/enviados/id-envio/${encodeURIComponent(idEnvio)}`,{method:"GET"});if(!result.ok)return{ok:false,status:result.status,data:result.data};const status=String(result.data?.status??"EM_PROCESSAMENTO").toUpperCase();const settled=await sync(idEnvio,status,String(result.data?.endToEndId??result.data?.e2eId??"")||null,result.data,status==="NAO_REALIZADO"?providerError(result.data):null);return{ok:true,status:result.status,data:result.data,settled};};
@@ -30,15 +30,13 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
    return Response.json({ok:true,payout:result.settled,providerStatus:String(result.data?.status??"")});
   }
   if(payout.status==="PAID")return Response.json({ok:true,reused:true,payoutStatus:"PAID",providerId:activeId||null});
-  if(payout.status==="PROCESSING"&&activeId){const result=await reconcile(client,access,activeId);if(result.ok)return Response.json({ok:true,reused:true,payout:result.settled,providerStatus:String(result.data?.status??"")});if(result.status!==404)return Response.json({error:"EFI_PAYOUT_STATUS_FAILED",providerStatus:result.status},{status:502});}
   if(!["APPROVED","FAILED","PROCESSING"].includes(payout.status))return Response.json({error:payout.status==="REQUESTED"?"PAYOUT_REQUIRES_APPROVAL":"PAYOUT_NOT_SENDABLE",currentStatus:payout.status},{status:409});
-  const{data:other}=await ctx.supabaseAdmin.from("payouts").select("id").eq("provider_name","EFI").eq("status","PROCESSING").neq("id",payout.id).limit(1).maybeSingle();if(other)return Response.json({error:"EFI_PAYOUT_ANOTHER_TRANSFER_PROCESSING",processingPayoutId:other.id},{status:409});
-  if(payout.status!=="PROCESSING"){
-   const rpc=payout.recipient_type==="DRIVER"?"review_driver_payout_atomic":"review_store_payout_atomic";const{error}=await ctx.supabaseAdmin.schema("private").rpc(rpc,{p_payout_id:payout.id,p_target_status:"PROCESSING",p_actor_id:userId,p_notes:payout.status==="FAILED"?"Nova tentativa automática pela Efí":"Envio Pix iniciado pela Efí",p_provider_id:null});if(error)return Response.json({error:String(error.message).includes("INSUFFICIENT")?"INSUFFICIENT_AVAILABLE_BALANCE":"PAYOUT_STATUS_CHANGED"},{status:409});
-  }
-  activeId=crypto.randomUUID().replaceAll("-","");
-  const{error:attemptError}=await ctx.supabaseAdmin.from("payout_provider_attempts").insert({payout_id:payout.id,provider:"EFI",id_envio:activeId,status:"CREATED"});
-  if(attemptError){const{data:existing}=await ctx.supabaseAdmin.from("payout_provider_attempts").select("id_envio").eq("payout_id",payout.id).in("status",["CREATED","EM_PROCESSAMENTO","UNKNOWN"]).order("created_at",{ascending:false}).limit(1).maybeSingle();if(!existing?.id_envio)throw attemptError;activeId=String(existing.id_envio);}
+
+  const{data:prepared,error:prepareError}=await ctx.supabaseAdmin.schema("private").rpc("prepare_efi_payout_send_atomic",{p_payout_id:payout.id,p_actor_id:userId});
+  if(prepareError){const msg=String(prepareError.message??"");if(msg.includes("ANOTHER_EFI_PAYOUT_PROCESSING"))return Response.json({error:"EFI_PAYOUT_ANOTHER_TRANSFER_PROCESSING"},{status:409});if(msg.includes("INSUFFICIENT"))return Response.json({error:"INSUFFICIENT_AVAILABLE_BALANCE"},{status:409});return Response.json({error:"PAYOUT_STATUS_CHANGED"},{status:409});}
+  const prep=Array.isArray(prepared)?prepared[0]:prepared;activeId=String(prep?.id_envio??"");if(!activeId)return Response.json({error:"EFI_PAYOUT_TRANSFER_NOT_STARTED"},{status:500});
+  if(prep?.reused){const check=await reconcile(client,access,activeId);if(check.ok)return Response.json({ok:true,reused:true,payout:check.settled,providerStatus:String(check.data?.status??"")});if(check.status!==404)return Response.json({error:"EFI_PAYOUT_STATUS_FAILED",providerStatus:check.status},{status:502});}
+
   await sync(activeId,"CREATED",null,{environment:config.environment},null);
   const bodyPix={valor:Number(payout.amount).toFixed(2),pagador:{chave:required("EFI_PIX_KEY"),infoPagador:`CLICK-FOOD repasse ${String(payout.id).slice(0,8)}`},favorecido:{chave:String(payout.destination_value).trim()}};
   let result=await api(client,access,`/v3/gn/pix/${encodeURIComponent(activeId)}`,{method:"PUT",body:JSON.stringify(bodyPix)});
@@ -47,7 +45,7 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   const err=providerError(result.data);
   if([400,404,422].includes(result.status)){const settled=await sync(activeId,"NAO_REALIZADO",null,result.data,err);return Response.json({error:"EFI_PAYOUT_REJECTED",providerStatus:result.status,payout:settled},{status:409});}
   const uncertain=await sync(activeId,"UNKNOWN",null,result.data,err);return Response.json({ok:false,error:"EFI_PAYOUT_CONFIRMATION_PENDING",uncertain:true,payout:uncertain,providerStatus:result.status},{status:202});
- }catch(e:any){const msg=String(e?.message??"EFI_PAYOUT_FAILED");if(activeId){try{await sync(activeId,msg.startsWith("EFI_OAUTH_")?"NAO_REALIZADO":"UNKNOWN",null,null,msg.startsWith("EFI_OAUTH_")?"Falha de autenticação Efí":msg.slice(0,500));}catch{}}
+ }catch(e:any){const msg=String(e?.message??"EFI_PAYOUT_FAILED");if(activeId&&!msg.startsWith("EFI_OAUTH_")){try{await sync(activeId,"UNKNOWN",null,null,msg.slice(0,500));}catch{}}
   return Response.json({error:msg.startsWith("EFI_OAUTH_")?"EFI_AUTH_FAILED":"EFI_PAYOUT_FAILED"},{status:502});
  }finally{client?.close();}
 })};
