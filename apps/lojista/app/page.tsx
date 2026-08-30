@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import StoreSetup from "./StoreSetup";
 import OrderDetailsPanel from "./OrderDetailsPanel";
+import NewOrderAlarm from "./NewOrderAlarm";
 import { supabase } from "../lib/supabase";
 
 type Tab = "Dashboard" | "Pedidos" | "PDV" | "Produtos" | "Estoque" | "Entregas" | "Clientes" | "Cupons" | "Financeiro" | "Bônus" | "Configurações";
@@ -72,6 +73,7 @@ export default function Home() {
   const posPaymentTotal = useMemo(() => posPayments.length === 1 && !posPayments[0].amount.trim() ? cartTotal : posPayments.reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0), [posPayments, cartTotal]);
   const posPaymentDifference = Math.round((cartTotal - posPaymentTotal) * 100) / 100;
   const marketplaceOrders = useMemo(() => orders.filter((order) => order.source !== "POS"), [orders]);
+  const waitingStoreOrders = useMemo(() => marketplaceOrders.filter((order) => order.status === "WAITING_STORE").length, [marketplaceOrders]);
   const customerIds = useMemo(() => Array.from(new Set(orders.map((order) => order.customer_id).filter(Boolean))) as string[], [orders]);
   const financeSummary = useMemo(() => finance.reduce((acc, item) => {
     if (item.direction === "CREDIT") acc.credit += item.amount;
@@ -439,6 +441,7 @@ export default function Home() {
 
   return (
     <main className="app">
+      <NewOrderAlarm count={waitingStoreOrders} />
       <aside className="side">
         <div className="logo"><span>CLICK</span>-FOOD</div><p>{store.name}</p>
         <nav>{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={tab === item ? "active" : ""}>{item}</button>)}</nav><a href="/entregadores" style={{display:"block",margin:"10px 0",padding:"12px 14px",borderRadius:10,background:"#f4c400",color:"#111",fontWeight:900,textDecoration:"none",textAlign:"center"}}>Atribuir entregador</a><a href="/recibos" style={{display:"block",margin:"10px 0",padding:"12px 14px",borderRadius:10,background:"#fff",border:"1px solid #d8d8d8",color:"#111",fontWeight:900,textDecoration:"none",textAlign:"center"}}>Recibos / imprimir</a>
