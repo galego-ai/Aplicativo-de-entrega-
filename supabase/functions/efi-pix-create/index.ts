@@ -1,0 +1,36 @@
+import { withSupabase } from "npm:@supabase/server@1.4.1";
+
+const required=(name:string)=>{const v=Deno.env.get(name);if(!v)throw new Error(`MISSING_SECRET_${name}`);return v;};
+const baseUrl=()=>Deno.env.get("EFI_PIX_SANDBOX")==="false"?"https://pix.api.efipay.com.br":"https://pix-h.api.efipay.com.br";
+function httpClient(){return Deno.createHttpClient({cert:required("EFI_PIX_CERT_PEM"),key:required("EFI_PIX_KEY_PEM")});}
+async function token(client:Deno.HttpClient){const id=required("EFI_PIX_CLIENT_ID"),secret=required("EFI_PIX_CLIENT_SECRET");const res=await fetch(`${baseUrl()}/oauth/token`,{method:"POST",headers:{Authorization:`Basic ${btoa(`${id}:${secret}`)}`,"Content-Type":"application/json"},body:JSON.stringify({grant_type:"client_credentials"}),client} as any);const data=await res.json();if(!res.ok||!data.access_token)throw new Error(`EFI_OAUTH_${res.status}`);return String(data.access_token);}
+async function api(client:Deno.HttpClient,access:string,path:string,init:RequestInit={}){const res=await fetch(`${baseUrl()}${path}`,{...init,headers:{Authorization:`Bearer ${access}`,"Content-Type":"application/json",...(init.headers??{})},client} as any);const text=await res.text();let data:any={};try{data=text?JSON.parse(text):{}}catch{data={raw:text}}if(!res.ok){const e:any=new Error(`EFI_API_${res.status}`);e.payload=data;throw e;}return data;}
+
+export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
+ if(req.method!=="POST")return Response.json({error:"METHOD_NOT_ALLOWED"},{status:405});
+ let body:any;try{body=await req.json()}catch{return Response.json({error:"INVALID_JSON"},{status:400})}
+ const orderId=String(body?.orderId??"");if(!orderId)return Response.json({error:"ORDER_REQUIRED"},{status:400});
+ const{data:config}=await ctx.supabaseAdmin.from("payment_provider_configs").select("enabled,credentials_configured,environment").eq("provider","EFI").maybeSingle();
+ if(!config?.enabled||!config?.credentials_configured)return Response.json({error:"EFI_NOT_ENABLED"},{status:409});
+ const{data:order}=await ctx.supabaseAdmin.from("orders").select("id,order_number,customer_id,total,status,payment_status").eq("id",orderId).maybeSingle();
+ if(!order||order.customer_id!==ctx.userClaims!.id)return Response.json({error:"ORDER_NOT_FOUND"},{status:404});
+ if(order.payment_status==="PAID")return Response.json({error:"ORDER_ALREADY_PAID"},{status:409});
+ if(order.status!=="PENDING_PAYMENT")return Response.json({error:"ORDER_NOT_WAITING_PAYMENT"},{status:409});
+ const{data:payment}=await ctx.supabaseAdmin.from("payments").select("id,amount,status,method").eq("order_id",orderId).eq("method","PIX").order("created_at",{ascending:false}).limit(1).maybeSingle();
+ if(!payment)return Response.json({error:"PIX_PAYMENT_NOT_FOUND"},{status:409});
+ const{data:existing}=await ctx.supabaseAdmin.from("efi_pix_charges").select("txid,brcode,qr_image,visualization_url,status,expires_at").eq("payment_id",payment.id).maybeSingle();
+ if(existing?.status==="ACTIVE"&&new Date(existing.expires_at).getTime()>Date.now()&&existing.brcode)return Response.json({charge:existing,reused:true});
+ const txid=String(payment.id).replaceAll("-","").slice(0,35);const expiration=900;const amount=Number(payment.amount).toFixed(2);const pixKey=required("EFI_PIX_KEY");
+ const client=httpClient();try{
+  const access=await token(client);
+  const cob=await api(client,access,`/v2/cob/${encodeURIComponent(txid)}`,{method:"PUT",body:JSON.stringify({calendario:{expiracao:expiration},valor:{original:amount},chave:pixKey,solicitacaoPagador:`CLICK-FOOD pedido #${order.order_number}`})});
+  const locId=Number(cob?.loc?.id??0);if(!locId)throw new Error("EFI_LOCATION_MISSING");
+  const qr=await api(client,access,`/v2/loc/${locId}/qrcode`,{method:"GET"});
+  const expiresAt=new Date(Date.now()+expiration*1000).toISOString();
+  const row={order_id:order.id,payment_id:payment.id,txid,location_id:locId,location_url:cob?.loc?.location??null,brcode:qr?.qrcode??null,qr_image:qr?.imagemQrcode??null,visualization_url:qr?.linkVisualizacao??null,status:"ACTIVE",amount:Number(payment.amount),expires_at:expiresAt,provider_payload:{cob:{status:cob?.status,calendario:cob?.calendario,loc:cob?.loc}}};
+  const{data:charge,error}=await ctx.supabaseAdmin.from("efi_pix_charges").upsert(row,{onConflict:"payment_id"}).select("txid,brcode,qr_image,visualization_url,status,expires_at").single();if(error)throw error;
+  await ctx.supabaseAdmin.from("payments").update({provider:"EFI",status:"PROCESSING",provider_transaction_id:txid}).eq("id",payment.id);
+  await ctx.supabaseAdmin.from("payment_attempts").insert({payment_id:payment.id,request_reference:txid,status:"CREATED",provider_payload:{locationId:locId,environment:config.environment}});
+  return Response.json({charge,reused:false},{status:201});
+ }catch(e:any){await ctx.supabaseAdmin.from("payment_attempts").insert({payment_id:payment.id,request_reference:txid,status:"FAILED",error_code:String(e?.message??"EFI_ERROR").slice(0,120),error_message:"Falha ao gerar cobrança PIX Efí",provider_payload:e?.payload??null});return Response.json({error:"EFI_PIX_CREATE_FAILED"},{status:502});}finally{client.close();}
+})};
