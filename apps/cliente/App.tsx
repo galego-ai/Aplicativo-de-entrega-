@@ -26,6 +26,7 @@ type CartItem = CustomizedItem & { cartKey:string };
 type DeliveryType = "DELIVERY"|"PICKUP";
 type PaymentMethod = "CASH"|"PIX";
 type Tracking = { orderId:string; deliveryId:string; deliveryStatus:string; driverId:string|null; driverLat:number|null; driverLng:number|null; storeLat:number|null; storeLng:number|null; destinationLat:number|null; destinationLng:number|null };
+type DriverCard = { id:string; name:string; avatarUrl:string|null; rating:number; vehicle:{type:string;brand:string|null;model:string|null;plate:string|null}|null };
 type ProductGroupLink = { product_id:string; option_group_id:string };
 
 const brl=(value:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value||0);
@@ -85,7 +86,7 @@ export default function App(){
   const[paymentMethod,setPaymentMethod]=useState<PaymentMethod>("CASH"); const[availablePaymentMethods,setAvailablePaymentMethods]=useState<PaymentMethod[]>(["CASH"]); const[pixCharge,setPixCharge]=useState<PixCharge|null>(null); const[pixBusy,setPixBusy]=useState(false);
   const[refundByOrder,setRefundByOrder]=useState<Record<string,RefundInfo>>({}); const[refundBusyOrderId,setRefundBusyOrderId]=useState<string|null>(null);
   const[addressForm,setAddressForm]=useState({label:"Casa",street:"",number:"",district:"",reference:""}); const[savingAddress,setSavingAddress]=useState(false);
-  const[tracking,setTracking]=useState<Tracking|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);
+  const[tracking,setTracking]=useState<Tracking|null>(null); const[driverCard,setDriverCard]=useState<DriverCard|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);
 
   const cartSubtotal=useMemo(()=>cart.reduce((sum,item)=>{
     const extras=item.options.reduce((s,o)=>s+o.price*o.quantity,0);
@@ -93,7 +94,7 @@ export default function App(){
   },0),[cart]);
 
   useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false);});const{data}=supabase.auth.onAuthStateChange((_event,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[]);
-  useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();}else{setTracking(null);setOrders([]);setPixCharge(null);}},[session]);
+  useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();}else{setTracking(null);setDriverCard(null);setOrders([]);setPixCharge(null);}},[session]);
   useEffect(()=>{if(!session||tab!=="orders")return;const timer=setInterval(()=>loadOrders(),6000);return()=>clearInterval(timer);},[session?.user.id,tab]);
   useEffect(()=>{if(!session)return;const timer=setInterval(()=>loadStores(),60000);return()=>clearInterval(timer);},[session?.user.id]);
 
@@ -158,15 +159,19 @@ export default function App(){
 
   async function loadTracking(currentOrders:Order[]){
     const activeOrder=currentOrders.find(order=>order.delivery_type==="DELIVERY"&&!terminalStatuses.has(order.status));
-    if(!activeOrder){setTracking(null);return;}
+    if(!activeOrder){setTracking(null);setDriverCard(null);return;}
     const{data:delivery}=await supabase.from("deliveries").select("id,status,driver_id").eq("order_id",activeOrder.id).maybeSingle();
-    if(!delivery){setTracking(null);return;}
+    if(!delivery){setTracking(null);setDriverCard(null);return;}
     const relation=Array.isArray(activeOrder.stores)?activeOrder.stores[0]:activeOrder.stores;
     let driverLat:number|null=null,driverLng:number|null=null,destinationLat:number|null=null,destinationLng:number|null=null;
     if(delivery.driver_id){
-      const{data:location}=await supabase.from("driver_locations").select("latitude,longitude").eq("driver_id",delivery.driver_id).maybeSingle();
-      if(location){driverLat=Number(location.latitude);driverLng=Number(location.longitude);}
-    }
+      const[locationResult,cardResult]=await Promise.all([
+        supabase.from("driver_locations").select("latitude,longitude").eq("driver_id",delivery.driver_id).maybeSingle(),
+        supabase.functions.invoke("customer-driver-card",{body:{orderId:activeOrder.id}}),
+      ]);
+      if(locationResult.data){driverLat=Number(locationResult.data.latitude);driverLng=Number(locationResult.data.longitude);}
+      if(!cardResult.error&&cardResult.data?.driver)setDriverCard(cardResult.data.driver as DriverCard);else setDriverCard(null);
+    }else setDriverCard(null);
     if(activeOrder.address_id){
       const{data:address}=await supabase.from("customer_addresses").select("latitude,longitude").eq("id",activeOrder.address_id).maybeSingle();
       if(address){destinationLat=address.latitude==null?null:Number(address.latitude);destinationLng=address.longitude==null?null:Number(address.longitude);}
@@ -481,6 +486,7 @@ export default function App(){
     {tracking&&trackedOrder&&<View style={styles.trackingCard}>
       {tracking.deliveryStatus==="DRIVER_AT_CUSTOMER"&&<View style={styles.arrivedBanner}><Text style={styles.arrivedTitle}>Seu motorista chegou!</Text><Text style={styles.arrivedText}>Dirija-se ao local combinado para receber o pedido.</Text></View>}
       <Text style={styles.trackingKicker}>ACOMPANHAMENTO EM TEMPO REAL</Text><Text style={styles.trackingTitle}>Pedido #{trackedOrder.order_number}</Text><Text style={styles.trackingStatus}>{statusLabel[trackedOrder.status]??trackedOrder.status}</Text>
+      {driverCard&&<View style={styles.driverCardBox}>{driverCard.avatarUrl?<Image source={{uri:driverCard.avatarUrl}} style={styles.driverAvatar}/>:<View style={styles.driverAvatarFallback}><Text style={styles.driverAvatarInitials}>{driverCard.name.slice(0,2).toUpperCase()}</Text></View>}<View style={styles.driverCardBody}><Text style={styles.driverCardName}>{driverCard.name}</Text><Text style={styles.driverCardMeta}>★ {driverCard.rating.toFixed(1)}{driverCard.vehicle?` • ${driverCard.vehicle.type==="MOTORCYCLE"?"Moto":driverCard.vehicle.type==="CAR"?"Carro":driverCard.vehicle.type==="BICYCLE"?"Bicicleta":driverCard.vehicle.type}${driverCard.vehicle.brand||driverCard.vehicle.model?` • ${[driverCard.vehicle.brand,driverCard.vehicle.model].filter(Boolean).join(" ")}`:""}${driverCard.vehicle.plate?` • ${driverCard.vehicle.plate}`:""}`:""}</Text></View></View>}
       {mapCenter?<MapView style={styles.trackingMap} region={{...mapCenter,latitudeDelta:0.018,longitudeDelta:0.018}}>
         {tracking.storeLat!=null&&tracking.storeLng!=null&&<Marker coordinate={{latitude:tracking.storeLat,longitude:tracking.storeLng}} title="Loja"><View style={styles.mapPin}><Text>🏪</Text></View></Marker>}
         {tracking.destinationLat!=null&&tracking.destinationLng!=null&&<Marker coordinate={{latitude:tracking.destinationLat,longitude:tracking.destinationLng}} title="Seu endereço"><View style={styles.mapPin}><Text>🏠</Text></View></Marker>}
@@ -532,7 +538,7 @@ const styles=StyleSheet.create({
   secondaryButton:{backgroundColor:"#fff",borderWidth:1,borderColor:"#ccc",padding:13,borderRadius:12,alignItems:"center"},secondaryText:{fontWeight:"900"},totalBox:{backgroundColor:"#fff",padding:16,borderRadius:15,marginTop:12},total:{fontSize:25,fontWeight:"900",marginTop:4},paymentHint:{fontSize:10,color:"#777",marginTop:10,lineHeight:14},checkout:{backgroundColor:"#f4c400",padding:16,borderRadius:14,alignItems:"center",marginTop:10},checkoutText:{fontWeight:"900"},back:{fontWeight:"900",color:"#856a00",fontSize:15},empty:{color:"#777",paddingVertical:20,textAlign:"center"},
   orderBlock:{marginBottom:10},orderCard:{backgroundColor:"#fff",borderRadius:14,padding:14,flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:10},rowBetween:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},link:{color:"#8d7000",fontWeight:"900"},
   refundBanner:{marginTop:7,borderRadius:12,padding:11,borderWidth:1},refundPending:{backgroundColor:"#fff8dd",borderColor:"#ead47a"},refundDone:{backgroundColor:"#e2f7e9",borderColor:"#9fd7b1"},refundFailed:{backgroundColor:"#fde9e6",borderColor:"#e2aaa2"},refundText:{fontSize:11,fontWeight:"900",color:"#333"},refundButton:{marginTop:9,backgroundColor:"#111",borderRadius:9,paddingVertical:9,paddingHorizontal:11,alignSelf:"flex-start"},refundButtonStandalone:{marginTop:7,backgroundColor:"#111",borderRadius:10,padding:11,alignItems:"center"},refundButtonText:{color:"#fff",fontSize:10,fontWeight:"900"},
-  trackingCard:{backgroundColor:"#111",borderRadius:20,padding:14,marginBottom:16,overflow:"hidden"},trackingKicker:{color:"#f4c400",fontWeight:"900",fontSize:9,letterSpacing:1.2},trackingTitle:{color:"#fff",fontSize:20,fontWeight:"900",marginTop:5},trackingStatus:{color:"#ccc",fontSize:12,marginTop:4,marginBottom:12},trackingMap:{height:250,borderRadius:15,overflow:"hidden"},mapWaiting:{height:180,borderRadius:15,backgroundColor:"#292929",alignItems:"center",justifyContent:"center",padding:20},mapPin:{backgroundColor:"#fff",borderRadius:18,padding:7,borderWidth:2,borderColor:"#111"},driverPin:{backgroundColor:"#f4c400",borderRadius:22,padding:8,borderWidth:2,borderColor:"#111"},driverEmoji:{fontSize:25},liveHint:{color:"#aaa",fontSize:10,marginTop:9,lineHeight:14},arrivedBanner:{backgroundColor:"#f4c400",borderRadius:13,padding:13,marginBottom:12},arrivedTitle:{fontSize:18,fontWeight:"900"},arrivedText:{fontSize:11,marginTop:3},
+  trackingCard:{backgroundColor:"#111",borderRadius:20,padding:14,marginBottom:16,overflow:"hidden"},trackingKicker:{color:"#f4c400",fontWeight:"900",fontSize:9,letterSpacing:1.2},trackingTitle:{color:"#fff",fontSize:20,fontWeight:"900",marginTop:5},trackingStatus:{color:"#ccc",fontSize:12,marginTop:4,marginBottom:12},driverCardBox:{backgroundColor:"#242424",borderRadius:14,padding:11,marginBottom:12,flexDirection:"row",alignItems:"center",gap:10},driverAvatar:{width:48,height:48,borderRadius:24,backgroundColor:"#444"},driverAvatarFallback:{width:48,height:48,borderRadius:24,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},driverAvatarInitials:{fontWeight:"900",color:"#111"},driverCardBody:{flex:1},driverCardName:{color:"#fff",fontSize:15,fontWeight:"900"},driverCardMeta:{color:"#ccc",fontSize:10,marginTop:4},trackingMap:{height:250,borderRadius:15,overflow:"hidden"},mapWaiting:{height:180,borderRadius:15,backgroundColor:"#292929",alignItems:"center",justifyContent:"center",padding:20},mapPin:{backgroundColor:"#fff",borderRadius:18,padding:7,borderWidth:2,borderColor:"#111"},driverPin:{backgroundColor:"#f4c400",borderRadius:22,padding:8,borderWidth:2,borderColor:"#111"},driverEmoji:{fontSize:25},liveHint:{color:"#aaa",fontSize:10,marginTop:9,lineHeight:14},arrivedBanner:{backgroundColor:"#f4c400",borderRadius:13,padding:13,marginBottom:12},arrivedTitle:{fontSize:18,fontWeight:"900"},arrivedText:{fontSize:11,marginTop:3},
   cancelButton:{borderWidth:1,borderColor:"#edc3c0",backgroundColor:"#fff",padding:10,borderRadius:10,alignItems:"center",marginTop:5},cancelText:{color:"#a32e28",fontWeight:"900",fontSize:10},rateButton:{backgroundColor:"#fff6cf",padding:10,borderRadius:10,alignItems:"center",marginTop:5},rateText:{color:"#745c00",fontWeight:"900",fontSize:10},reviewed:{color:"#24774b",fontWeight:"800",fontSize:11,padding:8},reviewBox:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e1d49d",borderRadius:14,padding:14,marginTop:5},stars:{flexDirection:"row",gap:7,marginBottom:12},star:{fontSize:34,color:"#ccc"},starActive:{color:"#f4c400"},
   profile:{backgroundColor:"#fff",padding:15,borderRadius:16,flexDirection:"row",alignItems:"center",gap:12},signOut:{borderWidth:1,borderColor:"#e3b7b7",borderRadius:13,padding:14,marginTop:24,alignItems:"center"},signOutText:{color:"#9d2c2c",fontWeight:"900"},
   bottom:{height:70,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e5e5e5",flexDirection:"row"},tab:{flex:1,alignItems:"center",justifyContent:"center"},tabIcon:{fontSize:19,color:"#777"},tabLabel:{fontSize:9,color:"#777",fontWeight:"700",marginTop:3},tabActive:{color:"#8d7000",fontWeight:"900"}
