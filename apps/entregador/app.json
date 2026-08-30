@@ -11,7 +11,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "O CLICK-FOOD usa sua localização enquanto você está online para encontrar entregas próximas e acompanhar entregas ativas."
+          "locationWhenInUsePermission": "O CLICK-FOOD usa sua localização enquanto você está online para encontrar entregas próximas e acompanhar entregas ativas.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "isIosBackgroundLocationEnabled": true
         }
       ],
       ["expo-notifications", {"color": "#F4C400", "defaultChannel": "clickfood-default"}]
