@@ -6,6 +6,7 @@ import {
 import * as Location from "expo-location";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
 
 type Screen = "home" | "history" | "wallet" | "profile";
 type Driver = { id: string; status: string; online: boolean; rating: number; acceptance_rate: number; city_id: string | null };
@@ -32,8 +33,8 @@ function AuthScreen() {
   async function submit() {
     setBusy(true); setMessage("");
     if (mode === "register") {
-      if (!name.trim() || !phone.trim() || password.length < 6) {
-        setMessage("Informe nome, telefone e senha com pelo menos 6 caracteres."); setBusy(false); return;
+      if (!name.trim() || !phone.trim() || password.length < 8) {
+        setMessage("Informe nome, telefone e senha com pelo menos 8 caracteres."); setBusy(false); return;
       }
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { full_name: name.trim(), phone: phone.trim() } } });
       if (error) setMessage(error.message);
@@ -54,6 +55,7 @@ function AuthScreen() {
     {!!message && <Text style={styles.notice}>{message}</Text>}
     <Pressable style={[styles.primary, busy && styles.disabled]} onPress={submit} disabled={busy}><Text style={styles.primaryText}>{busy ? "AGUARDE..." : mode === "login" ? "ENTRAR" : "CRIAR CONTA"}</Text></Pressable>
     <Pressable onPress={()=>{setMode(mode === "login" ? "register" : "login");setMessage("");}}><Text style={styles.switchText}>{mode === "login" ? "Quero me cadastrar como entregador" : "Já tenho uma conta"}</Text></Pressable>
+    {mode==="login"&&<PasswordResetLink scheme="clickfood-entregador"/>}
   </ScrollView></SafeAreaView>;
 }
 
@@ -79,6 +81,7 @@ function DriverRegistration({ cities, onDone }: { cities: City[]; onDone: () => 
     <TextInput style={styles.input} placeholder="Marca" value={brand} onChangeText={setBrand}/><TextInput style={styles.input} placeholder="Modelo" value={model} onChangeText={setModel}/>{vehicleType!=="BICYCLE"&&<TextInput style={styles.input} placeholder="Placa" autoCapitalize="characters" value={plate} onChangeText={setPlate}/>} 
     {!!message&&<Text style={styles.notice}>{message}</Text>}<Pressable style={[styles.primary,busy&&styles.disabled]} onPress={submit} disabled={busy}><Text style={styles.primaryText}>{busy?"ENVIANDO...":"ENVIAR PARA APROVAÇÃO"}</Text></Pressable>
     <Pressable onPress={()=>supabase.auth.signOut()}><Text style={styles.switchText}>Sair da conta</Text></Pressable>
+    <DeleteAccountButton/>
   </ScrollView></SafeAreaView>;
 }
 
@@ -105,7 +108,7 @@ export default function App() {
   if(loading)return<SafeAreaView style={styles.center}><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text>Carregando...</Text></SafeAreaView>;
   if(!session)return<AuthScreen/>;
   if(!driver)return<DriverRegistration cities={cities} onDone={bootstrap}/>;
-  if(driver.status!=="ACTIVE")return<SafeAreaView style={styles.safe}><View style={styles.pending}><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.pendingIcon}>⌛</Text><Text style={styles.pageTitle}>Cadastro em análise</Text><Text style={styles.pendingText}>Status: {driver.status}. Você poderá ficar online assim que a Matriz aprovar seus documentos e cadastro.</Text><Pressable style={styles.secondary} onPress={bootstrap}><Text style={styles.secondaryText}>ATUALIZAR STATUS</Text></Pressable><Pressable onPress={()=>supabase.auth.signOut()}><Text style={styles.switchText}>Sair</Text></Pressable></View></SafeAreaView>;
+  if(driver.status!=="ACTIVE")return<SafeAreaView style={styles.safe}><View style={styles.pending}><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.pendingIcon}>⌛</Text><Text style={styles.pageTitle}>Cadastro em análise</Text><Text style={styles.pendingText}>Status: {driver.status}. Você poderá ficar online assim que a Matriz aprovar seus documentos e cadastro.</Text><Pressable style={styles.secondary} onPress={bootstrap}><Text style={styles.secondaryText}>ATUALIZAR STATUS</Text></Pressable><Pressable onPress={()=>supabase.auth.signOut()}><Text style={styles.switchText}>Sair</Text></Pressable><DeleteAccountButton/></View></SafeAreaView>;
 
   const nextAction=active?.status==="DRIVER_ASSIGNED"?["START_TO_STORE","IR PARA A LOJA"]:active?.status==="DRIVER_TO_STORE"?["ARRIVED_STORE","CONFIRMAR CHEGADA À LOJA"]:active?.status==="DRIVER_AT_STORE"?["CONFIRM_PICKUP","VALIDAR CÓDIGO DE RETIRADA"]:active?.status==="PICKUP_CONFIRMED"?["START_TO_CUSTOMER","INICIAR ENTREGA"]:active?.status==="DRIVER_TO_CUSTOMER"?["ARRIVED_CUSTOMER","CONFIRMAR CHEGADA AO CLIENTE"]:active?.status==="DRIVER_AT_CUSTOMER"?["CONFIRM_DELIVERY","VALIDAR CÓDIGO E CONCLUIR"]:null;
   const needsCode=nextAction?.[0]==="CONFIRM_PICKUP"||nextAction?.[0]==="CONFIRM_DELIVERY";
@@ -119,7 +122,7 @@ export default function App() {
 
   const historyView=<ScrollView contentContainerStyle={styles.content}><View style={styles.rowBetween}><Text style={styles.pageTitle}>Minhas entregas</Text><Pressable onPress={()=>loadHistory()}><Text style={styles.link}>Atualizar</Text></Pressable></View>{history.length?history.map(item=><View style={styles.listRow} key={item.id}><View><Text style={styles.listTitle}>Entrega {item.id.slice(0,8)}</Text><Text style={styles.listMeta}>{item.delivered_at?new Date(item.delivered_at).toLocaleDateString("pt-BR"):"Concluída"}</Text></View><Text style={styles.listValue}>{brl(item.driver_earning)}</Text></View>):<Text style={styles.notice}>Nenhuma entrega concluída ainda.</Text>}</ScrollView>;
   const wallet=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Ganhos</Text><View style={styles.earningsCard}><Text style={styles.earningsLabel}>TOTAL DE ENTREGAS CONCLUÍDAS</Text><Text style={styles.earningsValue}>{brl(completedTotal)}</Text></View><Text style={styles.notice}>Repasses PIX serão exibidos aqui quando o módulo financeiro for habilitado pela Matriz.</Text></ScrollView>;
-  const profile=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Minha conta</Text><View style={styles.profileCard}><Text style={styles.listTitle}>{session.user.user_metadata?.full_name??"Entregador CLICK-FOOD"}</Text><Text style={styles.listMeta}>{session.user.email}</Text><Text style={styles.listMeta}>Status: {driver.status}</Text></View><Pressable style={styles.secondary} onPress={()=>supabase.auth.signOut()}><Text style={styles.secondaryText}>SAIR</Text></Pressable></ScrollView>;
+  const profile=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Minha conta</Text><View style={styles.profileCard}><Text style={styles.listTitle}>{session.user.user_metadata?.full_name??"Entregador CLICK-FOOD"}</Text><Text style={styles.listMeta}>{session.user.email}</Text><Text style={styles.listMeta}>Status: {driver.status}</Text></View><DeleteAccountButton/><Pressable style={styles.secondary} onPress={()=>supabase.auth.signOut()}><Text style={styles.secondaryText}>SAIR</Text></Pressable></ScrollView>;
   const current=screen==="home"?home:screen==="history"?historyView:screen==="wallet"?wallet:profile;
   const tabs:Array<[Screen,string,string]>=[["home","⌂","Início"],["history","▤","Entregas"],["wallet","$","Ganhos"],["profile","○","Perfil"]];
   return<SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content" backgroundColor="#f6f6f6"/><View style={styles.flex}>{current}</View><View style={styles.bottom}>{tabs.map(([key,icon,label])=><Pressable key={key} onPress={()=>setScreen(key)} style={styles.tab}><Text style={[styles.tabIcon,screen===key&&styles.tabActive]}>{icon}</Text><Text style={[styles.tabText,screen===key&&styles.tabActive]}>{label}</Text></Pressable>)}</View><Modal visible={!!offer} transparent animationType="fade"><View style={styles.modalBackdrop}>{offer&&<View style={styles.offerCard}><View style={styles.offerHeader}><Text style={styles.offerLabel}>NOVA ENTREGA</Text><Text style={styles.timerText}>{Math.max(0,Math.ceil((new Date(offer.expiresAt).getTime()-Date.now())/1000))}s</Text></View><Text style={styles.offerStore}>{offer.storeName}</Text><View style={styles.offerRoute}><View><Text style={styles.offerSmall}>ATÉ A LOJA</Text><Text style={styles.offerBig}>{offer.pickupDistanceKm==null?"—":`${offer.pickupDistanceKm.toFixed(1)} km`}</Text></View><Text style={styles.arrow}>→</Text><View><Text style={styles.offerSmall}>ENTREGA</Text><Text style={styles.offerBig}>{offer.deliveryDistanceKm==null?"—":`${offer.deliveryDistanceKm.toFixed(1)} km`}</Text></View></View><Text style={styles.offerSmall}>SEU GANHO</Text><Text style={styles.offerAmount}>{brl(offer.earning)}</Text><View style={styles.offerActions}><Pressable style={styles.reject} onPress={rejectOffer}><Text style={styles.rejectText}>RECUSAR</Text></Pressable><Pressable style={styles.accept} onPress={acceptOffer}><Text style={styles.acceptText}>ACEITAR</Text></Pressable></View></View>}</View></Modal></SafeAreaView>;

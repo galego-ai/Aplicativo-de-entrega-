@@ -15,6 +15,7 @@ import ProductCustomizer, {
 import PixPaymentCard, { type PixCharge } from "./PixPaymentCard";
 import CustomerSupport from "./CustomerSupport";
 import EfiCardPayment, { type CardTokenizationConfig, type PendingCardOrder } from "./EfiCardPayment";
+import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
 
 type Tab = "home" | "search" | "orders" | "support" | "profile";
 type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean };
@@ -67,6 +68,7 @@ function AuthScreen(){
     {!!message&&<Text style={styles.message}>{message}</Text>}
     <Pressable style={[styles.darkButton,busy&&styles.disabled]} onPress={submit} disabled={busy}><Text style={styles.darkButtonText}>{busy?"AGUARDE...":mode==="login"?"ENTRAR":"CRIAR CONTA"}</Text></Pressable>
     <Pressable onPress={()=>{setMode(mode==="login"?"register":"login");setMessage("");}}><Text style={styles.switchText}>{mode==="login"?"Ainda não tenho conta":"Já tenho uma conta"}</Text></Pressable>
+    {mode==="login"&&<PasswordResetLink scheme="clickfood-cliente"/>}
   </ScrollView></SafeAreaView>;
 }
 
@@ -574,6 +576,7 @@ export default function App(){
       {!!wallet.redemptions.length&&<><Text style={styles.loyaltySubtitle}>Meus cupons resgatados</Text>{wallet.redemptions.slice(0,5).map(item=><View style={styles.loyaltyCoupon} key={item.id}><View style={{flex:1}}><Text style={styles.productName}>{item.rewardName}</Text><Text selectable style={styles.loyaltyCode}>{item.coupon?.code??"Cupom indisponível"}</Text><Text style={styles.meta}>{item.status==="AVAILABLE"?"Disponível para uso":item.status==="USED"?"Utilizado":item.status==="EXPIRED"?"Expirado • pontos devolvidos":item.status}</Text></View><Text style={styles.loyaltyPointsSpent}>−{item.points_spent}</Text></View>)}</>}
     </View>):<Text style={styles.empty}>Você ainda não acumulou pontos. Pedidos entregues em lojas com fidelidade ativa geram pontos automaticamente.</Text>}
     <Text style={styles.section}>Endereços salvos</Text>{addresses.map(address=><View style={styles.addressCard} key={address.id}><Text style={styles.productName}>{address.label||"Endereço"}</Text><Text style={styles.meta}>{address.street}, {address.number}</Text></View>)}
+    <DeleteAccountButton/>
     <Pressable style={styles.signOut} onPress={()=>supabase.auth.signOut()}><Text style={styles.signOutText}>SAIR</Text></Pressable>
   </ScrollView>;
 
