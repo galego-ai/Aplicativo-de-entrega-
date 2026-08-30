@@ -13,6 +13,7 @@ type Metrics = { sales_today: number; orders_today: number; average_ticket_today
 type CashSession = { id: string; opening_balance: number; opened_at: string; status: string };
 type CartItem = Product & { quantity: number };
 type PaymentMethod = "CASH" | "PIX" | "CREDIT_CARD" | "DEBIT_CARD";
+type PosPayment = { method: PaymentMethod; amount: string };
 type Inventory = { id: string; product_id: string; quantity: number; minimum_quantity: number; products?: { name: string } | { name: string }[] | null };
 type Coupon = { id: string; code: string; discount_type: string; discount_value: number; minimum_order: number; max_uses: number | null; ends_at: string | null; active: boolean };
 type Finance = { id: string; transaction_type: string; direction: string; amount: number; status: string; created_at: string };
@@ -57,7 +58,8 @@ export default function Home() {
   const [cashSession, setCashSession] = useState<CashSession | null>(null);
   const [openingBalance, setOpeningBalance] = useState("0");
   const [countedCash, setCountedCash] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
+  const [posPayments, setPosPayments] = useState<PosPayment[]>([{ method: "CASH", amount: "" }]);
+  const [lastSaleOrderId, setLastSaleOrderId] = useState("");
   const [processingSale, setProcessingSale] = useState(false);
   const [processingOrder, setProcessingOrder] = useState<string | null>(null);
   const [inventoryDraft, setInventoryDraft] = useState<Record<string, string>>({});
@@ -66,6 +68,8 @@ export default function Home() {
   const [rewardForm, setRewardForm] = useState({ name: "", pointsCost: "500", rewardType: "DISCOUNT_FIXED", rewardValue: "20" });
 
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + Number(item.promotional_price ?? item.price) * item.quantity, 0), [cart]);
+  const posPaymentTotal = useMemo(() => posPayments.length === 1 && !posPayments[0].amount.trim() ? cartTotal : posPayments.reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0), [posPayments, cartTotal]);
+  const posPaymentDifference = Math.round((cartTotal - posPaymentTotal) * 100) / 100;
   const marketplaceOrders = useMemo(() => orders.filter((order) => order.source !== "POS"), [orders]);
   const customerIds = useMemo(() => Array.from(new Set(orders.map((order) => order.customer_id).filter(Boolean))) as string[], [orders]);
   const financeSummary = useMemo(() => finance.reduce((acc, item) => {
@@ -242,14 +246,53 @@ export default function Home() {
     setMessage("Movimentação registrada.");
   }
 
+  function updatePosPayment(index: number, patch: Partial<PosPayment>) {
+    setPosPayments((current) => current.map((payment, paymentIndex) => paymentIndex === index ? { ...payment, ...patch } : payment));
+  }
+
+  function updatePosPaymentAmount(index: number, amount: string) {
+    setPosPayments((current) => {
+      const next = current.map((payment, paymentIndex) => paymentIndex === index ? { ...payment, amount } : payment);
+      if (next.length > 1 && index < next.length - 1) {
+        const usedBeforeLast = next.slice(0, -1).reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0);
+        next[next.length - 1] = { ...next[next.length - 1], amount: Math.max(0, Math.round((cartTotal - usedBeforeLast) * 100) / 100).toFixed(2) };
+      }
+      return next;
+    });
+  }
+
+  function addPosPayment() {
+    setPosPayments((current) => {
+      if (current.length >= 4 || cartTotal <= 0) return current;
+      if (current.length === 1 && !current[0].amount.trim()) {
+        const first = Math.floor(cartTotal * 50) / 100;
+        const second = Math.round((cartTotal - first) * 100) / 100;
+        return [{ ...current[0], amount: first.toFixed(2) }, { method: "PIX", amount: second.toFixed(2) }];
+      }
+      const used = current.reduce((sum, payment) => sum + (Number(payment.amount.replace(",", ".")) || 0), 0);
+      const remaining = Math.max(0, Math.round((cartTotal - used) * 100) / 100);
+      return [...current, { method: "PIX", amount: remaining.toFixed(2) }];
+    });
+  }
+
+  function removePosPayment(index: number) {
+    setPosPayments((current) => current.length <= 1 ? current : current.filter((_, paymentIndex) => paymentIndex !== index));
+  }
+
   async function finalizeSale() {
     if (!store || !cashSession || !cart.length) return;
+    const payments = posPayments.map((payment) => ({ method: payment.method, amount: posPayments.length === 1 && !payment.amount.trim() ? cartTotal : Number(payment.amount.replace(",", ".")) }));
+    if (payments.some((payment) => !Number.isFinite(payment.amount) || payment.amount <= 0)) return setMessage("Informe valores válidos para todas as formas de pagamento.");
+    const paymentSum = Math.round(payments.reduce((sum, payment) => sum + payment.amount, 0) * 100) / 100;
+    if (Math.abs(paymentSum - Math.round(cartTotal * 100) / 100) > 0.009) return setMessage(`A soma dos pagamentos deve ser ${brl(cartTotal)}. Falta ou excede ${brl(Math.abs(cartTotal - paymentSum))}.`);
     setProcessingSale(true);
-    const { data, error } = await supabase.functions.invoke("create-pos-sale", { body: { storeId: store.id, cashSessionId: cashSession.id, items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })), payments: [{ method: paymentMethod, amount: cartTotal }], discount: 0 } });
+    const { data, error } = await supabase.functions.invoke("create-pos-sale", { body: { storeId: store.id, cashSessionId: cashSession.id, items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })), payments, discount: 0 } });
     setProcessingSale(false);
-    if (error || data?.error) return setMessage(data?.error === "INSUFFICIENT_STOCK" ? "Estoque insuficiente." : "Não foi possível concluir a venda.");
+    if (error || data?.error) return setMessage(data?.error === "INSUFFICIENT_STOCK" ? "Estoque insuficiente." : data?.error === "PAYMENT_TOTAL_MISMATCH" ? "A soma dos pagamentos não confere com o total da venda." : "Não foi possível concluir a venda.");
     setCart([]);
-    setMessage("Venda concluída com sucesso.");
+    setPosPayments([{ method: "CASH", amount: "" }]);
+    setLastSaleOrderId(String(data.orderId ?? ""));
+    setMessage("Venda concluída com sucesso. Recibo pronto para imprimir.");
     await loadStoreData(store);
   }
 
@@ -404,7 +447,7 @@ export default function Home() {
 
         {tab === "Dashboard" && <><div className="kpis"><article><span>Vendas hoje</span><b>{brl(metrics.sales_today)}</b></article><article><span>Pedidos hoje</span><b>{metrics.orders_today}</b></article><article><span>Ticket médio</span><b>{brl(metrics.average_ticket_today)}</b></article><article><span>Pedidos em aberto</span><b>{metrics.open_orders}</b></article></div><div className="managementGrid"><article className="mgCard"><h2>Operação</h2><p>Delivery hoje: <b>{metrics.delivery_orders_today}</b></p><p>PDV hoje: <b>{metrics.pos_orders_today}</b></p><p>Cancelados: <b>{metrics.cancelled_today}</b></p></article><article className="mgCard"><h2>Financeiro</h2><p>Créditos: <b>{brl(financeSummary.credit)}</b></p><p>Débitos: <b>{brl(financeSummary.debit)}</b></p><p>Saldo: <b>{brl(financeSummary.credit - financeSummary.debit)}</b></p></article><article className="mgCard"><h2>CLICK Pontos</h2><strong className="bigValue">{bonusBalance}</strong><p>Pontos disponíveis</p></article></div><OrdersPanel /></>}
         {tab === "Pedidos" && <OrdersPanel />}
-        {tab === "PDV" && <><CashPanel /><div className="pos"><section className="catalog"><div className="search">Toque em um produto para adicionar</div><div className="productGrid">{products.filter((item) => item.active).map((item) => <button className="product" onClick={() => addProduct(item)} key={item.id}><span>{item.name}</span><strong>{brl(Number(item.promotional_price ?? item.price))}</strong></button>)}</div></section><aside className="cart"><div className="cartHead"><div><small>PEDIDO ATUAL</small><h2>Balcão</h2></div><button onClick={() => setCart([])}>Limpar</button></div><div className="cartItems">{cart.map((item) => <div className="item" key={item.id}><div><b>{item.quantity}× {item.name}</b><div className="quantity"><button onClick={() => changeQuantity(item.id, -1)}>−</button><button onClick={() => changeQuantity(item.id, 1)}>+</button></div></div><strong>{brl(Number(item.promotional_price ?? item.price) * item.quantity)}</strong></div>)}{!cart.length && <div className="emptyCart">Carrinho vazio.</div>}</div><div className="paymentMethods">{[["CASH", "Dinheiro"], ["PIX", "PIX"], ["DEBIT_CARD", "Débito"], ["CREDIT_CARD", "Crédito"]].map(([value, label]) => <button key={value} className={paymentMethod === value ? "payActive" : ""} onClick={() => setPaymentMethod(value as PaymentMethod)}>{label}</button>)}</div><div className="totals"><div className="grand"><span>Total</span><strong>{brl(cartTotal)}</strong></div></div><button className="checkout" disabled={!cart.length || !cashSession || processingSale} onClick={finalizeSale}>{cashSession ? "FINALIZAR VENDA" : "ABRA O CAIXA"}</button></aside></div></>}
+        {tab === "PDV" && <><CashPanel /><div className="pos"><section className="catalog"><div className="search">Toque em um produto para adicionar</div><div className="productGrid">{products.filter((item) => item.active).map((item) => <button className="product" onClick={() => addProduct(item)} key={item.id}><span>{item.name}</span><strong>{brl(Number(item.promotional_price ?? item.price))}</strong></button>)}</div></section><aside className="cart"><div className="cartHead"><div><small>PEDIDO ATUAL</small><h2>Balcão</h2></div><button onClick={() => setCart([])}>Limpar</button></div><div className="cartItems">{cart.map((item) => <div className="item" key={item.id}><div><b>{item.quantity}× {item.name}</b><div className="quantity"><button onClick={() => changeQuantity(item.id, -1)}>−</button><button onClick={() => changeQuantity(item.id, 1)}>+</button></div></div><strong>{brl(Number(item.promotional_price ?? item.price) * item.quantity)}</strong></div>)}{!cart.length && <div className="emptyCart">Carrinho vazio.</div>}</div><div style={{marginTop:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}><b>Pagamento</b><button onClick={addPosPayment} disabled={!cart.length||posPayments.length>=4} style={{fontSize:11}}>+ DIVIDIR PAGAMENTO</button></div>{posPayments.map((payment,index)=><div key={index} style={{display:"grid",gridTemplateColumns:"1fr 110px auto",gap:7,marginBottom:7}}><select value={payment.method} onChange={(event)=>updatePosPayment(index,{method:event.target.value as PaymentMethod})}><option value="CASH">Dinheiro</option><option value="PIX">PIX</option><option value="DEBIT_CARD">Débito</option><option value="CREDIT_CARD">Crédito</option></select><input inputMode="decimal" placeholder={posPayments.length===1?cartTotal.toFixed(2):"0,00"} value={payment.amount} onChange={(event)=>updatePosPaymentAmount(index,event.target.value)} />{posPayments.length>1?<button onClick={()=>removePosPayment(index)} aria-label="Remover pagamento">×</button>:<span />}</div>)}<small style={{display:"block",color:Math.abs(posPaymentDifference)<0.01?"#267a44":"#9a2828",marginTop:5}}>{posPayments.length===1&&!posPayments[0].amount.trim()?`Valor total: ${brl(cartTotal)}`:`Informado: ${brl(posPaymentTotal)} • ${posPaymentDifference>0?`Falta ${brl(posPaymentDifference)}`:posPaymentDifference<0?`Excede ${brl(Math.abs(posPaymentDifference))}`:"Total conferido"}`}</small></div><div className="totals"><div className="grand"><span>Total</span><strong>{brl(cartTotal)}</strong></div></div><button className="checkout" disabled={!cart.length || !cashSession || processingSale || Math.abs(posPaymentDifference)>=0.01} onClick={finalizeSale}>{cashSession ? processingSale?"PROCESSANDO...":"FINALIZAR VENDA" : "ABRA O CAIXA"}</button>{lastSaleOrderId&&<a href={`/recibo?orderId=${encodeURIComponent(lastSaleOrderId)}`} style={{display:"block",textAlign:"center",marginTop:9,padding:11,borderRadius:10,background:"#111",color:"#fff",fontWeight:900,textDecoration:"none"}}>IMPRIMIR ÚLTIMO RECIBO</a>}</aside></div></>}
         {tab === "Produtos" && <StoreSetup storeId={store.id} onChanged={() => loadStoreData(store)} />}
         {tab === "Estoque" && <section className="mgCard"><h2>Controle de estoque</h2><p className="muted">Cada ajuste gera histórico.</p><div className="dataList">{products.map((product) => { const stock = inventory.find((item) => item.product_id === product.id); return <div className="dataRow" key={product.id}><div><b>{product.name}</b><small>Atual: {stock ? stock.quantity : "não controlado"}</small></div><div className="rowActions"><input value={inventoryDraft[product.id] ?? String(stock?.quantity ?? 0)} onChange={(event) => setInventoryDraft({ ...inventoryDraft, [product.id]: event.target.value })} /><button onClick={() => adjustStock(product.id)}>Ajustar</button></div></div>; })}</div></section>}
         {tab === "Entregas" && <section className="mgCard"><h2>Entregas</h2><div className="dataList">{deliveries.map((delivery) => { const order = Array.isArray(delivery.orders) ? delivery.orders[0] : delivery.orders; return <div className="dataRow" key={delivery.id}><div><b>Pedido #{order?.order_number ?? "-"}</b><small>{delivery.status} • {dateTime(delivery.created_at)}</small></div><div><b>{brl(delivery.delivery_fee)}</b><small>Entregador {brl(delivery.driver_earning)}</small></div></div>; })}{!deliveries.length && <div className="emptyRow">Nenhuma entrega registrada.</div>}</div></section>}
