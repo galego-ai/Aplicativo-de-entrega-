@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Image, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
 import MapView, { Marker } from "react-native-maps";
 import type { Session } from "@supabase/supabase-js";
@@ -14,7 +14,8 @@ import ProductCustomizer, {
 } from "./ProductCustomizer";
 
 type Tab = "home" | "search" | "orders" | "profile";
-type Store = { id:string; name:string; description:string|null; minimum_order:number; average_preparation_time:number };
+type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number };
+type ProductWithMedia = Product & { image_url:string|null };
 type Address = { id:string; label:string|null; street:string; number:string|null; district:string|null; reference:string|null };
 type StoreRelation = { name:string; latitude:number|null; longitude:number|null };
 type Order = { id:string; order_number:number; store_id:string; address_id:string|null; delivery_type:string; total:number; status:string; payment_status:string; created_at:string; stores:StoreRelation|StoreRelation[]|null };
@@ -72,8 +73,8 @@ function promotionPrice(base:number,productId:string,promotions:CustomerPromotio
 export default function App(){
   const[session,setSession]=useState<Session|null>(null); const[loading,setLoading]=useState(true); const[tab,setTab]=useState<Tab>("home");
   const[stores,setStores]=useState<Store[]>([]); const[orders,setOrders]=useState<Order[]>([]); const[query,setQuery]=useState(""); const[message,setMessage]=useState("");
-  const[selectedStore,setSelectedStore]=useState<Store|null>(null); const[products,setProducts]=useState<Product[]>([]); const[cart,setCart]=useState<CartItem[]>([]);
-  const[variants,setVariants]=useState<CustomerVariant[]>([]); const[optionGroups,setOptionGroups]=useState<CustomerOptionGroup[]>([]); const[productOptions,setProductOptions]=useState<CustomerOption[]>([]); const[productGroupLinks,setProductGroupLinks]=useState<ProductGroupLink[]>([]); const[promotions,setPromotions]=useState<CustomerPromotion[]>([]); const[selectedProduct,setSelectedProduct]=useState<Product|null>(null);
+  const[selectedStore,setSelectedStore]=useState<Store|null>(null); const[products,setProducts]=useState<ProductWithMedia[]>([]); const[cart,setCart]=useState<CartItem[]>([]);
+  const[variants,setVariants]=useState<CustomerVariant[]>([]); const[optionGroups,setOptionGroups]=useState<CustomerOptionGroup[]>([]); const[productOptions,setProductOptions]=useState<CustomerOption[]>([]); const[productGroupLinks,setProductGroupLinks]=useState<ProductGroupLink[]>([]); const[promotions,setPromotions]=useState<CustomerPromotion[]>([]); const[selectedProduct,setSelectedProduct]=useState<ProductWithMedia|null>(null);
   const[addresses,setAddresses]=useState<Address[]>([]); const[selectedAddressId,setSelectedAddressId]=useState(""); const[deliveryType,setDeliveryType]=useState<DeliveryType>("DELIVERY"); const[coupon,setCoupon]=useState(""); const[placing,setPlacing]=useState(false);
   const[addressForm,setAddressForm]=useState({label:"Casa",street:"",number:"",district:"",reference:""}); const[savingAddress,setSavingAddress]=useState(false);
   const[tracking,setTracking]=useState<Tracking|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);
@@ -88,7 +89,7 @@ export default function App(){
   useEffect(()=>{if(!session||tab!=="orders")return;const timer=setInterval(()=>loadOrders(),6000);return()=>clearInterval(timer);},[session?.user.id,tab]);
 
   async function loadStores(){
-    const{data}=await supabase.from("stores").select("id,name,description,minimum_order,average_preparation_time").eq("status","ACTIVE").order("name").limit(50);
+    const{data}=await supabase.from("stores").select("id,name,description,logo_url,cover_url,minimum_order,average_preparation_time").eq("status","ACTIVE").order("name").limit(50);
     setStores((data??[]).map((s:any)=>({...s,minimum_order:Number(s.minimum_order),average_preparation_time:Number(s.average_preparation_time)})));
   }
 
@@ -131,9 +132,9 @@ export default function App(){
 
   async function openStore(store:Store){
     setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);
-    const{data,error}=await supabase.from("products").select("id,name,description,price,promotional_price").eq("store_id",store.id).eq("active",true).eq("available_delivery",true).order("name");
+    const{data,error}=await supabase.from("products").select("id,name,description,image_url,price,promotional_price").eq("store_id",store.id).eq("active",true).eq("available_delivery",true).order("name");
     if(error){setMessage("Não foi possível abrir o cardápio.");return;}
-    const ps=(data??[]).map((p:any)=>({...p,price:Number(p.price),promotional_price:p.promotional_price==null?null:Number(p.promotional_price)})) as Product[];
+    const ps=(data??[]).map((p:any)=>({...p,price:Number(p.price),promotional_price:p.promotional_price==null?null:Number(p.promotional_price)})) as ProductWithMedia[];
     setProducts(ps);
     const productIds=ps.map(p=>p.id);
     if(!productIds.length){setVariants([]);setOptionGroups([]);setProductOptions([]);setProductGroupLinks([]);setPromotions([]);return;}
@@ -171,7 +172,7 @@ export default function App(){
     return Math.min(...bases.map(base=>promotionPrice(base,product.id,promotions)));
   }
 
-  function beginProduct(product:Product){
+  function beginProduct(product:ProductWithMedia){
     const needsCustomization=variantsFor(product.id).length>0||groupsFor(product.id).length>0;
     if(needsCustomization){setSelectedProduct(product);setMessage("");return;}
     addCustomized({productId:product.id,productName:product.name,unitPrice:promotionPrice(Number(product.promotional_price??product.price),product.id,promotions),quantity:1,options:[]});
@@ -211,7 +212,9 @@ export default function App(){
     if(deliveryType==="DELIVERY"){
       const quoteResult=await supabase.functions.invoke("quote-delivery",{body:{storeId:selectedStore.id,addressId:selectedAddressId}});
       if(quoteResult.error||quoteResult.data?.error){
-        const code=quoteResult.data?.error;setMessage(code==="OUTSIDE_DELIVERY_RADIUS"?"Este endereço está fora da área de entrega.":"Não foi possível calcular o frete. Confira a localização do endereço.");setPlacing(false);return;
+        const code=quoteResult.data?.error;
+        const quoteErrors:Record<string,string>={OUTSIDE_DELIVERY_RADIUS:"Este endereço está fora da área de entrega.",STORE_CLOSED:"Esta loja está fechada agora. Consulte o horário e tente novamente quando ela abrir.",STORE_UNAVAILABLE:"Esta loja está temporariamente indisponível.",DELIVERY_DISABLED:"A loja não está aceitando entregas neste momento.",LOCATION_COORDINATES_REQUIRED:"Não foi possível calcular o frete porque faltam coordenadas da loja ou do endereço."};
+        setMessage(quoteErrors[code]??"Não foi possível calcular o frete. Confira a localização do endereço.");setPlacing(false);return;
       }
       deliveryQuoteId=quoteResult.data.quote.id;deliveryFee=Number(quoteResult.data.quote.fee);
     }
@@ -241,6 +244,13 @@ export default function App(){
         REQUIRED_OPTION_MISSING:"Complete os complementos obrigatórios.",
         TOO_MANY_OPTIONS:"Há complementos acima do limite permitido.",
         OPTION_NOT_ALLOWED:"Um complemento escolhido não está mais disponível.",
+        STORE_CLOSED:"Esta loja está fechada agora.",
+        STORE_UNAVAILABLE:"Esta loja está temporariamente indisponível.",
+        DELIVERY_DISABLED:"A loja não está aceitando entregas neste momento.",
+        PICKUP_DISABLED:"A retirada na loja está desativada neste momento.",
+        INSUFFICIENT_STOCK:"Um dos produtos não possui quantidade suficiente em estoque.",
+        INVENTORY_NOT_CONFIGURED:"Um produto com controle de estoque precisa ser ajustado pela loja antes da venda.",
+        PRODUCT_UNAVAILABLE:"Um dos produtos ficou indisponível. Atualize o cardápio.",
       };
       setMessage(errors[code]??"Não foi possível enviar o pedido. Atualize o cardápio e tente novamente.");setPlacing(false);return;
     }
@@ -279,8 +289,8 @@ export default function App(){
   if(selectedStore){
     return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><ScrollView contentContainerStyle={styles.scroll}>
       <Pressable onPress={()=>{setSelectedStore(null);setSelectedProduct(null);setMessage("");}}><Text style={styles.back}>‹ Voltar</Text></Pressable>
-      <Text style={styles.storeTitle}>{selectedStore.name}</Text>
-      <Text style={styles.meta}>{selectedStore.description||"Cardápio CLICK-FOOD"}</Text>
+      {selectedStore.cover_url?<Image source={{uri:selectedStore.cover_url}} style={styles.storeCover}/>:<View style={styles.storeCoverFallback}><Text style={styles.storeCoverFallbackText}>CLICK-FOOD</Text></View>}
+      <View style={styles.storeHeading}>{selectedStore.logo_url?<Image source={{uri:selectedStore.logo_url}} style={styles.storeLogo}/>:<View style={styles.storeLogoFallback}><Text style={styles.storeLogoFallbackText}>CF</Text></View>}<View style={{flex:1}}><Text style={styles.storeTitle}>{selectedStore.name}</Text><Text style={styles.meta}>{selectedStore.description||"Cardápio CLICK-FOOD"}</Text></View></View>
       <Text style={styles.meta}>Pedido mínimo {brl(selectedStore.minimum_order)} • preparo médio {selectedStore.average_preparation_time} min</Text>
       {promotions.some(p=>p.promotion_type==="FREE_DELIVERY")&&<Text style={styles.promoBanner}>🚚 Entrega grátis em promoção</Text>}
       {!!message&&<Text style={styles.notice}>{message}</Text>}
@@ -293,6 +303,7 @@ export default function App(){
         const shown=displayProductPrice(product);
         const discounted=shown<base&&!hasVariants;
         return <View style={styles.productRow} key={product.id}>
+          {product.image_url?<Image source={{uri:product.image_url}} style={styles.productImage}/>:<View style={styles.productImageFallback}><Text style={styles.productImageFallbackText}>🍽️</Text></View>}
           <View style={{flex:1}}>
             <Text style={styles.productName}>{product.name}</Text><Text style={styles.meta}>{product.description||""}</Text>
             <Text style={styles.price}>{hasVariants?"A partir de ":""}{brl(shown)}</Text>
@@ -350,7 +361,7 @@ export default function App(){
 
       <Text style={styles.section}>Cupom</Text>
       <TextInput style={styles.input} placeholder="Digite o código do cupom" autoCapitalize="characters" value={coupon} onChangeText={setCoupon}/>
-      <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete e cupom antes de criar o pedido. Pagamento operacional disponível agora: dinheiro.</Text></View>
+      <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. Pagamento operacional disponível agora: dinheiro.</Text></View>
       <Pressable style={[styles.checkout,!cart.length&&styles.disabled]} disabled={!cart.length||placing} onPress={placeOrder}><Text style={styles.checkoutText}>{placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
     </ScrollView></SafeAreaView>;
   }
@@ -360,12 +371,12 @@ export default function App(){
     <Pressable style={styles.searchBox} onPress={()=>setTab("search")}><Text>⌕  O que você quer pedir hoje?</Text></Pressable>
     <View style={styles.hero}><View style={{flex:1}}><Text style={styles.heroKicker}>CLICK-FOOD</Text><Text style={styles.heroTitle}>Peça, acompanhe e aproveite.</Text><Text style={styles.heroText}>Seu pedido é calculado e validado com segurança no servidor.</Text></View><Text style={styles.heroEmoji}>🍔</Text></View>
     <Text style={styles.section}>Lojas</Text>
-    {stores.length?stores.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}><View style={styles.storeIcon}><Text style={{fontSize:32}}>🍽️</Text></View><View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text><Text style={styles.meta}>Mínimo {brl(store.minimum_order)}</Text></View><Text>›</Text></Pressable>):<Text style={styles.empty}>Ainda não há lojas ativas.</Text>}
+    {stores.length?stores.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}>{store.logo_url?<Image source={{uri:store.logo_url}} style={styles.storeLogoCard}/>:<View style={styles.storeIcon}><Text style={{fontSize:32}}>🍽️</Text></View>}<View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text><Text style={styles.meta}>Mínimo {brl(store.minimum_order)}</Text></View><Text>›</Text></Pressable>):<Text style={styles.empty}>Ainda não há lojas ativas.</Text>}
   </ScrollView>;
 
   const search=<ScrollView contentContainerStyle={styles.scroll}>
     <Text style={styles.pageTitle}>Buscar</Text><TextInput style={styles.input} autoFocus placeholder="Nome da loja" value={query} onChangeText={setQuery}/>
-    {filtered.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}><View style={styles.storeIcon}><Text style={{fontSize:30}}>🍽️</Text></View><View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text></View><Text>›</Text></Pressable>)}
+    {filtered.map(store=><Pressable style={styles.storeCard} key={store.id} onPress={()=>openStore(store)}>{store.logo_url?<Image source={{uri:store.logo_url}} style={styles.storeLogoCard}/>:<View style={styles.storeIcon}><Text style={{fontSize:30}}>🍽️</Text></View>}<View style={{flex:1}}><Text style={styles.productName}>{store.name}</Text><Text style={styles.meta}>{store.description||"Cardápio disponível"}</Text></View><Text>›</Text></Pressable>)}
   </ScrollView>;
 
   const trackedOrder=tracking?orders.find(order=>order.id===tracking.orderId):null;
@@ -414,8 +425,8 @@ const styles=StyleSheet.create({
   darkButton:{backgroundColor:"#111",padding:15,borderRadius:13,alignItems:"center"},darkButtonText:{color:"#fff",fontWeight:"900"},switchText:{textAlign:"center",fontWeight:"800",color:"#8b7000",padding:17},disabled:{opacity:.5},
   header:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:18},avatar:{width:44,height:44,borderRadius:22,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},
   searchBox:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:16,marginBottom:16},hero:{backgroundColor:"#111",borderRadius:20,padding:18,flexDirection:"row",alignItems:"center"},heroKicker:{color:"#f4c400",fontWeight:"900",fontSize:10},heroTitle:{color:"#fff",fontSize:22,fontWeight:"900",marginTop:6},heroText:{color:"#aaa",fontSize:11,marginTop:7},heroEmoji:{fontSize:48},
-  section:{fontSize:19,fontWeight:"900",marginTop:22,marginBottom:10},pageTitle:{fontSize:28,fontWeight:"900",marginBottom:18},storeCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:16,padding:13,flexDirection:"row",alignItems:"center",gap:12,marginBottom:9},storeIcon:{width:50,height:50,borderRadius:14,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},storeTitle:{fontSize:28,fontWeight:"900",marginTop:8},
-  productRow:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:14,marginBottom:9,flexDirection:"row",alignItems:"center",gap:10},productName:{fontWeight:"900",fontSize:15},meta:{color:"#777",fontSize:11,marginTop:4},price:{fontWeight:"900",color:"#8d7000",marginTop:6},addButton:{width:42,height:42,borderRadius:13,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},addText:{fontSize:24,fontWeight:"900"},
+  section:{fontSize:19,fontWeight:"900",marginTop:22,marginBottom:10},pageTitle:{fontSize:28,fontWeight:"900",marginBottom:18},storeCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:16,padding:13,flexDirection:"row",alignItems:"center",gap:12,marginBottom:9},storeIcon:{width:50,height:50,borderRadius:14,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},storeLogoCard:{width:50,height:50,borderRadius:14,backgroundColor:"#f1f1f1"},storeTitle:{fontSize:28,fontWeight:"900",marginTop:4},storeCover:{width:"100%",height:160,borderRadius:18,marginTop:12,marginBottom:12,backgroundColor:"#ddd"},storeCoverFallback:{height:130,borderRadius:18,marginTop:12,marginBottom:12,backgroundColor:"#111",alignItems:"center",justifyContent:"center"},storeCoverFallbackText:{color:"#f4c400",fontSize:24,fontWeight:"900"},storeHeading:{flexDirection:"row",alignItems:"center",gap:12,marginBottom:4},storeLogo:{width:58,height:58,borderRadius:16,backgroundColor:"#eee"},storeLogoFallback:{width:58,height:58,borderRadius:16,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},storeLogoFallbackText:{fontWeight:"900",fontSize:18},
+  productRow:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:12,marginBottom:9,flexDirection:"row",alignItems:"center",gap:10},productImage:{width:74,height:74,borderRadius:12,backgroundColor:"#eee"},productImageFallback:{width:74,height:74,borderRadius:12,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},productImageFallbackText:{fontSize:28},productName:{fontWeight:"900",fontSize:15},meta:{color:"#777",fontSize:11,marginTop:4},price:{fontWeight:"900",color:"#8d7000",marginTop:6},addButton:{width:42,height:42,borderRadius:13,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},addText:{fontSize:24,fontWeight:"900"},
   customHint:{fontSize:10,color:"#555",fontWeight:"800",marginTop:4},discountHint:{fontSize:10,color:"#26804a",fontWeight:"800",marginTop:3},promoBanner:{backgroundColor:"#dcf7e7",color:"#17673b",padding:10,borderRadius:11,fontWeight:"800",fontSize:11,marginTop:12},
   cartRow:{backgroundColor:"#fff",borderRadius:14,padding:13,marginBottom:8,flexDirection:"row",alignItems:"center"},cartOptions:{fontSize:10,color:"#666",marginTop:4,lineHeight:14},qty:{flexDirection:"row",gap:14,alignItems:"center",borderWidth:1,borderColor:"#ddd",borderRadius:10,paddingVertical:8,paddingHorizontal:10},
   segment:{flexDirection:"row",gap:7,marginTop:18},segmentButton:{flex:1,borderWidth:1,borderColor:"#ddd",padding:12,borderRadius:12,alignItems:"center"},segmentActive:{backgroundColor:"#111",borderColor:"#111"},segmentActiveText:{color:"#fff",fontWeight:"900"},
