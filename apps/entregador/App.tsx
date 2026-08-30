@@ -12,6 +12,7 @@ import {
   resumeBackgroundTrackingIfAuthorized,
 } from "./BackgroundLocation";
 import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
+import DriverWallet from "./DriverWallet";
 
 type Screen = "home" | "history" | "wallet" | "profile";
 type Driver = { id: string; status: string; online: boolean; rating: number; acceptance_rate: number; city_id: string | null };
@@ -157,7 +158,7 @@ export default function App() {
   </ScrollView>;
 
   const historyView=<ScrollView contentContainerStyle={styles.content}><View style={styles.rowBetween}><Text style={styles.pageTitle}>Minhas entregas</Text><Pressable onPress={()=>loadHistory()}><Text style={styles.link}>Atualizar</Text></Pressable></View>{history.length?history.map(item=><View style={styles.listRow} key={item.id}><View><Text style={styles.listTitle}>Entrega {item.id.slice(0,8)}</Text><Text style={styles.listMeta}>{item.delivered_at?new Date(item.delivered_at).toLocaleDateString("pt-BR"):"Concluída"}</Text></View><Text style={styles.listValue}>{brl(item.driver_earning)}</Text></View>):<Text style={styles.notice}>Nenhuma entrega concluída ainda.</Text>}</ScrollView>;
-  const wallet=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Ganhos</Text><View style={styles.earningsCard}><Text style={styles.earningsLabel}>TOTAL DE ENTREGAS CONCLUÍDAS</Text><Text style={styles.earningsValue}>{brl(completedTotal)}</Text></View><Text style={styles.notice}>Repasses PIX serão exibidos aqui quando o módulo financeiro for habilitado pela Matriz.</Text></ScrollView>;
+  const wallet=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Ganhos e repasses</Text><DriverWallet/></ScrollView>;
   const profile=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Minha conta</Text><View style={styles.profileCard}><Text style={styles.listTitle}>{session.user.user_metadata?.full_name??"Entregador CLICK-FOOD"}</Text><Text style={styles.listMeta}>{session.user.email}</Text><Text style={styles.listMeta}>Status: {driver.status}</Text></View><DeleteAccountButton/><Pressable style={styles.secondary} onPress={()=>supabase.auth.signOut()}><Text style={styles.secondaryText}>SAIR</Text></Pressable></ScrollView>;
   const current=screen==="home"?home:screen==="history"?historyView:screen==="wallet"?wallet:profile;
   const tabs:Array<[Screen,string,string]>=[["home","⌂","Início"],["history","▤","Entregas"],["wallet","$","Ganhos"],["profile","○","Perfil"]];
