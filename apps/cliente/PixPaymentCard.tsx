@@ -13,7 +13,7 @@ export type PixCharge = {
 
 type Props = {
   charge: PixCharge;
-  onRefresh: () => Promise<void>;
+  onRefresh: () => Promise<unknown>;
   busy?: boolean;
 };
 
