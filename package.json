@@ -11,6 +11,7 @@
     "dev:cliente": "npm run start --workspace=@clickfood/cliente",
     "dev:entregador": "npm run start --workspace=@clickfood/entregador",
     "build:admin": "npm run build --workspace=@clickfood/admin",
-    "build:lojista": "npm run build --workspace=@clickfood/lojista"
+    "build:lojista": "npm run build --workspace=@clickfood/lojista",
+    "test:shared": "node --test packages/shared/test/*.test.ts"
   }
 }
