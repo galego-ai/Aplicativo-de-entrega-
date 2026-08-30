@@ -12,6 +12,7 @@ import ProductCustomizer, {
   type CustomerPromotion,
   type CustomizedItem,
 } from "./ProductCustomizer";
+import PixPaymentCard, { type PixCharge } from "./PixPaymentCard";
 
 type Tab = "home" | "search" | "orders" | "profile";
 type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean };
@@ -21,6 +22,7 @@ type StoreRelation = { name:string; latitude:number|null; longitude:number|null 
 type Order = { id:string; order_number:number; store_id:string; address_id:string|null; delivery_type:string; total:number; status:string; payment_status:string; created_at:string; stores:StoreRelation|StoreRelation[]|null };
 type CartItem = CustomizedItem & { cartKey:string };
 type DeliveryType = "DELIVERY"|"PICKUP";
+type PaymentMethod = "CASH"|"PIX";
 type Tracking = { orderId:string; deliveryId:string; deliveryStatus:string; driverId:string|null; driverLat:number|null; driverLng:number|null; storeLat:number|null; storeLng:number|null; destinationLat:number|null; destinationLng:number|null };
 type ProductGroupLink = { product_id:string; option_group_id:string };
 
@@ -76,6 +78,7 @@ export default function App(){
   const[selectedStore,setSelectedStore]=useState<Store|null>(null); const[products,setProducts]=useState<ProductWithMedia[]>([]); const[cart,setCart]=useState<CartItem[]>([]);
   const[variants,setVariants]=useState<CustomerVariant[]>([]); const[optionGroups,setOptionGroups]=useState<CustomerOptionGroup[]>([]); const[productOptions,setProductOptions]=useState<CustomerOption[]>([]); const[productGroupLinks,setProductGroupLinks]=useState<ProductGroupLink[]>([]); const[promotions,setPromotions]=useState<CustomerPromotion[]>([]); const[selectedProduct,setSelectedProduct]=useState<ProductWithMedia|null>(null);
   const[addresses,setAddresses]=useState<Address[]>([]); const[selectedAddressId,setSelectedAddressId]=useState(""); const[deliveryType,setDeliveryType]=useState<DeliveryType>("DELIVERY"); const[coupon,setCoupon]=useState(""); const[placing,setPlacing]=useState(false);
+  const[paymentMethod,setPaymentMethod]=useState<PaymentMethod>("CASH"); const[availablePaymentMethods,setAvailablePaymentMethods]=useState<PaymentMethod[]>(["CASH"]); const[pixCharge,setPixCharge]=useState<PixCharge|null>(null); const[pixBusy,setPixBusy]=useState(false);
   const[addressForm,setAddressForm]=useState({label:"Casa",street:"",number:"",district:"",reference:""}); const[savingAddress,setSavingAddress]=useState(false);
   const[tracking,setTracking]=useState<Tracking|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);
 
@@ -85,7 +88,7 @@ export default function App(){
   },0),[cart]);
 
   useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false);});const{data}=supabase.auth.onAuthStateChange((_event,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[]);
-  useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();}else{setTracking(null);setOrders([]);}},[session]);
+  useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();}else{setTracking(null);setOrders([]);setPixCharge(null);}},[session]);
   useEffect(()=>{if(!session||tab!=="orders")return;const timer=setInterval(()=>loadOrders(),6000);return()=>clearInterval(timer);},[session?.user.id,tab]);
   useEffect(()=>{if(!session)return;const timer=setInterval(()=>loadStores(),60000);return()=>clearInterval(timer);},[session?.user.id]);
 
@@ -97,11 +100,34 @@ export default function App(){
     setSelectedStore(current=>current?(rows.find(s=>s.id===current.id)??current):current);
   }
 
+  async function loadPaymentMethods(){
+    const{data,error}=await supabase.functions.invoke("payment-methods",{body:{}});
+    if(error||data?.error){setAvailablePaymentMethods(["CASH"]);setPaymentMethod("CASH");return;}
+    const methods=(data?.methods??[]).filter((m:string)=>m==="CASH"||m==="PIX") as PaymentMethod[];
+    const next:PaymentMethod[]=methods.includes("CASH")?methods:(["CASH",...methods] as PaymentMethod[]);
+    setAvailablePaymentMethods(next);setPaymentMethod(current=>next.includes(current)?current:"CASH");
+  }
+
+  async function loadPendingPix(currentOrders:Order[]){
+    const pending=currentOrders.find(order=>order.status==="PENDING_PAYMENT"&&order.payment_status!=="PAID");
+    if(!pending){setPixCharge(null);return;}
+    const{data}=await supabase.from("efi_pix_charges").select("txid,brcode,status,expires_at").eq("order_id",pending.id).order("created_at",{ascending:false}).limit(1).maybeSingle();
+    if(data?.brcode)setPixCharge({orderId:pending.id,txid:data.txid,brcode:data.brcode,status:data.status,expires_at:data.expires_at});
+  }
+
+  async function refreshPix(orderId:string){
+    setPixBusy(true);
+    const{data,error}=await supabase.functions.invoke("efi-pix-create",{body:{orderId}});
+    if(error||data?.error||!data?.charge?.brcode){setMessage("Não foi possível gerar o PIX agora. Tente novamente.");setPixBusy(false);return false;}
+    setPixCharge({orderId,txid:data.charge.txid,brcode:data.charge.brcode,status:data.charge.status,expires_at:data.charge.expires_at});
+    setMessage("PIX atualizado. Assim que o pagamento for confirmado, o pedido seguirá automaticamente para a loja.");setPixBusy(false);return true;
+  }
+
   async function loadOrders(){
     if(!session)return;
     const{data}=await supabase.from("orders").select("id,order_number,store_id,address_id,delivery_type,total,status,payment_status,created_at,stores(name,latitude,longitude)").eq("customer_id",session.user.id).order("created_at",{ascending:false}).limit(30);
     const rows=(data??[]).map((o:any)=>({...o,total:Number(o.total)})) as Order[];
-    setOrders(rows);await loadTracking(rows);
+    setOrders(rows);await loadPendingPix(rows);await loadTracking(rows);
   }
 
   async function loadTracking(currentOrders:Order[]){
@@ -228,7 +254,7 @@ export default function App(){
       deliveryType,
       addressId:deliveryType==="DELIVERY"?selectedAddressId:undefined,
       deliveryQuoteId,
-      paymentMethod:"CASH",
+      paymentMethod,
       couponCode:coupon.trim()||undefined,
       items:cart.map(item=>({
         productId:item.productId,
@@ -261,7 +287,20 @@ export default function App(){
     }
     const total=Number(result.data.total);
     const promo=Number(result.data.promotionDiscount??0);
-    setMessage(`Pedido enviado! Total ${brl(total)}${deliveryFee?` • entrega calculada ${brl(deliveryFee)}`:""}${promo>0?` • economia ${brl(promo)}`:""}.`);
+    const orderId=String(result.data.orderId);
+    if(paymentMethod==="PIX"){
+      const pixResult=await supabase.functions.invoke("efi-pix-create",{body:{orderId}});
+      if(pixResult.error||pixResult.data?.error||!pixResult.data?.charge?.brcode){
+        await supabase.functions.invoke("customer-cancel-order",{body:{orderId,reason:"Cobrança PIX não pôde ser criada"}});
+        setMessage("Não foi possível gerar o PIX e o pedido foi cancelado automaticamente. Nenhum pagamento foi realizado.");
+        await loadOrders();setPlacing(false);return;
+      }
+      const charge=pixResult.data.charge;
+      setPixCharge({orderId,txid:charge.txid,brcode:charge.brcode,status:charge.status,expires_at:charge.expires_at});
+      setMessage(`PIX gerado! Total ${brl(total)}. Pague pelo QR Code ou Pix Copia e Cola.`);
+    }else{
+      setMessage(`Pedido enviado! Total ${brl(total)}${deliveryFee?` • entrega calculada ${brl(deliveryFee)}`:""}${promo>0?` • economia ${brl(promo)}`:""}.`);
+    }
     setCart([]);setCoupon("");setSelectedStore(null);setSelectedProduct(null);setTab("orders");await loadOrders();setPlacing(false);
   }
 
@@ -367,7 +406,13 @@ export default function App(){
 
       <Text style={styles.section}>Cupom</Text>
       <TextInput style={styles.input} placeholder="Digite o código do cupom" autoCapitalize="characters" value={coupon} onChangeText={setCoupon}/>
-      <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. Pagamento operacional disponível agora: dinheiro.</Text></View>
+      <Text style={styles.section}>Forma de pagamento</Text>
+      <View style={styles.segment}>
+        <Pressable style={[styles.segmentButton,paymentMethod==="CASH"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CASH")}><Text style={paymentMethod==="CASH"?styles.segmentActiveText:undefined}>Dinheiro</Text></Pressable>
+        {availablePaymentMethods.includes("PIX")&&<Pressable style={[styles.segmentButton,paymentMethod==="PIX"&&styles.segmentActive]} onPress={()=>setPaymentMethod("PIX")}><Text style={paymentMethod==="PIX"?styles.segmentActiveText:undefined}>PIX • Efí</Text></Pressable>}
+      </View>
+      {!availablePaymentMethods.includes("PIX")&&<Text style={styles.meta}>PIX será exibido automaticamente quando a Efí Bank estiver ativada pela Matriz.</Text>}
+      <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
       <Pressable style={[styles.checkout,(!cart.length||!selectedStore.open_now)&&styles.disabled]} disabled={!cart.length||placing||!selectedStore.open_now} onPress={placeOrder}><Text style={styles.checkoutText}>{!selectedStore.open_now?"LOJA FECHADA":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
     </ScrollView></SafeAreaView>;
   }
@@ -390,6 +435,7 @@ export default function App(){
 
   const ordersView=<ScrollView contentContainerStyle={styles.scroll}>
     <View style={styles.rowBetween}><Text style={styles.pageTitle}>Meus pedidos</Text><Pressable onPress={loadOrders}><Text style={styles.link}>Atualizar</Text></Pressable></View>{!!message&&<Text style={styles.notice}>{message}</Text>}
+    {pixCharge&&<PixPaymentCard charge={pixCharge} busy={pixBusy} onRefresh={()=>refreshPix(pixCharge.orderId)}/>}
     {tracking&&trackedOrder&&<View style={styles.trackingCard}>
       {tracking.deliveryStatus==="DRIVER_AT_CUSTOMER"&&<View style={styles.arrivedBanner}><Text style={styles.arrivedTitle}>Seu motorista chegou!</Text><Text style={styles.arrivedText}>Dirija-se ao local combinado para receber o pedido.</Text></View>}
       <Text style={styles.trackingKicker}>ACOMPANHAMENTO EM TEMPO REAL</Text><Text style={styles.trackingTitle}>Pedido #{trackedOrder.order_number}</Text><Text style={styles.trackingStatus}>{statusLabel[trackedOrder.status]??trackedOrder.status}</Text>
