@@ -1,0 +1,72 @@
+name: Patch refund UI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-refund-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch App Cliente refund UX
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/cliente/App.tsx')
+          s=p.read_text()
+
+          old='type Order = { id:string; order_number:number; store_id:string; address_id:string|null; delivery_type:string; total:number; status:string; payment_status:string; created_at:string; stores:StoreRelation|StoreRelation[]|null };\n'
+          new=old+'type RefundInfo = { payment_id:string; status:string; amount:number; reason:string|null; created_at:string; completed_at:string|null };\n'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='const statusLabel:Record<string,string>={PENDING_PAYMENT:"Aguardando pagamento",WAITING_STORE:"Aguardando a loja",ACCEPTED:"Pedido aceito",PREPARING:"Em preparação",READY:"Pronto",WAITING_DRIVER:"Procurando entregador",DRIVER_ASSIGNED:"Entregador confirmado",DRIVER_TO_STORE:"Entregador indo à loja",PICKUP_CONFIRMED:"Pedido retirado",DRIVER_TO_CUSTOMER:"A caminho de você",DRIVER_AT_CUSTOMER:"Seu motorista chegou",DELIVERED:"Entregue",CANCELLED:"Cancelado",REJECTED:"Recusado"};\n'
+          new=old+'const paymentStatusLabel:Record<string,string>={PENDING:"Pagamento pendente",PAID:"Pagamento confirmado",FAILED:"Pagamento falhou",CANCELLED:"Pagamento cancelado",PARTIALLY_REFUNDED:"Estorno parcial",REFUNDED:"Estornado"};\nconst refundStatusLabel:Record<string,string>={PENDING:"Estorno solicitado",PROCESSING:"Estorno em processamento",COMPLETED:"PIX devolvido",FAILED:"Falha no estorno",CANCELLED:"Estorno cancelado"};\n'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='  const[paymentMethod,setPaymentMethod]=useState<PaymentMethod>("CASH"); const[availablePaymentMethods,setAvailablePaymentMethods]=useState<PaymentMethod[]>(["CASH"]); const[pixCharge,setPixCharge]=useState<PixCharge|null>(null); const[pixBusy,setPixBusy]=useState(false);\n'
+          new=old+'  const[refundByOrder,setRefundByOrder]=useState<Record<string,RefundInfo>>({}); const[refundBusyOrderId,setRefundBusyOrderId]=useState<string|null>(null);\n'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='    setOrders(rows);await loadPendingPix(rows);await loadTracking(rows);\n  }\n\n  async function loadTracking(currentOrders:Order[]){\n'
+          new='    setOrders(rows);await Promise.all([loadPendingPix(rows),loadRefunds(rows),loadTracking(rows)]);\n  }\n\n  async function loadRefunds(currentOrders:Order[]){\n    const orderIds=currentOrders.map(order=>order.id);\n    if(!orderIds.length){setRefundByOrder({});return;}\n    const{data:payments,error:paymentError}=await supabase.from("payments").select("id,order_id").in("order_id",orderIds).eq("method","PIX");\n    if(paymentError||!payments?.length){setRefundByOrder({});return;}\n    const paymentIds=payments.map((payment:any)=>String(payment.id));\n    const paymentToOrder=new Map(payments.map((payment:any)=>[String(payment.id),String(payment.order_id)]));\n    const{data:refunds,error:refundError}=await supabase.from("refunds").select("payment_id,status,amount,reason,created_at,completed_at").in("payment_id",paymentIds).order("created_at",{ascending:false});\n    if(refundError){setRefundByOrder({});return;}\n    const next:Record<string,RefundInfo>={};\n    for(const raw of refunds??[]){\n      const orderId=paymentToOrder.get(String((raw as any).payment_id));\n      if(orderId&&!next[orderId])next[orderId]={...(raw as any),amount:Number((raw as any).amount)} as RefundInfo;\n    }\n    setRefundByOrder(next);\n  }\n\n  async function loadTracking(currentOrders:Order[]){\n'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='        if(error||data?.error){setMessage(data?.error==="CANCELLATION_REQUIRES_SUPPORT"?"A entrega já avançou. Abra o suporte para solicitar cancelamento.":"Não foi possível cancelar este pedido.");return;}\n        setMessage("Pedido cancelado.");await loadOrders();\n'
+          new='        if(error||data?.error){\n          const code=data?.error;\n          setMessage(code==="CANCELLATION_REQUIRES_SUPPORT"||code==="PAID_ORDER_REQUIRES_REFUND_FLOW"?"O pedido já avançou. Abra o suporte para solicitar cancelamento e análise do estorno.":"Não foi possível cancelar este pedido.");return;\n        }\n        if(data?.refundRequired){\n          const refundStatus=String(data?.refundStatus??"PENDING");\n          setMessage(refundStatus==="COMPLETED"?"Pedido cancelado e PIX devolvido com sucesso.":refundStatus==="FAILED"?"Pedido cancelado. A devolução do PIX precisa ser tentada novamente.":"Pedido cancelado. A devolução do PIX foi solicitada e está sendo processada.");\n        }else setMessage("Pedido cancelado.");\n        await loadOrders();\n'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          marker='  async function submitReview(order:Order){\n'
+          insert='  async function reconcileRefund(order:Order){\n    setRefundBusyOrderId(order.id);setMessage("");\n    const{data,error}=await supabase.functions.invoke("efi-pix-refund",{body:{orderId:order.id,reason:"Reconciliação de estorno solicitada pelo cliente"}});\n    if(error||data?.error){setMessage("Não foi possível consultar o estorno agora. Tente novamente em alguns minutos.");setRefundBusyOrderId(null);return;}\n    const status=String(data?.refundStatus??"");\n    setMessage(status==="COMPLETED"?"PIX devolvido com sucesso.":status==="FAILED"?"A Efí não concluiu a devolução. Você pode tentar novamente ou abrir o suporte.":"A devolução do PIX continua em processamento.");\n    await loadOrders();setRefundBusyOrderId(null);\n  }\n\n'
+          assert marker in s
+          s=s.replace(marker,insert+marker,1)
+
+          old='        <View style={styles.orderCard}><View style={{flex:1}}><Text style={styles.productName}>{rel?.name??"CLICK-FOOD"} • #{order.order_number}</Text><Text style={styles.meta}>{statusLabel[order.status]??order.status} • pagamento {order.payment_status}</Text></View><Text style={styles.price}>{brl(order.total)}</Text></View>\n        {cancellableStatuses.has(order.status)&&<Pressable style={styles.cancelButton} onPress={()=>cancelOrder(order)}><Text style={styles.cancelText}>CANCELAR PEDIDO</Text></Pressable>}\n'
+          new='        <View style={styles.orderCard}><View style={{flex:1}}><Text style={styles.productName}>{rel?.name??"CLICK-FOOD"} • #{order.order_number}</Text><Text style={styles.meta}>{statusLabel[order.status]??order.status} • {paymentStatusLabel[order.payment_status]??order.payment_status}</Text></View><Text style={styles.price}>{brl(order.total)}</Text></View>\n        {refundByOrder[order.id]&&<View style={[styles.refundBanner,refundByOrder[order.id].status==="COMPLETED"?styles.refundDone:refundByOrder[order.id].status==="FAILED"?styles.refundFailed:styles.refundPending]}><Text style={styles.refundText}>{refundStatusLabel[refundByOrder[order.id].status]??refundByOrder[order.id].status} • {brl(refundByOrder[order.id].amount)}</Text>{["PENDING","PROCESSING","FAILED"].includes(refundByOrder[order.id].status)&&<Pressable style={styles.refundButton} disabled={refundBusyOrderId===order.id} onPress={()=>reconcileRefund(order)}><Text style={styles.refundButtonText}>{refundBusyOrderId===order.id?"CONSULTANDO...":"ATUALIZAR ESTORNO"}</Text></Pressable>}</View>}\n        {!refundByOrder[order.id]&&["CANCELLED","REJECTED"].includes(order.status)&&["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status)&&<Pressable style={styles.refundButtonStandalone} disabled={refundBusyOrderId===order.id} onPress={()=>reconcileRefund(order)}><Text style={styles.refundButtonText}>{refundBusyOrderId===order.id?"CONSULTANDO...":"CONSULTAR ESTORNO PIX"}</Text></Pressable>}\n        {cancellableStatuses.has(order.status)&&<Pressable style={styles.cancelButton} onPress={()=>cancelOrder(order)}><Text style={styles.cancelText}>CANCELAR PEDIDO</Text></Pressable>}\n'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='  orderBlock:{marginBottom:10},orderCard:{backgroundColor:"#fff",borderRadius:14,padding:14,flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:10},rowBetween:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},link:{color:"#8d7000",fontWeight:"900"},\n'
+          new=old+'  refundBanner:{marginTop:7,borderRadius:12,padding:11,borderWidth:1},refundPending:{backgroundColor:"#fff8dd",borderColor:"#ead47a"},refundDone:{backgroundColor:"#e2f7e9",borderColor:"#9fd7b1"},refundFailed:{backgroundColor:"#fde9e6",borderColor:"#e2aaa2"},refundText:{fontSize:11,fontWeight:"900",color:"#333"},refundButton:{marginTop:9,backgroundColor:"#111",borderRadius:9,paddingVertical:9,paddingHorizontal:11,alignSelf:"flex-start"},refundButtonStandalone:{marginTop:7,backgroundColor:"#111",borderRadius:10,padding:11,alignItems:"center"},refundButtonText:{color:"#fff",fontSize:10,fontWeight:"900"},\n'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "click-food-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/cliente/App.tsx
+          git commit -m "feat: exibir e reconciliar estorno PIX no cliente"
+          git push
