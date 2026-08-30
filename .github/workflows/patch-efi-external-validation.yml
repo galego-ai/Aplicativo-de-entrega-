@@ -1,0 +1,51 @@
+name: Patch Efi External Validation UI
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/patch-efi-external-validation.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch payments page
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/admin/app/pagamentos/page.tsx')
+          s=p.read_text()
+          old='const[refundBusy,setRefundBusy]=useState<string|null>(null);'
+          new=old+'const[externalBusy,setExternalBusy]=useState(false);const[externalResult,setExternalResult]=useState<any|null>(null);'
+          if old not in s:
+              raise SystemExit('state anchor not found')
+          s=s.replace(old,new,1)
+          anchor=' async function setupCard()'
+          fn=''' async function validateExternalEfi(){setExternalBusy(true);setExternalResult(null);setMessage("");const{data,error}=await supabase.functions.invoke("efi-external-validation",{body:{}});if(error||data?.ok===false){setMessage(`Validação externa Efí falhou${data?.stage?` na etapa ${data.stage}`:""}${data?.providerStatus?` (HTTP ${data.providerStatus})`:""}. Diagnóstico: ${data?.error??"EFI_EXTERNAL_VALIDATION_FAILED"}.`);setExternalBusy(false);return;}setExternalResult(data);setMessage(`Validação externa Efí concluída com sucesso em ${data.environment==="PRODUCTION"?"PRODUÇÃO":"HOMOLOGAÇÃO"}. OAuth, webhook, cobrança, consulta e QR Code responderam corretamente.`);setExternalBusy(false);}\n'''
+          if anchor not in s:
+              raise SystemExit('function anchor not found')
+          s=s.replace(anchor,fn+anchor,1)
+          old_button='<button className="primaryAction" onClick={setupEfi} disabled={validatingEfi}>{validatingEfi?"VALIDANDO NA EFÍ...":efi?.enabled?"REVALIDAR PIX E WEBHOOK":"VALIDAR E ATIVAR PIX"}</button></section>'
+          new_button='''<button className="primaryAction" onClick={setupEfi} disabled={validatingEfi}>{validatingEfi?"VALIDANDO NA EFÍ...":efi?.enabled?"REVALIDAR PIX E WEBHOOK":"VALIDAR E ATIVAR PIX"}</button><button style={{marginLeft:10}} onClick={validateExternalEfi} disabled={externalBusy}>{externalBusy?"TESTANDO NA EFÍ...":"VALIDAÇÃO EXTERNA EFÍ"}</button>{externalResult&&<div className="adminList" style={{marginTop:14}}><div><div><b>Teste externo aprovado</b><small>OAuth: OK • Webhook: {externalResult.webhookRegistered?"OK":"FALHOU"} • Cobrança: {externalResult.chargeCreated?"OK":"FALHOU"} • Consulta: {externalResult.chargeConsulted?"OK":"FALHOU"} • QR Code: {externalResult.qrCodeGenerated?"OK":"FALHOU"}</small><small>Status da cobrança: {externalResult.chargeStatus||"-"} • txid de teste: {externalResult.txid||"-"} • expira em {externalResult.expiresInSeconds||120}s</small></div></div></div>}</section>'''
+          if old_button not in s:
+              raise SystemExit('button anchor not found')
+          s=s.replace(old_button,new_button,1)
+          p.write_text(s)
+          PY
+      - name: Validate admin build
+        run: |
+          cd apps/admin
+          npm ci
+          npm run build
+      - name: Commit patch and remove workflow
+        run: |
+          git config user.name 'galego-ai'
+          git config user.email 'elismarribeiro298@gmail.com'
+          git rm .github/workflows/patch-efi-external-validation.yml
+          git add apps/admin/app/pagamentos/page.tsx
+          git commit -m 'feat: adicionar validação externa Efí na Matriz'
+          git push
