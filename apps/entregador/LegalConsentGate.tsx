@@ -6,7 +6,10 @@ type LegalDocument={id:string;document_type:string;version:string;title:string;c
 
 export default function LegalConsentGate(){
   const[visible,setVisible]=useState(false);const[documents,setDocuments]=useState<LegalDocument[]>([]);const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");
-  useEffect(()=>{void load();},[]);
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data})=>{if(data.session)void load();else setVisible(false);});
+    const{data}=supabase.auth.onAuthStateChange((_event,session)=>{if(session)void load();else{setVisible(false);setDocuments([]);setMessage("");}});return()=>data.subscription.unsubscribe();
+  },[]);
   async function load(){
     const{data,error}=await supabase.functions.invoke("legal-consent",{body:{action:"STATUS",audience:"DRIVER",app:"DRIVER"}});
     if(error||data?.error){setMessage("Não foi possível verificar os Termos e a Política de Privacidade. Tente novamente.");setVisible(true);return;}
