@@ -25,7 +25,7 @@ const emptyMetrics: Metrics = { sales_today: 0, orders_today: 0, average_ticket_
 const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
 const dateTime = (value: string) => new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 const paymentLabels: Record<string,string> = { PENDING:"Pagamento pendente", PAID:"Pago", FAILED:"Pagamento falhou", CANCELLED:"Pagamento cancelado", PARTIALLY_REFUNDED:"Estorno parcial", REFUNDED:"Estornado" };
-const refundLabels: Record<string,string> = { PENDING:"Estorno solicitado", PROCESSING:"Estorno em processamento", COMPLETED:"PIX devolvido", FAILED:"Falha no estorno", CANCELLED:"Estorno cancelado" };
+const refundLabels: Record<string,string> = { PENDING:"Estorno solicitado", PROCESSING:"Estorno em processamento", COMPLETED:"Pagamento devolvido", FAILED:"Falha no estorno", CANCELLED:"Estorno cancelado" };
 
 export default function Home() {
   const [loading, setLoading] = useState(true);
@@ -107,7 +107,7 @@ export default function Home() {
   async function loadStoreRefunds(orderRows: any[]) {
     const orderIds = orderRows.map((order) => String(order.id));
     if (!orderIds.length) { setRefundByOrder({}); return; }
-    const { data: payments, error: paymentError } = await supabase.from("payments").select("id,order_id").in("order_id", orderIds).eq("method", "PIX");
+    const { data: payments, error: paymentError } = await supabase.from("payments").select("id,order_id").in("order_id", orderIds).in("method", ["PIX","CREDIT_CARD"]);
     if (paymentError || !payments?.length) { setRefundByOrder({}); return; }
     const paymentToOrder = new Map(payments.map((payment: any) => [String(payment.id), String(payment.order_id)]));
     const { data: refunds, error: refundError } = await supabase.from("refunds").select("payment_id,status,amount,created_at,completed_at").in("payment_id", payments.map((payment: any) => payment.id)).order("created_at", { ascending: false });
@@ -267,7 +267,7 @@ export default function Home() {
       setMessage(dispatch.error || dispatch.data?.error ? "Pedido pronto, mas nenhum entregador disponível agora." : "Pedido pronto e chamado enviado.");
     } else {
       if (error || data?.error) setMessage("Não foi possível atualizar o pedido.");
-      else if (data?.refundRequired) { const status=String(data?.refundStatus??"PENDING"); setMessage(status==="COMPLETED"?"Pedido recusado e PIX devolvido ao cliente.":status==="FAILED"?"Pedido recusado. A devolução PIX falhou e precisa ser reconciliada.":"Pedido recusado. A devolução PIX foi solicitada e está em processamento."); }
+      else if (data?.refundRequired) { const status=String(data?.refundStatus??"PENDING"); setMessage(status==="COMPLETED"?"Pedido recusado e pagamento devolvido ao cliente.":status==="FAILED"?"Pedido recusado. A devolução do pagamento falhou e precisa ser reconciliada.":"Pedido recusado. A devolução do pagamento foi solicitada e está em processamento."); }
       else setMessage("Pedido atualizado.");
     }
     setProcessingOrder(null);
@@ -276,9 +276,9 @@ export default function Home() {
 
   async function reconcileStoreRefund(order: Order) {
     setRefundBusyOrderId(order.id); setMessage("");
-    const { data, error } = await supabase.functions.invoke("efi-pix-refund", { body: { orderId: order.id, reason: "Reconciliação de estorno pelo Painel Lojista" } });
-    if (error || data?.error) setMessage("Não foi possível consultar a devolução PIX agora.");
-    else { const status=String(data?.refundStatus??""); setMessage(status==="COMPLETED"?"PIX devolvido ao cliente.":status==="FAILED"?"A devolução falhou na Efí e pode ser tentada novamente.":"A devolução continua em processamento."); }
+    const { data, error } = await supabase.functions.invoke("payment-refund", { body: { orderId: order.id, reason: "Reconciliação de estorno pelo Painel Lojista" } });
+    if (error || data?.error) setMessage("Não foi possível consultar a devolução do pagamento agora.");
+    else { const status=String(data?.refundStatus??""); setMessage(status==="COMPLETED"?"Pagamento devolvido ao cliente.":status==="FAILED"?"A devolução falhou e pode ser tentada novamente.":"A devolução continua em processamento."); }
     await loadStoreData(store); setRefundBusyOrderId(null);
   }
 
@@ -369,7 +369,7 @@ export default function Home() {
             <div className="queueTop"><b>#{order.order_number}</b><span>{order.delivery_type}</span></div>
             <strong>{brl(order.total)}</strong><p>{order.status} • {paymentLabels[order.payment_status] ?? order.payment_status}</p>
             {refundByOrder[order.id] && <div style={{margin:"8px 0",padding:"9px 10px",borderRadius:10,background:refundByOrder[order.id].status==="COMPLETED"?"#e5f7ea":refundByOrder[order.id].status==="FAILED"?"#fde9e7":"#fff7d9",fontSize:12,fontWeight:800}}>{refundLabels[refundByOrder[order.id].status] ?? refundByOrder[order.id].status} • {brl(refundByOrder[order.id].amount)}{["PENDING","PROCESSING","FAILED"].includes(refundByOrder[order.id].status) && <button style={{marginLeft:8}} disabled={refundBusyOrderId===order.id} onClick={() => reconcileStoreRefund(order)}>{refundBusyOrderId===order.id?"Consultando...":"Atualizar estorno"}</button>}</div>}
-            {!refundByOrder[order.id] && ["CANCELLED","REJECTED"].includes(order.status) && ["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status) && <button style={{marginBottom:8}} disabled={refundBusyOrderId===order.id} onClick={() => reconcileStoreRefund(order)}>{refundBusyOrderId===order.id?"Consultando...":"Consultar estorno PIX"}</button>}
+            {!refundByOrder[order.id] && ["CANCELLED","REJECTED"].includes(order.status) && ["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status) && <button style={{marginBottom:8}} disabled={refundBusyOrderId===order.id} onClick={() => reconcileStoreRefund(order)}>{refundBusyOrderId===order.id?"Consultando...":"Consultar estorno"}</button>}
             <div className="queueActions">
               {order.status === "WAITING_STORE" && <><button disabled={processingOrder === order.id} onClick={() => orderAction(order, "ACCEPT")}>Aceitar</button><button className="dangerAction" disabled={processingOrder === order.id} onClick={() => orderAction(order, "REJECT")}>Recusar</button></>}
               {order.status === "ACCEPTED" && <button onClick={() => orderAction(order, "START_PREPARING")}>Iniciar preparo</button>}
@@ -396,7 +396,7 @@ export default function Home() {
     <main className="app">
       <aside className="side">
         <div className="logo"><span>CLICK</span>-FOOD</div><p>{store.name}</p>
-        <nav>{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={tab === item ? "active" : ""}>{item}</button>)}</nav><a href="/entregadores" style={{display:"block",margin:"10px 0",padding:"12px 14px",borderRadius:10,background:"#f4c400",color:"#111",fontWeight:900,textDecoration:"none",textAlign:"center"}}>Atribuir entregador</a>
+        <nav>{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={tab === item ? "active" : ""}>{item}</button>)}</nav><a href="/entregadores" style={{display:"block",margin:"10px 0",padding:"12px 14px",borderRadius:10,background:"#f4c400",color:"#111",fontWeight:900,textDecoration:"none",textAlign:"center"}}>Atribuir entregador</a><a href="/recibos" style={{display:"block",margin:"10px 0",padding:"12px 14px",borderRadius:10,background:"#fff",border:"1px solid #d8d8d8",color:"#111",fontWeight:900,textDecoration:"none",textAlign:"center"}}>Recibos / imprimir</a>
       </aside>
       <section className="workspace">
         <header><div><small>{store.status === "ACTIVE" ? "LOJA ATIVA" : `LOJA ${store.status}`} • {store.role}</small><h1>{tab}</h1></div><div className="headerActions"><button className="refresh" onClick={() => loadStoreData(store)}>Atualizar</button><button className="refresh" onClick={logout}>Sair</button></div></header>
