@@ -20,12 +20,13 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  if(body.action==="DRIVER_SUMMARY"){
   const{data:driver}=await ctx.supabaseAdmin.from("drivers").select("id").eq("user_id",userId).maybeSingle();
   if(!driver)return Response.json({error:"DRIVER_REQUIRED"},{status:403});
-  const[{data:transactions},{data:payouts}]=await Promise.all([
-   ctx.supabaseAdmin.from("financial_transactions").select("direction,amount,status").eq("driver_id",driver.id).in("status",["POSTED","PENDING"]),
+  const[{data:available,error:balanceError},{data:payouts}]=await Promise.all([
+   ctx.supabaseAdmin.schema("private").rpc("driver_available_balance",{p_driver_id:driver.id}),
    ctx.supabaseAdmin.from("payouts").select("id,amount,method,status,destination_value,requested_at,processed_at,review_notes,provider_id").eq("recipient_type","DRIVER").eq("driver_id",driver.id).order("requested_at",{ascending:false}).limit(30),
   ]);
-  const available=(transactions??[]).reduce((sum:any,t:any)=>sum+(t.direction==="CREDIT"?Number(t.amount):-Number(t.amount)),0);
-  return Response.json({driverId:driver.id,availableBalance:Math.max(0,Math.round(available*100)/100),payouts:(payouts??[]).map((p:any)=>({...p,amount:Number(p.amount)}))});
+  if(balanceError)return Response.json({error:"DRIVER_BALANCE_FAILED"},{status:500});
+  const balance=Math.max(0,Math.round(Number(available??0)*100)/100);
+  return Response.json({driverId:driver.id,availableBalance:balance,payouts:(payouts??[]).map((p:any)=>({...p,amount:Number(p.amount)}))});
  }
 
  if(body.action==="REQUEST"){
