@@ -110,6 +110,13 @@ export default {
       } else delivery = created.data;
     }
 
+    const nowIso = new Date().toISOString();
+    await ctx.supabaseAdmin.from("delivery_offers")
+      .update({ status: "EXPIRED", responded_at: nowIso })
+      .eq("delivery_id", delivery!.id)
+      .eq("status", "PENDING")
+      .lte("expires_at", nowIso);
+
     const { data: drivers, error: driversError } = await ctx.supabaseAdmin
       .from("drivers")
       .select("id,rating,acceptance_rate")
@@ -124,7 +131,7 @@ export default {
     const [{ data: locations }, { data: activeDeliveries }, { data: pendingOffers }] = await Promise.all([
       ctx.supabaseAdmin.from("driver_locations").select("driver_id,latitude,longitude,recorded_at").in("driver_id", driverIds),
       ctx.supabaseAdmin.from("deliveries").select("driver_id,status").in("driver_id", driverIds).not("status", "in", "(DELIVERED,DELIVERY_CANCELLED)"),
-      ctx.supabaseAdmin.from("delivery_offers").select("driver_id").eq("delivery_id", delivery!.id).eq("status", "PENDING"),
+      ctx.supabaseAdmin.from("delivery_offers").select("driver_id").eq("delivery_id", delivery!.id).eq("status", "PENDING").gt("expires_at", nowIso),
     ]);
 
     const activeCount = new Map<string, number>();
