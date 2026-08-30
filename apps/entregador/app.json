@@ -2,6 +2,7 @@
   "expo": {
     "name": "CLICK-FOOD Entregador",
     "slug": "click-food-entregador",
+    "scheme": "clickfood-entregador",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
