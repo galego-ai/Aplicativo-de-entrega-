@@ -396,7 +396,7 @@ export default function Home() {
     <main className="app">
       <aside className="side">
         <div className="logo"><span>CLICK</span>-FOOD</div><p>{store.name}</p>
-        <nav>{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={tab === item ? "active" : ""}>{item}</button>)}</nav>
+        <nav>{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={tab === item ? "active" : ""}>{item}</button>)}</nav><a href="/entregadores" style={{display:"block",margin:"10px 0",padding:"12px 14px",borderRadius:10,background:"#f4c400",color:"#111",fontWeight:900,textDecoration:"none",textAlign:"center"}}>Atribuir entregador</a>
       </aside>
       <section className="workspace">
         <header><div><small>{store.status === "ACTIVE" ? "LOJA ATIVA" : `LOJA ${store.status}`} • {store.role}</small><h1>{tab}</h1></div><div className="headerActions"><button className="refresh" onClick={() => loadStoreData(store)}>Atualizar</button><button className="refresh" onClick={logout}>Sair</button></div></header>
