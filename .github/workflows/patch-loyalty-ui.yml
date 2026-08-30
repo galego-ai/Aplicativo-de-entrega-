@@ -32,5 +32,4 @@ jobs:
           git checkout -- package-lock.json apps/lojista/tsconfig.json 2>/dev/null || true
           git add apps/cliente/App.tsx apps/lojista/app/page.tsx
           git commit -m "feat: conectar fidelidade e resgates aos apps" || exit 0
-          git pull --rebase origin main
           git push
