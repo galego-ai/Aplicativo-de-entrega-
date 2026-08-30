@@ -6,40 +6,35 @@ export type DriverCandidate = {
   activeDeliveries: number;
   rating: number;
   acceptanceRate: number;
-  levelWeight?: number;
 };
 
 export type RankedDriver = DriverCandidate & {
   score: number;
 };
 
+export function driverCandidateScore(candidate: DriverCandidate): number {
+  const proximityScore = Math.max(0, 100 - candidate.distanceToStoreKm * 12);
+  const workloadScore = Math.max(0, 100 - candidate.activeDeliveries * 35);
+  const ratingScore = candidate.rating * 20;
+  const acceptanceScore = candidate.acceptanceRate;
+  return proximityScore * 0.55 + workloadScore * 0.2 + ratingScore * 0.15 + acceptanceScore * 0.1;
+}
+
 export function rankDriverCandidates(candidates: DriverCandidate[]): RankedDriver[] {
   return candidates
     .filter((candidate) =>
       Number.isFinite(candidate.distanceToStoreKm) &&
       candidate.distanceToStoreKm >= 0 &&
+      Number.isInteger(candidate.activeDeliveries) &&
       candidate.activeDeliveries >= 0 &&
+      Number.isFinite(candidate.rating) &&
       candidate.rating >= 0 &&
       candidate.rating <= 5 &&
+      Number.isFinite(candidate.acceptanceRate) &&
       candidate.acceptanceRate >= 0 &&
       candidate.acceptanceRate <= 100
     )
-    .map((candidate) => {
-      const proximityScore = Math.max(0, 100 - candidate.distanceToStoreKm * 12);
-      const workloadScore = Math.max(0, 100 - candidate.activeDeliveries * 35);
-      const ratingScore = candidate.rating * 20;
-      const acceptanceScore = candidate.acceptanceRate;
-      const levelScore = Math.max(0, Math.min(candidate.levelWeight ?? 0, 100));
-
-      const score =
-        proximityScore * 0.5 +
-        workloadScore * 0.2 +
-        ratingScore * 0.15 +
-        acceptanceScore * 0.1 +
-        levelScore * 0.05;
-
-      return { ...candidate, score: Math.round(score * 100) / 100 };
-    })
+    .map((candidate) => ({ ...candidate, score: Math.round(driverCandidateScore(candidate) * 100) / 100 }))
     .sort((a, b) => b.score - a.score || a.distanceToStoreKm - b.distanceToStoreKm);
 }
 
