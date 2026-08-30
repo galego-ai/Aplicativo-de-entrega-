@@ -12,7 +12,8 @@
         {
           "locationWhenInUsePermission": "O CLICK-FOOD usa sua localização enquanto você está online para encontrar entregas próximas e acompanhar entregas ativas."
         }
-      ]
+      ],
+      ["expo-notifications", {"color": "#F4C400", "defaultChannel": "clickfood-default"}]
     ],
     "android": {
       "package": "br.com.clickfood.entregador"
