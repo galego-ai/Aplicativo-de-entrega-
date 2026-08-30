@@ -173,6 +173,15 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [store?.id]);
 
+  useEffect(() => {
+    if (!store) return;
+    const channel = supabase
+      .channel(`lojista-orders-${store.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `store_id=eq.${store.id}` }, () => { void loadStoreData(store); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [store?.id]);
+
   async function submitAuth(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
