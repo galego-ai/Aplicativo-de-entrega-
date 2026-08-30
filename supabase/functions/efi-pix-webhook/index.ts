@@ -9,12 +9,33 @@ export default{fetch:async(req:Request)=>{
  let body:any;try{body=await req.json()}catch{return new Response("invalid",{status:400})}
  const supabase=createClient(Deno.env.get("SUPABASE_URL")!,Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,{auth:{persistSession:false}});
  const items=Array.isArray(body?.pix)?body.pix:[];let processed=0,ignored=0;
+
  for(const pix of items){
-  const txid=String(pix?.txid??"");const e2e=String(pix?.endToEndId??"");const value=Number(String(pix?.valor??"0").replace(",","."));const paidAt=pix?.horario?new Date(pix.horario).toISOString():new Date().toISOString();
-  const eventId=e2e||`${txid}:${paidAt}:${value}`;
+  const txid=String(pix?.txid??"");const e2e=String(pix?.endToEndId??"");
+  const refunds=Array.isArray(pix?.devolucoes)?pix.devolucoes:[];
+
+  if(refunds.length){
+   for(const refund of refunds){
+    const refundId=String(refund?.id??"");const status=String(refund?.status??"").toUpperCase();
+    const eventId=`${e2e||txid}:refund:${refundId||"unknown"}:${status||"unknown"}`;
+    const{data:existing}=await supabase.from("webhook_events").select("id,processed").eq("provider","EFI").eq("event_id",eventId).maybeSingle();
+    if(existing?.processed){ignored++;continue;}
+    if(!existing)await supabase.from("webhook_events").insert({provider:"EFI",event_id:eventId,event_type:`PIX_REFUND_${status||"UNKNOWN"}`,payload:refund,processed:false});
+    if(!refundId){await supabase.from("webhook_events").update({processed:true,processed_at:new Date().toISOString(),last_error:"IGNORED_REFUND_NO_ID"}).eq("provider","EFI").eq("event_id",eventId);ignored++;continue;}
+    const{data:local}=await supabase.from("refunds").select("id").eq("provider_refund_id",refundId).maybeSingle();
+    if(!local){await supabase.from("webhook_events").update({processed:true,processed_at:new Date().toISOString(),last_error:"IGNORED_UNKNOWN_REFUND"}).eq("provider","EFI").eq("event_id",eventId);ignored++;continue;}
+    const{error}=await supabase.rpc("settle_efi_pix_refund_atomic",{p_provider_refund_id:refundId,p_provider_status:status||"EM_PROCESSAMENTO",p_provider_payload:refund});
+    if(error){await supabase.from("webhook_events").update({last_error:String(error.message).slice(0,500)}).eq("provider","EFI").eq("event_id",eventId);return new Response("retry",{status:500});}
+    await supabase.from("webhook_events").update({processed:true,processed_at:new Date().toISOString(),last_error:null}).eq("provider","EFI").eq("event_id",eventId);processed++;
+   }
+   continue;
+  }
+
+  const value=Number(String(pix?.valor??"0").replace(",","."));const paidAt=pix?.horario?new Date(pix.horario).toISOString():new Date().toISOString();
+  const eventId=`receipt:${e2e||`${txid}:${paidAt}:${value}`}`;
   const{data:existing}=await supabase.from("webhook_events").select("id,processed").eq("provider","EFI").eq("event_id",eventId).maybeSingle();
   if(existing?.processed){ignored++;continue;}
-  if(!existing){await supabase.from("webhook_events").insert({provider:"EFI",event_id:eventId,event_type:"PIX_RECEIVED",payload:pix,processed:false});}
+  if(!existing)await supabase.from("webhook_events").insert({provider:"EFI",event_id:eventId,event_type:"PIX_RECEIVED",payload:pix,processed:false});
   if(!txid||!Number.isFinite(value)){await supabase.from("webhook_events").update({processed:true,processed_at:new Date().toISOString(),last_error:"IGNORED_NO_TXID_OR_VALUE"}).eq("provider","EFI").eq("event_id",eventId);ignored++;continue;}
   const{data:charge}=await supabase.from("efi_pix_charges").select("id").eq("txid",txid).maybeSingle();
   if(!charge){await supabase.from("webhook_events").update({processed:true,processed_at:new Date().toISOString(),last_error:"IGNORED_UNKNOWN_TXID"}).eq("provider","EFI").eq("event_id",eventId);ignored++;continue;}
