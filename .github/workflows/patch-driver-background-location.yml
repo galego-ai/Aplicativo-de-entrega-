@@ -1,0 +1,75 @@
+name: Patch driver background location
+
+on:
+  push:
+    paths:
+      - .github/workflows/patch-driver-background-location.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Patch driver app
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path("apps/entregador/App.tsx")
+          text = path.read_text()
+
+          text = text.replace(
+            '  Modal, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet,\n',
+            '  Alert, Modal, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet,\n'
+          )
+
+          marker = 'import { supabase } from "./supabase";\n'
+          bg_import = '''import {\n  disableBackgroundTracking,\n  enableBackgroundTracking,\n  resumeBackgroundTrackingIfAuthorized,\n} from "./BackgroundLocation";\n'''
+          if bg_import not in text:
+            text = text.replace(marker, marker + bg_import)
+
+          effect = '''  useEffect(()=>{\n    if(driver?.id&&driver.online&&driver.status==="ACTIVE")void resumeBackgroundTrackingIfAuthorized(driver.id);\n    else void disableBackgroundTracking();\n  },[driver?.id,driver?.online,driver?.status]);\n'''
+          anchor = '  async function bootstrap(){'
+          if effect not in text:
+            text = text.replace(anchor, effect + '\n' + anchor)
+
+          old_pattern = r'  async function toggleOnline\(\)\{.*?\}\n  async function acceptOffer\(\)'
+          replacement = '''  async function toggleOnline(){\n    if(!driver)return;\n    setMessage("");\n    const next=!driver.online;\n    const {data,error}=await supabase.functions.invoke("driver-status",{body:{online:next}});\n    if(error||data?.error){\n      setMessage(data?.error==="ACTIVE_DELIVERY_PREVENTS_OFFLINE"?"Finalize a entrega atual antes de ficar offline.":"Não foi possível alterar seu status.");\n      return;\n    }\n    setDriver({...driver,online:Boolean(data.driver.online)});\n    if(!next){\n      await disableBackgroundTracking();\n      return;\n    }\n    await loadOffers();\n    Alert.alert(\n      "Rastreamento durante entregas",\n      "Para receber chamadas e manter o acompanhamento mesmo com a tela bloqueada, permita ao CLICK-FOOD usar sua localização em segundo plano enquanto você estiver online.",\n      [\n        {text:"AGORA NÃO",style:"cancel"},\n        {text:"ATIVAR",onPress:async()=>{\n          const enabled=await enableBackgroundTracking(driver.id);\n          setMessage(enabled?"Localização em segundo plano ativada enquanto você estiver online.":"A localização em segundo plano não foi autorizada. O app continuará atualizando sua posição enquanto estiver aberto.");\n        }},\n      ],\n    );\n  }\n  async function acceptOffer()'''
+          text, count = re.subn(old_pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+            raise SystemExit("toggleOnline patch not applied")
+
+          path.write_text(text)
+
+      - name: Install dependencies and update lockfile
+        run: npm install --ignore-scripts
+
+      - name: Type-check Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/entregador/App.tsx package-lock.json
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "feat: ligar GPS em segundo plano no app entregador"
+          git pull --rebase origin main
+          git push origin main
