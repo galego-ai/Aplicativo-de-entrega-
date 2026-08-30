@@ -1,8 +1,0 @@
-name: Patch account lifecycle (manual archive)
-on:
-  workflow_dispatch:
-jobs:
-  archived:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Patch já aplicado. Workflow mantido apenas como histórico manual."
