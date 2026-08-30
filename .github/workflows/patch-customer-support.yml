@@ -1,0 +1,37 @@
+name: Patch customer support
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-customer-support.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Connect support screen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/cliente/App.tsx')
+          s=p.read_text()
+          s=s.replace('import PixPaymentCard, { type PixCharge } from "./PixPaymentCard";\n','import PixPaymentCard, { type PixCharge } from "./PixPaymentCard";\nimport CustomerSupport from "./CustomerSupport";\n',1)
+          s=s.replace('type Tab = "home" | "search" | "orders" | "profile";','type Tab = "home" | "search" | "orders" | "support" | "profile";',1)
+          old='  const screen=tab==="home"?home:tab==="search"?search:tab==="orders"?ordersView:profile;\n  const tabs:Array<[Tab,string,string]>=[["home","⌂","Início"],["search","⌕","Buscar"],["orders","▤","Pedidos"],["profile","○","Perfil"]];\n'
+          new='  const support=<CustomerSupport/>;\n  const screen=tab==="home"?home:tab==="search"?search:tab==="orders"?ordersView:tab==="support"?support:profile;\n  const tabs:Array<[Tab,string,string]>=[["home","⌂","Início"],["search","⌕","Buscar"],["orders","▤","Pedidos"],["support","?","Ajuda"],["profile","○","Perfil"]];\n'
+          assert old in s
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "click-food-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/cliente/App.tsx
+          git commit -m "feat: adicionar Central de Ajuda ao App Cliente"
+          git push
