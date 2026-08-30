@@ -1,0 +1,58 @@
+name: Patch Customer Receipt
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-customer-receipt.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Patch App Cliente
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/cliente/App.tsx')
+          s=p.read_text()
+          imp='import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";'
+          if 'import CustomerOrderReceipt from "./CustomerOrderReceipt";' not in s:
+              assert imp in s
+              s=s.replace(imp,imp+'\nimport CustomerOrderReceipt from "./CustomerOrderReceipt";',1)
+          state='const[tracking,setTracking]=useState<Tracking|null>(null); const[driverCard,setDriverCard]=useState<DriverCard|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);'
+          if 'const[receiptOrderId,setReceiptOrderId]' not in s:
+              assert state in s
+              s=s.replace(state,state+'\n  const[receiptOrderId,setReceiptOrderId]=useState<string|null>(null);',1)
+          marker='        {cancellableStatuses.has(order.status)&&<Pressable style={styles.cancelButton} onPress={()=>cancelOrder(order)}><Text style={styles.cancelText}>CANCELAR PEDIDO</Text></Pressable>}'
+          receipt='        <Pressable style={styles.rateButton} onPress={()=>setReceiptOrderId(order.id)}><Text style={styles.rateText}>▤ VER COMPROVANTE</Text></Pressable>\n'
+          if 'VER COMPROVANTE' not in s:
+              assert marker in s
+              s=s.replace(marker,receipt+marker,1)
+          target='<View style={{flex:1}}>{screen}</View><View style={styles.bottom}>'
+          replacement='<View style={{flex:1}}>{screen}</View><CustomerOrderReceipt orderId={receiptOrderId} onClose={()=>setReceiptOrderId(null)}/><View style={styles.bottom}>'
+          if '<CustomerOrderReceipt orderId={receiptOrderId}' not in s:
+              assert target in s
+              s=s.replace(target,replacement,1)
+          p.write_text(s)
+          PY
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Type-check Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+      - name: Commit patch
+        run: |
+          git config user.name "click-food-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/cliente/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: exibir comprovante detalhado no App Cliente"
+          git push
