@@ -13,8 +13,9 @@ import ProductCustomizer, {
   type CustomizedItem,
 } from "./ProductCustomizer";
 import PixPaymentCard, { type PixCharge } from "./PixPaymentCard";
+import CustomerSupport from "./CustomerSupport";
 
-type Tab = "home" | "search" | "orders" | "profile";
+type Tab = "home" | "search" | "orders" | "support" | "profile";
 type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean };
 type ProductWithMedia = Product & { image_url:string|null };
 type Address = { id:string; label:string|null; street:string; number:string|null; district:string|null; reference:string|null };
@@ -508,8 +509,9 @@ export default function App(){
     <Pressable style={styles.signOut} onPress={()=>supabase.auth.signOut()}><Text style={styles.signOutText}>SAIR</Text></Pressable>
   </ScrollView>;
 
-  const screen=tab==="home"?home:tab==="search"?search:tab==="orders"?ordersView:profile;
-  const tabs:Array<[Tab,string,string]>=[["home","⌂","Início"],["search","⌕","Buscar"],["orders","▤","Pedidos"],["profile","○","Perfil"]];
+  const support=<CustomerSupport/>;
+  const screen=tab==="home"?home:tab==="search"?search:tab==="orders"?ordersView:tab==="support"?support:profile;
+  const tabs:Array<[Tab,string,string]>=[["home","⌂","Início"],["search","⌕","Buscar"],["orders","▤","Pedidos"],["support","?","Ajuda"],["profile","○","Perfil"]];
   return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><View style={{flex:1}}>{screen}</View><View style={styles.bottom}>{tabs.map(([key,icon,label])=><Pressable style={styles.tab} key={key} onPress={()=>setTab(key)}><Text style={[styles.tabIcon,tab===key&&styles.tabActive]}>{icon}</Text><Text style={[styles.tabLabel,tab===key&&styles.tabActive]}>{label}</Text></Pressable>)}</View></SafeAreaView>;
 }
 
