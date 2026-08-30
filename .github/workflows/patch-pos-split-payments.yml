@@ -1,3 +1,4 @@
+# one-time workflow: remove itself after a successful patch
 name: Patch POS split payments
 on:
   push:
