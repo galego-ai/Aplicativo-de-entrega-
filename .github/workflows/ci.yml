@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
+      - name: Testar regras críticas compartilhadas
+        run: npm run test:shared
+
       - name: Build Painel Matriz
         run: npm run build:admin
 
