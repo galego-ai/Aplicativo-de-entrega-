@@ -1,0 +1,53 @@
+name: Patch driver wallet
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-driver-wallet.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Integrate real driver wallet
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          app=Path('apps/entregador/App.tsx')
+          text=app.read_text()
+          marker='import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";\n'
+          if 'import DriverWallet from "./DriverWallet";' not in text:
+              if marker not in text: raise SystemExit('AccountLifecycle import not found')
+              text=text.replace(marker,marker+'import DriverWallet from "./DriverWallet";\n',1)
+
+          pattern=r'  const wallet=<ScrollView contentContainerStyle=\{styles\.content\}>.*?</ScrollView>;\n  const profile='
+          replacement='  const wallet=<ScrollView contentContainerStyle={styles.content}><Text style={styles.pageTitle}>Ganhos e repasses</Text><DriverWallet/></ScrollView>;\n  const profile='
+          text2,count=re.subn(pattern,replacement,text,count=1,flags=re.S)
+          if count!=1: raise SystemExit(f'wallet block replacements={count}')
+          app.write_text(text2)
+
+          index=Path('apps/entregador/index.js')
+          root=index.read_text()
+          root=root.replace('import DriverPayoutHost from "./DriverPayoutHost";\n','')
+          root=root.replace('<DriverSupportHost><DriverPayoutHost><App/><LegalConsentGate/></DriverPayoutHost></DriverSupportHost>','<DriverSupportHost><App/><LegalConsentGate/></DriverSupportHost>')
+          if 'DriverPayoutHost' in root: raise SystemExit('DriverPayoutHost still referenced')
+          index.write_text(root)
+
+          Path('.github/workflows/patch-driver-wallet.yml').unlink()
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/entregador/App.tsx apps/entregador/index.js .github/workflows/patch-driver-wallet.yml
+          git commit -m "feat: integrar carteira real na aba de ganhos do entregador"
+          git pull --rebase origin main
+          git push origin HEAD:main
