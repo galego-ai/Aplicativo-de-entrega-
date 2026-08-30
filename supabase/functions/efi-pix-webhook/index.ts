@@ -19,7 +19,7 @@ export default{fetch:async(req:Request)=>{
   const{data:charge}=await supabase.from("efi_pix_charges").select("id").eq("txid",txid).maybeSingle();
   if(!charge){await supabase.from("webhook_events").update({processed:true,processed_at:new Date().toISOString(),last_error:"IGNORED_UNKNOWN_TXID"}).eq("provider","EFI").eq("event_id",eventId);ignored++;continue;}
   const{error}=await supabase.rpc("complete_efi_pix_payment_atomic",{p_txid:txid,p_end_to_end_id:e2e||null,p_paid_amount:value,p_paid_at:paidAt,p_payload:pix});
-  if(error){await supabase.from("webhook_events").update({last_error:String(error.message).slice(0,500)}).eq("provider","EFI").eq("event_id",eventId);if(String(error.message).includes("AMOUNT_MISMATCH")){ignored++;continue;}return new Response("retry",{status:500});}
+  if(error){const msg=String(error.message).slice(0,500);if(msg.includes("AMOUNT_MISMATCH")){await supabase.from("webhook_events").update({processed:true,processed_at:new Date().toISOString(),last_error:"EFI_PIX_AMOUNT_MISMATCH"}).eq("provider","EFI").eq("event_id",eventId);ignored++;continue;}await supabase.from("webhook_events").update({last_error:msg}).eq("provider","EFI").eq("event_id",eventId);return new Response("retry",{status:500});}
   await supabase.from("webhook_events").update({processed:true,processed_at:new Date().toISOString(),last_error:null}).eq("provider","EFI").eq("event_id",eventId);processed++;
  }
  return Response.json({ok:true,processed,ignored});
