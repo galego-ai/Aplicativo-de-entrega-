@@ -1,3 +1,4 @@
+# one-shot patch workflow; remove after success
 name: Patch card resume
 on:
   push:
