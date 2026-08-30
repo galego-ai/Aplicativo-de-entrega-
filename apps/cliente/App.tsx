@@ -20,6 +20,7 @@ type ProductWithMedia = Product & { image_url:string|null };
 type Address = { id:string; label:string|null; street:string; number:string|null; district:string|null; reference:string|null };
 type StoreRelation = { name:string; latitude:number|null; longitude:number|null };
 type Order = { id:string; order_number:number; store_id:string; address_id:string|null; delivery_type:string; total:number; status:string; payment_status:string; created_at:string; stores:StoreRelation|StoreRelation[]|null };
+type RefundInfo = { payment_id:string; status:string; amount:number; reason:string|null; created_at:string; completed_at:string|null };
 type CartItem = CustomizedItem & { cartKey:string };
 type DeliveryType = "DELIVERY"|"PICKUP";
 type PaymentMethod = "CASH"|"PIX";
@@ -30,6 +31,8 @@ const brl=(value:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",curren
 const terminalStatuses=new Set(["DELIVERED","CANCELLED","REJECTED"]);
 const cancellableStatuses=new Set(["PENDING_PAYMENT","WAITING_STORE","ACCEPTED","PREPARING","READY","WAITING_DRIVER"]);
 const statusLabel:Record<string,string>={PENDING_PAYMENT:"Aguardando pagamento",WAITING_STORE:"Aguardando a loja",ACCEPTED:"Pedido aceito",PREPARING:"Em preparação",READY:"Pronto",WAITING_DRIVER:"Procurando entregador",DRIVER_ASSIGNED:"Entregador confirmado",DRIVER_TO_STORE:"Entregador indo à loja",PICKUP_CONFIRMED:"Pedido retirado",DRIVER_TO_CUSTOMER:"A caminho de você",DRIVER_AT_CUSTOMER:"Seu motorista chegou",DELIVERED:"Entregue",CANCELLED:"Cancelado",REJECTED:"Recusado"};
+const paymentStatusLabel:Record<string,string>={PENDING:"Pagamento pendente",PAID:"Pagamento confirmado",FAILED:"Pagamento falhou",CANCELLED:"Pagamento cancelado",PARTIALLY_REFUNDED:"Estorno parcial",REFUNDED:"Estornado"};
+const refundStatusLabel:Record<string,string>={PENDING:"Estorno solicitado",PROCESSING:"Estorno em processamento",COMPLETED:"PIX devolvido",FAILED:"Falha no estorno",CANCELLED:"Estorno cancelado"};
 
 function AuthScreen(){
   const[mode,setMode]=useState<"login"|"register">("login");
@@ -79,6 +82,7 @@ export default function App(){
   const[variants,setVariants]=useState<CustomerVariant[]>([]); const[optionGroups,setOptionGroups]=useState<CustomerOptionGroup[]>([]); const[productOptions,setProductOptions]=useState<CustomerOption[]>([]); const[productGroupLinks,setProductGroupLinks]=useState<ProductGroupLink[]>([]); const[promotions,setPromotions]=useState<CustomerPromotion[]>([]); const[selectedProduct,setSelectedProduct]=useState<ProductWithMedia|null>(null);
   const[addresses,setAddresses]=useState<Address[]>([]); const[selectedAddressId,setSelectedAddressId]=useState(""); const[deliveryType,setDeliveryType]=useState<DeliveryType>("DELIVERY"); const[coupon,setCoupon]=useState(""); const[placing,setPlacing]=useState(false);
   const[paymentMethod,setPaymentMethod]=useState<PaymentMethod>("CASH"); const[availablePaymentMethods,setAvailablePaymentMethods]=useState<PaymentMethod[]>(["CASH"]); const[pixCharge,setPixCharge]=useState<PixCharge|null>(null); const[pixBusy,setPixBusy]=useState(false);
+  const[refundByOrder,setRefundByOrder]=useState<Record<string,RefundInfo>>({}); const[refundBusyOrderId,setRefundBusyOrderId]=useState<string|null>(null);
   const[addressForm,setAddressForm]=useState({label:"Casa",street:"",number:"",district:"",reference:""}); const[savingAddress,setSavingAddress]=useState(false);
   const[tracking,setTracking]=useState<Tracking|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);
 
@@ -131,7 +135,24 @@ export default function App(){
     if(!session)return;
     const{data}=await supabase.from("orders").select("id,order_number,store_id,address_id,delivery_type,total,status,payment_status,created_at,stores(name,latitude,longitude)").eq("customer_id",session.user.id).order("created_at",{ascending:false}).limit(30);
     const rows=(data??[]).map((o:any)=>({...o,total:Number(o.total)})) as Order[];
-    setOrders(rows);await loadPendingPix(rows);await loadTracking(rows);
+    setOrders(rows);await Promise.all([loadPendingPix(rows),loadRefunds(rows),loadTracking(rows)]);
+  }
+
+  async function loadRefunds(currentOrders:Order[]){
+    const orderIds=currentOrders.map(order=>order.id);
+    if(!orderIds.length){setRefundByOrder({});return;}
+    const{data:payments,error:paymentError}=await supabase.from("payments").select("id,order_id").in("order_id",orderIds).eq("method","PIX");
+    if(paymentError||!payments?.length){setRefundByOrder({});return;}
+    const paymentIds=payments.map((payment:any)=>String(payment.id));
+    const paymentToOrder=new Map(payments.map((payment:any)=>[String(payment.id),String(payment.order_id)]));
+    const{data:refunds,error:refundError}=await supabase.from("refunds").select("payment_id,status,amount,reason,created_at,completed_at").in("payment_id",paymentIds).order("created_at",{ascending:false});
+    if(refundError){setRefundByOrder({});return;}
+    const next:Record<string,RefundInfo>={};
+    for(const raw of refunds??[]){
+      const orderId=paymentToOrder.get(String((raw as any).payment_id));
+      if(orderId&&!next[orderId])next[orderId]={...(raw as any),amount:Number((raw as any).amount)} as RefundInfo;
+    }
+    setRefundByOrder(next);
   }
 
   async function loadTracking(currentOrders:Order[]){
@@ -313,10 +334,26 @@ export default function App(){
       {text:"Não",style:"cancel"},
       {text:"Cancelar",style:"destructive",onPress:async()=>{
         const{data,error}=await supabase.functions.invoke("customer-cancel-order",{body:{orderId:order.id,reason:"Cancelado pelo cliente no aplicativo"}});
-        if(error||data?.error){setMessage(data?.error==="CANCELLATION_REQUIRES_SUPPORT"?"A entrega já avançou. Abra o suporte para solicitar cancelamento.":"Não foi possível cancelar este pedido.");return;}
-        setMessage("Pedido cancelado.");await loadOrders();
+        if(error||data?.error){
+          const code=data?.error;
+          setMessage(code==="CANCELLATION_REQUIRES_SUPPORT"||code==="PAID_ORDER_REQUIRES_REFUND_FLOW"?"O pedido já avançou. Abra o suporte para solicitar cancelamento e análise do estorno.":"Não foi possível cancelar este pedido.");return;
+        }
+        if(data?.refundRequired){
+          const refundStatus=String(data?.refundStatus??"PENDING");
+          setMessage(refundStatus==="COMPLETED"?"Pedido cancelado e PIX devolvido com sucesso.":refundStatus==="FAILED"?"Pedido cancelado. A devolução do PIX precisa ser tentada novamente.":"Pedido cancelado. A devolução do PIX foi solicitada e está sendo processada.");
+        }else setMessage("Pedido cancelado.");
+        await loadOrders();
       }},
     ]);
+  }
+
+  async function reconcileRefund(order:Order){
+    setRefundBusyOrderId(order.id);setMessage("");
+    const{data,error}=await supabase.functions.invoke("efi-pix-refund",{body:{orderId:order.id,reason:"Reconciliação de estorno solicitada pelo cliente"}});
+    if(error||data?.error){setMessage("Não foi possível consultar o estorno agora. Tente novamente em alguns minutos.");setRefundBusyOrderId(null);return;}
+    const status=String(data?.refundStatus??"");
+    setMessage(status==="COMPLETED"?"PIX devolvido com sucesso.":status==="FAILED"?"A Efí não concluiu a devolução. Você pode tentar novamente ou abrir o suporte.":"A devolução do PIX continua em processamento.");
+    await loadOrders();setRefundBusyOrderId(null);
   }
 
   async function submitReview(order:Order){
@@ -453,7 +490,9 @@ export default function App(){
     {orders.length?orders.map(order=>{
       const rel=Array.isArray(order.stores)?order.stores[0]:order.stores;const reviewed=reviewedOrderIds.has(order.id);
       return <View style={styles.orderBlock} key={order.id}>
-        <View style={styles.orderCard}><View style={{flex:1}}><Text style={styles.productName}>{rel?.name??"CLICK-FOOD"} • #{order.order_number}</Text><Text style={styles.meta}>{statusLabel[order.status]??order.status} • pagamento {order.payment_status}</Text></View><Text style={styles.price}>{brl(order.total)}</Text></View>
+        <View style={styles.orderCard}><View style={{flex:1}}><Text style={styles.productName}>{rel?.name??"CLICK-FOOD"} • #{order.order_number}</Text><Text style={styles.meta}>{statusLabel[order.status]??order.status} • {paymentStatusLabel[order.payment_status]??order.payment_status}</Text></View><Text style={styles.price}>{brl(order.total)}</Text></View>
+        {refundByOrder[order.id]&&<View style={[styles.refundBanner,refundByOrder[order.id].status==="COMPLETED"?styles.refundDone:refundByOrder[order.id].status==="FAILED"?styles.refundFailed:styles.refundPending]}><Text style={styles.refundText}>{refundStatusLabel[refundByOrder[order.id].status]??refundByOrder[order.id].status} • {brl(refundByOrder[order.id].amount)}</Text>{["PENDING","PROCESSING","FAILED"].includes(refundByOrder[order.id].status)&&<Pressable style={styles.refundButton} disabled={refundBusyOrderId===order.id} onPress={()=>reconcileRefund(order)}><Text style={styles.refundButtonText}>{refundBusyOrderId===order.id?"CONSULTANDO...":"ATUALIZAR ESTORNO"}</Text></Pressable>}</View>}
+        {!refundByOrder[order.id]&&["CANCELLED","REJECTED"].includes(order.status)&&["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status)&&<Pressable style={styles.refundButtonStandalone} disabled={refundBusyOrderId===order.id} onPress={()=>reconcileRefund(order)}><Text style={styles.refundButtonText}>{refundBusyOrderId===order.id?"CONSULTANDO...":"CONSULTAR ESTORNO PIX"}</Text></Pressable>}
         {cancellableStatuses.has(order.status)&&<Pressable style={styles.cancelButton} onPress={()=>cancelOrder(order)}><Text style={styles.cancelText}>CANCELAR PEDIDO</Text></Pressable>}
         {order.status==="DELIVERED"&&!reviewed&&ratingOrderId!==order.id&&<Pressable style={styles.rateButton} onPress={()=>{setRatingOrderId(order.id);setStars(5);setReviewComment("");}}><Text style={styles.rateText}>☆ AVALIAR PEDIDO</Text></Pressable>}
         {order.status==="DELIVERED"&&reviewed&&<Text style={styles.reviewed}>✓ Avaliação enviada</Text>}
@@ -490,6 +529,7 @@ const styles=StyleSheet.create({
   addressCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e2e2e2",borderRadius:13,padding:12,marginBottom:7},addressSelected:{borderColor:"#d4ae00",backgroundColor:"#fffbea"},addressForm:{backgroundColor:"#eeeae0",borderRadius:16,padding:14,marginTop:10},formTitle:{fontWeight:"900",marginBottom:10},
   secondaryButton:{backgroundColor:"#fff",borderWidth:1,borderColor:"#ccc",padding:13,borderRadius:12,alignItems:"center"},secondaryText:{fontWeight:"900"},totalBox:{backgroundColor:"#fff",padding:16,borderRadius:15,marginTop:12},total:{fontSize:25,fontWeight:"900",marginTop:4},paymentHint:{fontSize:10,color:"#777",marginTop:10,lineHeight:14},checkout:{backgroundColor:"#f4c400",padding:16,borderRadius:14,alignItems:"center",marginTop:10},checkoutText:{fontWeight:"900"},back:{fontWeight:"900",color:"#856a00",fontSize:15},empty:{color:"#777",paddingVertical:20,textAlign:"center"},
   orderBlock:{marginBottom:10},orderCard:{backgroundColor:"#fff",borderRadius:14,padding:14,flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:10},rowBetween:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},link:{color:"#8d7000",fontWeight:"900"},
+  refundBanner:{marginTop:7,borderRadius:12,padding:11,borderWidth:1},refundPending:{backgroundColor:"#fff8dd",borderColor:"#ead47a"},refundDone:{backgroundColor:"#e2f7e9",borderColor:"#9fd7b1"},refundFailed:{backgroundColor:"#fde9e6",borderColor:"#e2aaa2"},refundText:{fontSize:11,fontWeight:"900",color:"#333"},refundButton:{marginTop:9,backgroundColor:"#111",borderRadius:9,paddingVertical:9,paddingHorizontal:11,alignSelf:"flex-start"},refundButtonStandalone:{marginTop:7,backgroundColor:"#111",borderRadius:10,padding:11,alignItems:"center"},refundButtonText:{color:"#fff",fontSize:10,fontWeight:"900"},
   trackingCard:{backgroundColor:"#111",borderRadius:20,padding:14,marginBottom:16,overflow:"hidden"},trackingKicker:{color:"#f4c400",fontWeight:"900",fontSize:9,letterSpacing:1.2},trackingTitle:{color:"#fff",fontSize:20,fontWeight:"900",marginTop:5},trackingStatus:{color:"#ccc",fontSize:12,marginTop:4,marginBottom:12},trackingMap:{height:250,borderRadius:15,overflow:"hidden"},mapWaiting:{height:180,borderRadius:15,backgroundColor:"#292929",alignItems:"center",justifyContent:"center",padding:20},mapPin:{backgroundColor:"#fff",borderRadius:18,padding:7,borderWidth:2,borderColor:"#111"},driverPin:{backgroundColor:"#f4c400",borderRadius:22,padding:8,borderWidth:2,borderColor:"#111"},driverEmoji:{fontSize:25},liveHint:{color:"#aaa",fontSize:10,marginTop:9,lineHeight:14},arrivedBanner:{backgroundColor:"#f4c400",borderRadius:13,padding:13,marginBottom:12},arrivedTitle:{fontSize:18,fontWeight:"900"},arrivedText:{fontSize:11,marginTop:3},
   cancelButton:{borderWidth:1,borderColor:"#edc3c0",backgroundColor:"#fff",padding:10,borderRadius:10,alignItems:"center",marginTop:5},cancelText:{color:"#a32e28",fontWeight:"900",fontSize:10},rateButton:{backgroundColor:"#fff6cf",padding:10,borderRadius:10,alignItems:"center",marginTop:5},rateText:{color:"#745c00",fontWeight:"900",fontSize:10},reviewed:{color:"#24774b",fontWeight:"800",fontSize:11,padding:8},reviewBox:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e1d49d",borderRadius:14,padding:14,marginTop:5},stars:{flexDirection:"row",gap:7,marginBottom:12},star:{fontSize:34,color:"#ccc"},starActive:{color:"#f4c400"},
   profile:{backgroundColor:"#fff",padding:15,borderRadius:16,flexDirection:"row",alignItems:"center",gap:12},signOut:{borderWidth:1,borderColor:"#e3b7b7",borderRadius:13,padding:14,marginTop:24,alignItems:"center"},signOutText:{color:"#9d2c2c",fontWeight:"900"},
