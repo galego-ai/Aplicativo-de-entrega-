@@ -16,6 +16,7 @@ import PixPaymentCard, { type PixCharge } from "./PixPaymentCard";
 import CustomerSupport from "./CustomerSupport";
 import EfiCardPayment, { type CardTokenizationConfig, type PendingCardOrder } from "./EfiCardPayment";
 import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
+import CustomerOrderReceipt from "./CustomerOrderReceipt";
 
 type Tab = "home" | "search" | "orders" | "support" | "profile";
 type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean };
@@ -95,6 +96,7 @@ export default function App(){
   const[loyaltyWallets,setLoyaltyWallets]=useState<LoyaltyWallet[]>([]); const[loyaltyTotal,setLoyaltyTotal]=useState(0); const[loyaltyBusyReward,setLoyaltyBusyReward]=useState<string|null>(null);
   const[addressForm,setAddressForm]=useState({label:"Casa",street:"",number:"",district:"",reference:""}); const[savingAddress,setSavingAddress]=useState(false);
   const[tracking,setTracking]=useState<Tracking|null>(null); const[driverCard,setDriverCard]=useState<DriverCard|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);
+  const[receiptOrderId,setReceiptOrderId]=useState<string|null>(null);
 
   const cartSubtotal=useMemo(()=>cart.reduce((sum,item)=>{
     const extras=item.options.reduce((s,o)=>s+o.price*o.quantity,0);
@@ -581,6 +583,7 @@ export default function App(){
         <View style={styles.orderCard}><View style={{flex:1}}><Text style={styles.productName}>{rel?.name??"CLICK-FOOD"} • #{order.order_number}</Text><Text style={styles.meta}>{statusLabel[order.status]??order.status} • {paymentStatusLabel[order.payment_status]??order.payment_status}</Text></View><Text style={styles.price}>{brl(order.total)}</Text></View>
         {refundByOrder[order.id]&&<View style={[styles.refundBanner,refundByOrder[order.id].status==="COMPLETED"?styles.refundDone:refundByOrder[order.id].status==="FAILED"?styles.refundFailed:styles.refundPending]}><Text style={styles.refundText}>{refundStatusLabel[refundByOrder[order.id].status]??refundByOrder[order.id].status} • {brl(refundByOrder[order.id].amount)}</Text>{["PENDING","PROCESSING","FAILED"].includes(refundByOrder[order.id].status)&&<Pressable style={styles.refundButton} disabled={refundBusyOrderId===order.id} onPress={()=>reconcileRefund(order)}><Text style={styles.refundButtonText}>{refundBusyOrderId===order.id?"CONSULTANDO...":"ATUALIZAR ESTORNO"}</Text></Pressable>}</View>}
         {!refundByOrder[order.id]&&["CANCELLED","REJECTED"].includes(order.status)&&["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status)&&<Pressable style={styles.refundButtonStandalone} disabled={refundBusyOrderId===order.id} onPress={()=>reconcileRefund(order)}><Text style={styles.refundButtonText}>{refundBusyOrderId===order.id?"CONSULTANDO...":"CONSULTAR ESTORNO PIX"}</Text></Pressable>}
+        <Pressable style={styles.rateButton} onPress={()=>setReceiptOrderId(order.id)}><Text style={styles.rateText}>▤ VER COMPROVANTE</Text></Pressable>
         {cancellableStatuses.has(order.status)&&<Pressable style={styles.cancelButton} onPress={()=>cancelOrder(order)}><Text style={styles.cancelText}>CANCELAR PEDIDO</Text></Pressable>}
         {order.status==="DELIVERED"&&!reviewed&&ratingOrderId!==order.id&&<Pressable style={styles.rateButton} onPress={()=>{setRatingOrderId(order.id);setStars(5);setReviewComment("");}}><Text style={styles.rateText}>☆ AVALIAR PEDIDO</Text></Pressable>}
         {order.status==="DELIVERED"&&reviewed&&<Text style={styles.reviewed}>✓ Avaliação enviada</Text>}
@@ -608,7 +611,7 @@ export default function App(){
   const support=<CustomerSupport/>;
   const screen=tab==="home"?home:tab==="search"?search:tab==="orders"?ordersView:tab==="support"?support:profile;
   const tabs:Array<[Tab,string,string]>=[["home","⌂","Início"],["search","⌕","Buscar"],["orders","▤","Pedidos"],["support","?","Ajuda"],["profile","○","Perfil"]];
-  return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><View style={{flex:1}}>{screen}</View><View style={styles.bottom}>{tabs.map(([key,icon,label])=><Pressable style={styles.tab} key={key} onPress={()=>setTab(key)}><Text style={[styles.tabIcon,tab===key&&styles.tabActive]}>{icon}</Text><Text style={[styles.tabLabel,tab===key&&styles.tabActive]}>{label}</Text></Pressable>)}</View></SafeAreaView>;
+  return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><View style={{flex:1}}>{screen}</View><CustomerOrderReceipt orderId={receiptOrderId} onClose={()=>setReceiptOrderId(null)}/><View style={styles.bottom}>{tabs.map(([key,icon,label])=><Pressable style={styles.tab} key={key} onPress={()=>setTab(key)}><Text style={[styles.tabIcon,tab===key&&styles.tabActive]}>{icon}</Text><Text style={[styles.tabLabel,tab===key&&styles.tabActive]}>{label}</Text></Pressable>)}</View></SafeAreaView>;
 }
 
 const styles=StyleSheet.create({
