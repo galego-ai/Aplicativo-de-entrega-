@@ -105,6 +105,7 @@ export default function App(){
   useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();loadLoyalty();}else{setTracking(null);setDriverCard(null);setOrders([]);setPixCharge(null);setLoyaltyWallets([]);setLoyaltyTotal(0);}},[session]);
   useEffect(()=>{if(!session||tab!=="orders")return;const timer=setInterval(()=>loadOrders(),6000);return()=>clearInterval(timer);},[session?.user.id,tab]);
   useEffect(()=>{if(!session)return;const timer=setInterval(()=>loadStores(),60000);return()=>clearInterval(timer);},[session?.user.id]);
+  useEffect(()=>{if(session&&cardTokenization)void loadOrders();},[session?.user.id,cardTokenization?.accountId]);
 
   async function loadLoyalty(){
     if(!session)return;
@@ -150,6 +151,30 @@ export default function App(){
     if(data?.brcode)setPixCharge({orderId:pending.id,txid:data.txid,brcode:data.brcode,status:data.status,expires_at:data.expires_at});
   }
 
+  async function loadPendingCard(currentOrders:Order[]){
+    if(!session)return;
+    const pending=currentOrders.find(order=>order.status==="PENDING_PAYMENT"&&order.payment_status==="PENDING");
+    if(!pending){
+      setPendingCardOrder(current=>current&&currentOrders.some(order=>order.id===current.orderId&&order.status==="PENDING_PAYMENT")?current:null);
+      return;
+    }
+    const{data:payment}=await supabase.from("payments").select("method").eq("order_id",pending.id).order("created_at",{ascending:false}).limit(1).maybeSingle();
+    if(payment?.method!=="CREDIT_CARD")return;
+    const{data:charge}=await supabase.from("efi_card_charges").select("charge_id,status").eq("order_id",pending.id).maybeSingle();
+    if(charge?.charge_id){
+      const statusResult=await supabase.functions.invoke("efi-card-status",{body:{orderId:pending.id}});
+      const status=String(statusResult.data?.status??charge.status??"").toUpperCase();
+      const paid=Boolean(statusResult.data?.paid||status==="PAID");
+      const approved=Boolean(statusResult.data?.approved||status==="APPROVED");
+      setPendingCardOrder(null);
+      if(!statusResult.error&&paid)setMessage("Pagamento no cartão confirmado! Seu pedido foi enviado para a loja.");
+      else if(!statusResult.error&&approved)setMessage("Cartão aprovado pela Efí. Aguardando a confirmação final do pagamento.");
+      else if(!statusResult.error&&["WAITING","PROCESSING"].includes(status))setMessage("Pagamento no cartão em processamento. A Efí está confirmando o status.");
+      return;
+    }
+    if(cardTokenization)setPendingCardOrder(current=>current?.orderId===pending.id?current:{orderId:pending.id,total:pending.total});
+  }
+
   async function refreshPix(orderId:string){
     setPixBusy(true);
     const statusResult=await supabase.functions.invoke("efi-pix-status",{body:{orderId}});
@@ -166,7 +191,7 @@ export default function App(){
     if(!session)return;
     const{data}=await supabase.from("orders").select("id,order_number,store_id,address_id,delivery_type,total,status,payment_status,created_at,stores(name,latitude,longitude)").eq("customer_id",session.user.id).order("created_at",{ascending:false}).limit(30);
     const rows=(data??[]).map((o:any)=>({...o,total:Number(o.total)})) as Order[];
-    setOrders(rows);await Promise.all([loadPendingPix(rows),loadRefunds(rows),loadTracking(rows)]);
+    setOrders(rows);await Promise.all([loadPendingPix(rows),loadPendingCard(rows),loadRefunds(rows),loadTracking(rows)]);
   }
 
   async function loadRefunds(currentOrders:Order[]){
