@@ -5,6 +5,7 @@ type AdminStatus="APPROVED"|"PROCESSING"|"PAID"|"FAILED"|"REJECTED";
 type Body=
  | {action:"REQUEST";storeId:string;amount:number;method:Method;destinationValue:string}
  | {action:"CANCEL";payoutId:string}
+ | {action:"DRIVER_SUMMARY"}
  | {action:"DRIVER_REQUEST";amount:number;method:Method;destinationValue:string}
  | {action:"DRIVER_CANCEL";payoutId:string}
  | {action:"ADMIN_STATUS";payoutId:string;status:AdminStatus;notes?:string;providerId?:string};
@@ -15,6 +16,17 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  if(req.method!=="POST")return Response.json({error:"METHOD_NOT_ALLOWED"},{status:405});
  let body:Body;try{body=await req.json()}catch{return Response.json({error:"INVALID_JSON"},{status:400})}
  const userId=ctx.userClaims!.id;const platformRole=String(ctx.userClaims!.appMetadata?.clickfood_role??"");
+
+ if(body.action==="DRIVER_SUMMARY"){
+  const{data:driver}=await ctx.supabaseAdmin.from("drivers").select("id").eq("user_id",userId).maybeSingle();
+  if(!driver)return Response.json({error:"DRIVER_REQUIRED"},{status:403});
+  const[{data:transactions},{data:payouts}]=await Promise.all([
+   ctx.supabaseAdmin.from("financial_transactions").select("direction,amount,status").eq("driver_id",driver.id).in("status",["POSTED","PENDING"]),
+   ctx.supabaseAdmin.from("payouts").select("id,amount,method,status,destination_value,requested_at,processed_at,review_notes,provider_id").eq("recipient_type","DRIVER").eq("driver_id",driver.id).order("requested_at",{ascending:false}).limit(30),
+  ]);
+  const available=(transactions??[]).reduce((sum:any,t:any)=>sum+(t.direction==="CREDIT"?Number(t.amount):-Number(t.amount)),0);
+  return Response.json({driverId:driver.id,availableBalance:Math.max(0,Math.round(available*100)/100),payouts:(payouts??[]).map((p:any)=>({...p,amount:Number(p.amount)}))});
+ }
 
  if(body.action==="REQUEST"){
   const amount=Number(body.amount);if(!body.storeId||!Number.isFinite(amount)||amount<=0||!body.destinationValue?.trim())return Response.json({error:"INVALID_REQUEST"},{status:400});
