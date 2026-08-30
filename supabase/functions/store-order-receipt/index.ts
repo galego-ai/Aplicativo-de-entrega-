@@ -14,12 +14,12 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  if(!authorized){const{data:membership}=await ctx.supabaseAdmin.from("store_memberships").select("role").eq("store_id",order.store_id).eq("user_id",ctx.userClaims!.id).eq("active",true).maybeSingle();authorized=!!membership;}
  if(!authorized)return Response.json({error:"STORE_ACCESS_DENIED"},{status:403});
 
- const[{data:store},{data:customer},{data:address},{data:items},{data:payment},{data:delivery}]=await Promise.all([
+ const[{data:store},{data:customer},{data:address},{data:items},{data:payments},{data:delivery}]=await Promise.all([
   ctx.supabaseAdmin.from("stores").select("name,document,phone,logo_url").eq("id",order.store_id).maybeSingle(),
   order.customer_id?ctx.supabaseAdmin.from("profiles").select("full_name").eq("id",order.customer_id).maybeSingle():Promise.resolve({data:null}),
   order.address_id?ctx.supabaseAdmin.from("customer_addresses").select("street,number,complement,district,postal_code,reference").eq("id",order.address_id).maybeSingle():Promise.resolve({data:null}),
   ctx.supabaseAdmin.from("order_items").select("id,product_name_snapshot,quantity,unit_price,total_price,notes").eq("order_id",order.id).order("id"),
-  ctx.supabaseAdmin.from("payments").select("method,provider,status,amount,provider_transaction_id,paid_at").eq("order_id",order.id).order("created_at",{ascending:false}).limit(1).maybeSingle(),
+  ctx.supabaseAdmin.from("payments").select("method,provider,status,amount,provider_transaction_id,paid_at,created_at").eq("order_id",order.id).order("created_at",{ascending:true}),
   ctx.supabaseAdmin.from("deliveries").select("id,driver_id,status,delivery_fee,driver_earning,pickup_at,delivered_at").eq("order_id",order.id).maybeSingle(),
  ]);
 
@@ -28,6 +28,8 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  const optionMap=new Map<string,any[]>();for(const option of options??[]){const list=optionMap.get(option.order_item_id)??[];list.push({name:option.option_name_snapshot,price:Number(option.price),quantity:Number(option.quantity)});optionMap.set(option.order_item_id,list);}
  let driverInfo:any=null;
  if(delivery?.driver_id){const{data:driver}=await ctx.supabaseAdmin.from("drivers").select("user_id").eq("id",delivery.driver_id).maybeSingle();if(driver?.user_id){const{data:profile}=await ctx.supabaseAdmin.from("profiles").select("full_name,avatar_url").eq("id",driver.user_id).maybeSingle();driverInfo=profile?{name:profile.full_name??"Entregador CLICK-FOOD",avatarUrl:profile.avatar_url??null}:null;}}
+ const paymentRows=(payments??[]).map((payment:any)=>({method:payment.method,provider:payment.provider??null,status:payment.status,amount:Number(payment.amount),transactionId:payment.provider_transaction_id??null,paidAt:payment.paid_at??null}));
+ const primaryPayment=paymentRows.length?paymentRows[paymentRows.length-1]:null;
 
  return Response.json({
   order:{...order,subtotal:Number(order.subtotal),delivery_fee:Number(order.delivery_fee),discount:Number(order.discount),total:Number(order.total)},
@@ -35,7 +37,8 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   customer:{name:customer?.full_name??"Cliente CLICK-FOOD"},
   address:address??null,
   items:itemRows.map(item=>({id:item.id,name:item.product_name_snapshot,quantity:Number(item.quantity),unitPrice:Number(item.unit_price),totalPrice:Number(item.total_price),notes:item.notes??null,options:optionMap.get(item.id)??[]})),
-  payment:payment?{method:payment.method,provider:payment.provider??null,status:payment.status,amount:Number(payment.amount),transactionId:payment.provider_transaction_id??null,paidAt:payment.paid_at??null}:null,
+  payments:paymentRows,
+  payment:primaryPayment,
   delivery:delivery?{id:delivery.id,status:delivery.status,fee:Number(delivery.delivery_fee),driverEarning:Number(delivery.driver_earning),pickupAt:delivery.pickup_at??null,deliveredAt:delivery.delivered_at??null,driver:driverInfo}:null,
  });
 })};
