@@ -42,7 +42,7 @@ function buildHtml(config: CardTokenizationConfig, total: number, defaults: Prop
 <meta http-equiv="Cache-Control" content="no-store" />
 <meta http-equiv="Pragma" content="no-cache" />
 <title>Pagamento seguro</title>
-<script src="https://cdn.jsdelivr.net/gh/efipay/js-payment-token-efi/dist/payment-token-efi-umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/payment-token-efi@3.4.1/dist/payment-token-efi-umd.min.js"></script>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f7f7f7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111}.wrap{padding:18px 18px 42px}.brand{font-size:22px;font-weight:900;margin-bottom:4px}.brand span{color:#e1b400}.sub{font-size:12px;color:#666;line-height:1.45;margin-bottom:18px}.total{background:#111;color:#fff;border-radius:16px;padding:16px;margin-bottom:16px}.total small{display:block;color:#bbb;font-weight:700}.total strong{display:block;font-size:25px;margin-top:4px}.card{background:#fff;border:1px solid #e5e5e5;border-radius:16px;padding:14px;margin-bottom:12px}.label{font-size:11px;font-weight:800;color:#555;margin:9px 0 5px}.input,.select{width:100%;height:46px;border:1px solid #d8d8d8;border-radius:11px;padding:0 12px;font-size:15px;background:#fff}.row{display:flex;gap:9px}.row>div{flex:1}.button{width:100%;border:0;border-radius:13px;background:#f4c400;padding:15px;font-size:15px;font-weight:900;margin-top:14px}.button[disabled]{opacity:.45}.hint{font-size:10px;color:#777;line-height:1.45;margin-top:12px}.error{background:#fff0ed;color:#8d2f25;border-radius:11px;padding:11px;font-size:12px;margin:10px 0;display:none}.ok{background:#e9f8ee;color:#23683b;border-radius:11px;padding:11px;font-size:12px;margin:10px 0;display:none}</style>
 </head>
