@@ -1,0 +1,36 @@
+name: CLICK-FOOD Security Guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  secrets-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bloquear arquivos de certificado e chave privada
+        shell: bash
+        run: |
+          set -euo pipefail
+          blocked="$(git ls-files '*.pem' '*.p12' '*.pfx' '*.key' '*.jks' '*.keystore')"
+          if [ -n "$blocked" ]; then
+            echo 'Arquivos sensíveis não podem ser versionados:'
+            echo "$blocked"
+            exit 1
+          fi
+
+      - name: Bloquear conteúdo típico de segredo privado
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -n -E -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|-----BEGIN CERTIFICATE-----|sk-proj-[A-Za-z0-9_-]{20,}' -- ':!package-lock.json'; then
+            echo 'Conteúdo sensível detectado. Use Secrets do backend e nunca o Git.'
+            exit 1
+          fi
+          echo 'Nenhum certificado, chave privada ou token OpenAI detectado no repositório.'
