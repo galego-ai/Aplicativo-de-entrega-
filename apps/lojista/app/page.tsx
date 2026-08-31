@@ -80,6 +80,7 @@ export default function Home() {
     else acc.debit += item.amount;
     return acc;
   }, { credit: 0, debit: 0 }), [finance]);
+  const staleCashSession = useMemo(() => !!cashSession && Date.now() - new Date(cashSession.opened_at).getTime() >= 24 * 60 * 60 * 1000, [cashSession?.id, cashSession?.opened_at]);
 
   async function hydrate() {
     setLoading(true);
@@ -459,7 +460,7 @@ export default function Home() {
   function CashPanel() {
     return (
       <section className="cashPanel">
-        <div><small>CAIXA</small><h2>{cashSession ? "Caixa 01 aberto" : "Caixa fechado"}</h2>{cashSession && <p>Saldo inicial: {brl(cashSession.opening_balance)}</p>}</div>
+        <div><small>CAIXA</small><h2>{cashSession ? "Caixa 01 aberto" : "Caixa fechado"}</h2>{cashSession && <p>Saldo inicial: {brl(cashSession.opening_balance)} • aberto em {dateTime(cashSession.opened_at)}</p>}{staleCashSession && <p style={{color:"#9a6400",fontWeight:900}}>Caixa aberto há mais de 24h — confira antes de continuar o turno.</p>}</div>
         {!cashSession ? <div className="cashActions"><input value={openingBalance} onChange={(event) => setOpeningBalance(event.target.value)} inputMode="decimal" /><button className="primaryCash" onClick={openCash}>ABRIR CAIXA</button></div> : <div className="cashActions"><input value={countedCash} onChange={(event) => setCountedCash(event.target.value)} inputMode="decimal" placeholder="Dinheiro contado" /><button className="secondaryCash" onClick={closeCash}>FECHAR CAIXA</button></div>}
       </section>
     );
@@ -475,6 +476,7 @@ export default function Home() {
       <section className="workspace">
         <header><div><small>{store.status === "ACTIVE" ? "LOJA ATIVA" : `LOJA ${store.status}`} • {store.role}</small><h1>{tab}</h1></div><div className="headerActions"><button className="refresh" onClick={() => loadStoreData(store)}>Atualizar</button><button className="refresh" onClick={logout}>Sair</button></div></header>
         {message && <div className="notice">{message}</div>}
+        {staleCashSession && <div className="notice" style={{background:"#fff1cc",border:"1px solid #e4b600",color:"#5c4900"}}><b>ATENÇÃO: caixa aberto há mais de 24 horas.</b> Confira as movimentações e feche o caixa quando encerrar o turno. O CLICK-FOOD não fecha o caixa automaticamente para não alterar sua conferência.</div>}
 
         {tab === "Dashboard" && <><div className="kpis"><article><span>Vendas hoje</span><b>{brl(metrics.sales_today)}</b></article><article><span>Pedidos hoje</span><b>{metrics.orders_today}</b></article><article><span>Ticket médio</span><b>{brl(metrics.average_ticket_today)}</b></article><article><span>Pedidos em aberto</span><b>{metrics.open_orders}</b></article></div><div className="managementGrid"><article className="mgCard"><h2>Operação</h2><p>Delivery hoje: <b>{metrics.delivery_orders_today}</b></p><p>PDV hoje: <b>{metrics.pos_orders_today}</b></p><p>Cancelados: <b>{metrics.cancelled_today}</b></p></article><article className="mgCard"><h2>Financeiro</h2><p>Créditos: <b>{brl(financeSummary.credit)}</b></p><p>Débitos: <b>{brl(financeSummary.debit)}</b></p><p>Saldo: <b>{brl(financeSummary.credit - financeSummary.debit)}</b></p></article><article className="mgCard"><h2>CLICK Pontos</h2><strong className="bigValue">{bonusBalance}</strong><p>Pontos disponíveis</p></article></div><OrdersPanel /></>}
         {tab === "Pedidos" && <OrdersPanel />}
