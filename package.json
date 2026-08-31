@@ -12,6 +12,7 @@
     "dev:entregador": "npm run start --workspace=@clickfood/entregador",
     "build:admin": "npm run build --workspace=@clickfood/admin",
     "build:lojista": "npm run build --workspace=@clickfood/lojista",
+    "vercel-build": "npm run build:lojista",
     "test:shared": "node --test packages/shared/test/*.test.ts"
   }
 }
