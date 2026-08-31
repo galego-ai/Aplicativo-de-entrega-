@@ -23,38 +23,23 @@ jobs:
         shell: python {0}
         run: |
           from pathlib import Path
-
           path = Path('apps/lojista/app/page.tsx')
           text = path.read_text(encoding='utf-8')
-
-          needle = '''  const financeSummary = useMemo(() => finance.reduce((acc, item) => {
-    if (item.direction === "CREDIT") acc.credit += item.amount;
-    else acc.debit += item.amount;
-    return acc;
-  }, { credit: 0, debit: 0 }), [finance]);
-'''
-          replacement = needle + '''  const staleCashSession = useMemo(() => !!cashSession && Date.now() - new Date(cashSession.opened_at).getTime() >= 24 * 60 * 60 * 1000, [cashSession?.id, cashSession?.opened_at]);
-'''
-          if needle not in text:
-              raise SystemExit('financeSummary anchor not found')
-          text = text.replace(needle, replacement, 1)
-
-          message_needle = '''        {message && <div className="notice">{message}</div>}
-'''
-          message_replacement = message_needle + '''        {staleCashSession && <div className="notice" style={{background:"#fff1cc",border:"1px solid #e4b600",color:"#5c4900"}}><b>ATENÇÃO: caixa aberto há mais de 24 horas.</b> Confira as movimentações e feche o caixa quando encerrar o turno. O CLICK-FOOD não fecha o caixa automaticamente para não alterar sua conferência.</div>}
-'''
-          if message_needle not in text:
-              raise SystemExit('notice anchor not found')
-          text = text.replace(message_needle, message_replacement, 1)
-
-          cash_needle = '''        <div><small>CAIXA</small><h2>{cashSession ? "Caixa 01 aberto" : "Caixa fechado"}</h2>{cashSession && <p>Saldo inicial: {brl(cashSession.opening_balance)}</p>}</div>
-'''
-          cash_replacement = '''        <div><small>CAIXA</small><h2>{cashSession ? "Caixa 01 aberto" : "Caixa fechado"}</h2>{cashSession && <p>Saldo inicial: {brl(cashSession.opening_balance)} • aberto em {dateTime(cashSession.opened_at)}</p>}{staleCashSession && <p style={{color:"#9a6400",fontWeight:900}}>Caixa aberto há mais de 24h — confira antes de continuar o turno.</p>}</div>
-'''
-          if cash_needle not in text:
-              raise SystemExit('cash panel anchor not found')
-          text = text.replace(cash_needle, cash_replacement, 1)
-
+          needle = '  }, { credit: 0, debit: 0 }), [finance]);\n'
+          addition = '  const staleCashSession = useMemo(() => !!cashSession && Date.now() - new Date(cashSession.opened_at).getTime() >= 24 * 60 * 60 * 1000, [cashSession?.id, cashSession?.opened_at]);\n'
+          if addition not in text:
+              if needle not in text: raise SystemExit('finance anchor not found')
+              text = text.replace(needle, needle + addition, 1)
+          notice = '        {message && <div className="notice">{message}</div>}\n'
+          alert = '        {staleCashSession && <div className="notice" style={{background:"#fff1cc",border:"1px solid #e4b600",color:"#5c4900"}}><b>ATENÇÃO: caixa aberto há mais de 24 horas.</b> Confira as movimentações e feche o caixa quando encerrar o turno. O CLICK-FOOD não fecha o caixa automaticamente para não alterar sua conferência.</div>}\n'
+          if alert not in text:
+              if notice not in text: raise SystemExit('notice anchor not found')
+              text = text.replace(notice, notice + alert, 1)
+          old_cash = '        <div><small>CAIXA</small><h2>{cashSession ? "Caixa 01 aberto" : "Caixa fechado"}</h2>{cashSession && <p>Saldo inicial: {brl(cashSession.opening_balance)}</p>}</div>\n'
+          new_cash = '        <div><small>CAIXA</small><h2>{cashSession ? "Caixa 01 aberto" : "Caixa fechado"}</h2>{cashSession && <p>Saldo inicial: {brl(cashSession.opening_balance)} • aberto em {dateTime(cashSession.opened_at)}</p>}{staleCashSession && <p style={{color:"#9a6400",fontWeight:900}}>Caixa aberto há mais de 24h — confira antes de continuar o turno.</p>}</div>\n'
+          if new_cash not in text:
+              if old_cash not in text: raise SystemExit('cash anchor not found')
+              text = text.replace(old_cash, new_cash, 1)
           path.write_text(text, encoding='utf-8')
       - run: npm ci
       - run: npm run build:lojista
