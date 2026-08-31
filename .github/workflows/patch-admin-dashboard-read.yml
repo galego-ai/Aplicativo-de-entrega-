@@ -1,0 +1,60 @@
+name: Patch Admin Dashboard Read
+
+on:
+  push:
+    paths:
+      - .github/workflows/patch-admin-dashboard-read.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Patch admin dashboard reads
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('apps/admin/app/page.tsx')
+          text = path.read_text(encoding='utf-8')
+          start = text.index(' async function loadAll(){')
+          end = text.index(' async function loadSession(){', start)
+          replacement = ''' async function loadAll(){
+  const{data,error}=await supabase.functions.invoke("admin-dashboard-read",{body:{}});
+  if(error||data?.error){setMessage("Não foi possível atualizar os dados da Matriz.");return;}
+  const payload:any=data??{};
+  setMetrics({...emptyMetrics,...(payload.metrics??{})});
+  setStores((payload.stores??[]) as any);
+  const loadedCities=(payload.cities??[]) as City[];setCities(loadedCities);
+  setOrders((payload.orders??[]).map((x:any)=>({...x,total:Number(x.total)})));
+  setPlans((payload.plans??[]).map((x:any)=>({...x,setup_fee:Number(x.setup_fee),monthly_fee:Number(x.monthly_fee),commission_percentage:Number(x.commission_percentage),extra_order_fee:Number(x.extra_order_fee)})));
+  setInvoices((payload.invoices??[]).map((x:any)=>({...x,amount:Number(x.amount)})));
+  setFinance((payload.finance??[]).map((x:any)=>({...x,amount:Number(x.amount)})));
+  setBonusRules((payload.bonusRules??[]).map((x:any)=>({...x,target:Number(x.target)})));
+  setBonusRewards((payload.bonusRewards??[]).map((x:any)=>({...x,reward_value:x.reward_value==null?null:Number(x.reward_value)})));
+  setAudit((payload.audit??[]) as any);
+  setDrivers((payload.drivers??[]).map((d:any)=>({...d,rating:Number(d.rating),acceptance_rate:Number(d.acceptance_rate),profileName:d.profileName||"Entregador"})));
+  const pricing=payload.pricing??[],dispatch=payload.dispatch??[];const draft:Record<string,any>={};
+  for(const city of loadedCities){const p=pricing.find((x:any)=>x.city_id===city.id);const d=dispatch.find((x:any)=>x.city_id===city.id);draft[city.id]={base:String(Number(p?.driver_base_earning??4)),perKm:String(Number(p?.driver_per_km??1)),minimum:String(Number(p?.driver_minimum_earning??6)),timeout:String(Number(d?.offer_timeout_seconds??15)),initialRadius:String(Number(d?.initial_radius_km??5)),maxRadius:String(Number(d?.max_radius_km??20)),batch:String(Number(d?.batch_size??3))};}
+  setCitySettings(draft);
+ }
+'''
+          path.write_text(text[:start] + replacement + text[end:], encoding='utf-8')
+      - run: npm ci
+      - run: npm run build:admin
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "galego-ai"
+          git config user.email "elismarribeiro298@gmail.com"
+          git add apps/admin/app/page.tsx
+          git commit -m "fix: ler dashboard matriz pelo backend"
+          git push
