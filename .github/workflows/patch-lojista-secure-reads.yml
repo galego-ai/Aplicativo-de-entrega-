@@ -1,0 +1,49 @@
+name: Patch lojista secure reads
+
+on:
+  push:
+    paths:
+      - .github/workflows/patch-lojista-secure-reads.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Trocar leitura direta de cupons por RPC protegido
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("apps/lojista/app/page.tsx")
+          s = p.read_text(encoding="utf-8")
+          old_query = 'supabase.from("coupons").select("id,code,discount_type,discount_value,minimum_order,max_uses,ends_at,active").eq("store_id", currentStore.id).order("created_at", { ascending: false })'
+          new_query = 'supabase.rpc("store_coupon_list", { p_store_id: currentStore.id })'
+          old_set = 'if (couponsResult.data) setCoupons(couponsResult.data.map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));'
+          new_set = 'if (Array.isArray(couponsResult.data)) setCoupons(couponsResult.data.map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));'
+          if old_query not in s:
+              raise SystemExit("consulta direta de cupons esperada não encontrada")
+          if old_set not in s:
+              raise SystemExit("normalização de cupons esperada não encontrada")
+          s = s.replace(old_query, new_query, 1).replace(old_set, new_set, 1)
+          p.write_text(s, encoding="utf-8")
+      - name: Build Lojista
+        run: npm --workspace @clickfood/lojista run build
+      - name: Commit da correção
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "galego-ai"
+          git config user.email "elismarribeiro298@gmail.com"
+          git add apps/lojista/app/page.tsx
+          git commit -m "fix: usar leituras protegidas no dashboard lojista"
+          git pull --rebase origin main
+          git push origin HEAD:main
