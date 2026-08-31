@@ -129,13 +129,12 @@ export default function Home() {
 
   async function loadStoreData(currentStore = store) {
     if (!currentStore) return;
-    const [metricsResult, productsResult, ordersResult, cashResult, inventoryResult, couponsResult, financeResult, deliveriesResult, bonusWalletResult, bonusTxResult, loyaltyResult] = await Promise.all([
-      supabase.rpc("store_dashboard_metrics", { p_store_id: currentStore.id }),
+    const [dashboardResult, productsResult, ordersResult, cashResult, inventoryResult, financeResult, deliveriesResult, bonusWalletResult, bonusTxResult, loyaltyResult] = await Promise.all([
+      supabase.functions.invoke("store-dashboard-read", { body: { storeId: currentStore.id } }),
       supabase.from("products").select("id,name,price,promotional_price,active").eq("store_id", currentStore.id).order("name"),
       supabase.from("orders").select("id,order_number,customer_id,total,status,payment_status,delivery_type,source,created_at").eq("store_id", currentStore.id).order("created_at", { ascending: false }).limit(100),
       supabase.functions.invoke("cash-session-action", { body: { action: "STATUS", storeId: currentStore.id } }),
       supabase.from("inventory_items").select("id,product_id,quantity,minimum_quantity,products(name)").eq("store_id", currentStore.id),
-      supabase.rpc("store_coupon_list", { p_store_id: currentStore.id }),
       supabase.from("financial_transactions").select("id,transaction_type,direction,amount,status,created_at").eq("store_id", currentStore.id).order("created_at", { ascending: false }).limit(100),
       supabase.from("deliveries").select("id,status,delivery_fee,driver_earning,created_at,orders!inner(order_number,total,store_id)").eq("orders.store_id", currentStore.id).order("created_at", { ascending: false }).limit(50),
       supabase.from("store_bonus_wallets").select("id,balance").eq("store_id", currentStore.id).maybeSingle(),
@@ -143,12 +142,12 @@ export default function Home() {
       supabase.from("loyalty_programs").select("id,points_per_currency,active").eq("store_id", currentStore.id).maybeSingle(),
     ]);
 
-    if (metricsResult.data) setMetrics({ ...emptyMetrics, ...(metricsResult.data as Metrics) });
+    if (dashboardResult.data?.metrics) setMetrics({ ...emptyMetrics, ...(dashboardResult.data.metrics as Metrics) });
     if (productsResult.data) setProducts(productsResult.data.map((item: any) => ({ ...item, price: Number(item.price), promotional_price: item.promotional_price == null ? null : Number(item.promotional_price) })));
     if (ordersResult.data) { const normalizedOrders=ordersResult.data.map((item: any) => ({ ...item, total: Number(item.total) })); setOrders(normalizedOrders); await loadStoreRefunds(normalizedOrders); }
     setCashSession(cashResult.data?.session ? { ...cashResult.data.session, opening_balance: Number(cashResult.data.session.opening_balance) } : null);
     if (inventoryResult.data) setInventory(inventoryResult.data.map((item: any) => ({ ...item, quantity: Number(item.quantity), minimum_quantity: Number(item.minimum_quantity) })));
-    if (Array.isArray(couponsResult.data)) setCoupons(couponsResult.data.map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));
+    if (Array.isArray(dashboardResult.data?.coupons)) setCoupons(dashboardResult.data.coupons.map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));
     if (financeResult.data) setFinance(financeResult.data.map((item: any) => ({ ...item, amount: Number(item.amount) })));
     if (deliveriesResult.data) setDeliveries(deliveriesResult.data.map((item: any) => ({ ...item, delivery_fee: Number(item.delivery_fee), driver_earning: Number(item.driver_earning) })));
     setBonusBalance(Number(bonusWalletResult.data?.balance ?? 0));
