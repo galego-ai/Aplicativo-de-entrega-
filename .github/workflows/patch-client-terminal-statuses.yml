@@ -1,0 +1,49 @@
+name: Patch client terminal statuses
+
+on:
+  push:
+    paths:
+      - .github/workflows/patch-client-terminal-statuses.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Corrigir estados terminais do App Cliente
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("apps/cliente/App.tsx")
+          s = p.read_text(encoding="utf-8")
+          old_terminal = 'const terminalStatuses=new Set(["DELIVERED","CANCELLED","REJECTED"]);'
+          new_terminal = 'const terminalStatuses=new Set(["DELIVERED","CANCELLED","REJECTED","PAYMENT_FAILED","REFUNDED"]);'
+          old_labels = 'const statusLabel:Record<string,string>={PENDING_PAYMENT:"Aguardando pagamento",WAITING_STORE:"Aguardando a loja",ACCEPTED:"Pedido aceito",PREPARING:"Em preparação",READY:"Pronto",WAITING_DRIVER:"Procurando entregador",DRIVER_ASSIGNED:"Entregador confirmado",DRIVER_TO_STORE:"Entregador indo à loja",PICKUP_CONFIRMED:"Pedido retirado",DRIVER_TO_CUSTOMER:"A caminho de você",DRIVER_AT_CUSTOMER:"Seu motorista chegou",DELIVERED:"Entregue",CANCELLED:"Cancelado",REJECTED:"Recusado"};'
+          new_labels = 'const statusLabel:Record<string,string>={PENDING_PAYMENT:"Aguardando pagamento",WAITING_STORE:"Aguardando a loja",ACCEPTED:"Pedido aceito",PREPARING:"Em preparação",READY:"Pronto",WAITING_DRIVER:"Procurando entregador",DRIVER_ASSIGNED:"Entregador confirmado",DRIVER_TO_STORE:"Entregador indo à loja",PICKUP_CONFIRMED:"Pedido retirado",DRIVER_TO_CUSTOMER:"A caminho de você",DRIVER_AT_CUSTOMER:"Seu motorista chegou",DELIVERED:"Entregue",CANCELLED:"Cancelado",REJECTED:"Recusado",PAYMENT_FAILED:"Pagamento não concluído",REFUNDED:"Pagamento devolvido"};'
+          if old_terminal not in s:
+              raise SystemExit("terminalStatuses esperado não encontrado")
+          if old_labels not in s:
+              raise SystemExit("statusLabel esperado não encontrado")
+          s = s.replace(old_terminal, new_terminal, 1).replace(old_labels, new_labels, 1)
+          p.write_text(s, encoding="utf-8")
+      - name: Typecheck Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+      - name: Commit da correção
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "galego-ai"
+          git config user.email "elismarribeiro298@gmail.com"
+          git add apps/cliente/App.tsx
+          git commit -m "fix: encerrar rastreio após falha ou estorno"
+          git pull --rebase origin main
+          git push origin HEAD:main
