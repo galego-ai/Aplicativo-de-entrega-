@@ -12,6 +12,7 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "O CLICK-FOOD usa sua localização enquanto você está online para encontrar entregas próximas e acompanhar entregas ativas.",
+          "locationAlwaysAndWhenInUsePermission": "Permita que o CLICK-FOOD Entregador use sua localização sempre que você estiver online, inclusive em segundo plano, para receber chamadas e acompanhar entregas ativas.",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true,
           "isIosBackgroundLocationEnabled": true
