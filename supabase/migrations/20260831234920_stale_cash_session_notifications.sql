@@ -14,9 +14,10 @@ begin
     and cs.opened_at < now() - interval '24 hours';
 
   with stale as (
-    select cs.id as cash_session_id, cs.store_id, cs.opened_at, coalesce(s.name,'Loja') as store_name
+    select cs.id as cash_session_id, cr.store_id, cs.opened_at, coalesce(s.name,'Loja') as store_name
     from public.cash_sessions cs
-    join public.stores s on s.id=cs.store_id
+    join public.cash_registers cr on cr.id=cs.cash_register_id
+    join public.stores s on s.id=cr.store_id
     where cs.status='OPEN'
       and cs.opened_at < now() - interval '24 hours'
   ), recipients as (
