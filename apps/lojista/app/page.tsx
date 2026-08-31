@@ -329,6 +329,23 @@ export default function Home() {
     await loadStoreData(store);
   }
 
+  async function completePickup(order: Order) {
+    if (!store || processingOrder) return;
+    if (!window.confirm(`Confirmar que o pedido #${order.order_number} foi retirado pelo cliente?`)) return;
+    setProcessingOrder(order.id);
+    setMessage("");
+    const { data, error } = await supabase.functions.invoke("complete-store-pickup", { body: { orderId: order.id } });
+    setProcessingOrder(null);
+    if (error || data?.error) {
+      const code = String(data?.error ?? "");
+      setMessage(code === "PAYMENT_NOT_CONFIRMED" ? "O pagamento deste pedido ainda não está confirmado." : code === "ORDER_NOT_READY" ? "O pedido precisa estar marcado como pronto antes da retirada." : "Não foi possível concluir a retirada agora.");
+      await loadStoreData(store);
+      return;
+    }
+    setMessage("Retirada concluída. Pedido e pagamento finalizados com sucesso.");
+    await loadStoreData(store);
+  }
+
   async function reconcileStoreRefund(order: Order) {
     setRefundBusyOrderId(order.id); setMessage("");
     const { data, error } = await supabase.functions.invoke("payment-refund", { body: { orderId: order.id, reason: "Reconciliação de estorno pelo Painel Lojista" } });
@@ -431,6 +448,7 @@ export default function Home() {
               {order.status === "ACCEPTED" && <button onClick={() => orderAction(order, "START_PREPARING")}>Iniciar preparo</button>}
               {order.status === "PREPARING" && <button onClick={() => orderAction(order, "MARK_READY")}>Marcar pronto</button>}
               {order.status === "READY" && order.delivery_type === "DELIVERY" && <button onClick={() => retryDispatch(order)}>Chamar entregador</button>}
+              {order.status === "READY" && order.delivery_type === "PICKUP" && <button disabled={processingOrder === order.id} onClick={() => completePickup(order)}>Confirmar retirada</button>}
               {["WAITING_DRIVER", "DRIVER_ASSIGNED", "PICKED_UP", "ON_THE_WAY"].includes(order.status) && <span className="inProgress">Entrega em andamento</span>}
             </div>
           </article>
