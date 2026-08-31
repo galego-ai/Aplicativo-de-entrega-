@@ -1,0 +1,44 @@
+name: Patch Lojista Consolidated Read
+
+on:
+  push:
+    paths:
+      - .github/workflows/patch-lojista-consolidated-read.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Replace store data loader
+        shell: python {0}
+        env:
+          REPLACEMENT_B64: ICBhc3luYyBmdW5jdGlvbiBsb2FkU3RvcmVEYXRhKGN1cnJlbnRTdG9yZSA9IHN0b3JlKSB7CiAgICBpZiAoIWN1cnJlbnRTdG9yZSkgcmV0dXJuOwogICAgY29uc3QgW2Rhc2hib2FyZFJlc3VsdCwgY2FzaFJlc3VsdF0gPSBhd2FpdCBQcm9taXNlLmFsbChbCiAgICAgIHN1cGFiYXNlLmZ1bmN0aW9ucy5pbnZva2UoInN0b3JlLWRhc2hib2FyZC1yZWFkIiwgeyBib2R5OiB7IHN0b3JlSWQ6IGN1cnJlbnRTdG9yZS5pZCB9IH0pLAogICAgICBzdXBhYmFzZS5mdW5jdGlvbnMuaW52b2tlKCJjYXNoLXNlc3Npb24tYWN0aW9uIiwgeyBib2R5OiB7IGFjdGlvbjogIlNUQVRVUyIsIHN0b3JlSWQ6IGN1cnJlbnRTdG9yZS5pZCB9IH0pLAogICAgXSk7CgogICAgaWYgKGRhc2hib2FyZFJlc3VsdC5lcnJvciB8fCBkYXNoYm9hcmRSZXN1bHQuZGF0YT8uZXJyb3IpIHsKICAgICAgc2V0TWVzc2FnZSgiTsOjbyBmb2kgcG9zc8OtdmVsIGF0dWFsaXphciBvcyBkYWRvcyBkYSBsb2phLiIpOwogICAgICByZXR1cm47CiAgICB9CgogICAgY29uc3QgcGF5bG9hZDogYW55ID0gZGFzaGJvYXJkUmVzdWx0LmRhdGEgPz8ge307CiAgICBpZiAocGF5bG9hZC5tZXRyaWNzKSBzZXRNZXRyaWNzKHsgLi4uZW1wdHlNZXRyaWNzLCAuLi4ocGF5bG9hZC5tZXRyaWNzIGFzIE1ldHJpY3MpIH0pOwogICAgc2V0UHJvZHVjdHMoKHBheWxvYWQucHJvZHVjdHMgPz8gW10pLm1hcCgoaXRlbTogYW55KSA9PiAoeyAuLi5pdGVtLCBwcmljZTogTnVtYmVyKGl0ZW0ucHJpY2UpLCBwcm9tb3Rpb25hbF9wcmljZTogaXRlbS5wcm9tb3Rpb25hbF9wcmljZSA9PSBudWxsID8gbnVsbCA6IE51bWJlcihpdGVtLnByb21vdGlvbmFsX3ByaWNlKSB9KSkpOwoKICAgIGNvbnN0IG5vcm1hbGl6ZWRPcmRlcnMgPSAocGF5bG9hZC5vcmRlcnMgPz8gW10pLm1hcCgoaXRlbTogYW55KSA9PiAoeyAuLi5pdGVtLCB0b3RhbDogTnVtYmVyKGl0ZW0udG90YWwpIH0pKTsKICAgIHNldE9yZGVycyhub3JtYWxpemVkT3JkZXJzKTsKCiAgICBjb25zdCByZWZ1bmRNYXA6IFJlY29yZDxzdHJpbmcsIFJlZnVuZEluZm8+ID0ge307CiAgICBmb3IgKGNvbnN0IFtvcmRlcklkLCByYXddIG9mIE9iamVjdC5lbnRyaWVzKHBheWxvYWQucmVmdW5kc0J5T3JkZXIgPz8ge30pKSB7CiAgICAgIGNvbnN0IGl0ZW06IGFueSA9IHJhdzsKICAgICAgcmVmdW5kTWFwW29yZGVySWRdID0geyAuLi5pdGVtLCBhbW91bnQ6IE51bWJlcihpdGVtLmFtb3VudCkgfSBhcyBSZWZ1bmRJbmZvOwogICAgfQogICAgc2V0UmVmdW5kQnlPcmRlcihyZWZ1bmRNYXApOwoKICAgIHNldENhc2hTZXNzaW9uKGNhc2hSZXN1bHQuZGF0YT8uc2Vzc2lvbiA/IHsgLi4uY2FzaFJlc3VsdC5kYXRhLnNlc3Npb24sIG9wZW5pbmdfYmFsYW5jZTogTnVtYmVyKGNhc2hSZXN1bHQuZGF0YS5zZXNzaW9uLm9wZW5pbmdfYmFsYW5jZSkgfSA6IG51bGwpOwogICAgc2V0SW52ZW50b3J5KChwYXlsb2FkLmludmVudG9yeSA/PyBbXSkubWFwKChpdGVtOiBhbnkpID0+ICh7IC4uLml0ZW0sIHF1YW50aXR5OiBOdW1iZXIoaXRlbS5xdWFudGl0eSksIG1pbmltdW1fcXVhbnRpdHk6IE51bWJlcihpdGVtLm1pbmltdW1fcXVhbnRpdHkpIH0pKSk7CiAgICBzZXRDb3Vwb25zKChwYXlsb2FkLmNvdXBvbnMgPz8gW10pLm1hcCgoaXRlbTogYW55KSA9PiAoeyAuLi5pdGVtLCBkaXNjb3VudF92YWx1ZTogTnVtYmVyKGl0ZW0uZGlzY291bnRfdmFsdWUpLCBtaW5pbXVtX29yZGVyOiBOdW1iZXIoaXRlbS5taW5pbXVtX29yZGVyKSB9KSkpOwogICAgc2V0RmluYW5jZSgocGF5bG9hZC5maW5hbmNlID8/IFtdKS5tYXAoKGl0ZW06IGFueSkgPT4gKHsgLi4uaXRlbSwgYW1vdW50OiBOdW1iZXIoaXRlbS5hbW91bnQpIH0pKSk7CiAgICBzZXREZWxpdmVyaWVzKChwYXlsb2FkLmRlbGl2ZXJpZXMgPz8gW10pLm1hcCgoaXRlbTogYW55KSA9PiAoeyAuLi5pdGVtLCBkZWxpdmVyeV9mZWU6IE51bWJlcihpdGVtLmRlbGl2ZXJ5X2ZlZSksIGRyaXZlcl9lYXJuaW5nOiBOdW1iZXIoaXRlbS5kcml2ZXJfZWFybmluZykgfSkpKTsKICAgIHNldEJvbnVzQmFsYW5jZShOdW1iZXIocGF5bG9hZC5ib251c1dhbGxldD8uYmFsYW5jZSA/PyAwKSk7CiAgICBzZXRCb251c1RyYW5zYWN0aW9ucygocGF5bG9hZC5ib251c1RyYW5zYWN0aW9ucyA/PyBbXSkgYXMgQm9udXNUeFtdKTsKCiAgICBpZiAocGF5bG9hZC5sb3lhbHR5UHJvZ3JhbSkgewogICAgICBzZXRMb3lhbHR5UHJvZ3JhbUlkKFN0cmluZyhwYXlsb2FkLmxveWFsdHlQcm9ncmFtLmlkKSk7CiAgICAgIHNldExveWFsdHlQb2ludHMoU3RyaW5nKE51bWJlcihwYXlsb2FkLmxveWFsdHlQcm9ncmFtLnBvaW50c19wZXJfY3VycmVuY3kpKSk7CiAgICAgIHNldFJld2FyZHMoKHBheWxvYWQubG95YWx0eVJld2FyZHMgPz8gW10pLm1hcCgoaXRlbTogYW55KSA9PiAoeyAuLi5pdGVtLCByZXdhcmRfdmFsdWU6IGl0ZW0ucmV3YXJkX3ZhbHVlID09IG51bGwgPyBudWxsIDogTnVtYmVyKGl0ZW0ucmV3YXJkX3ZhbHVlKSB9KSkpOwogICAgfSBlbHNlIHsKICAgICAgc2V0TG95YWx0eVByb2dyYW1JZCgiIik7CiAgICAgIHNldExveWFsdHlQb2ludHMoIjEiKTsKICAgICAgc2V0UmV3YXJkcyhbXSk7CiAgICB9CiAgfQoK
+        run: |
+          import base64, os
+          from pathlib import Path
+          path = Path('apps/lojista/app/page.tsx')
+          text = path.read_text(encoding='utf-8')
+          start = text.index('  async function loadStoreData(currentStore = store) {')
+          end = text.index('  useEffect(() => {', start)
+          replacement = base64.b64decode(os.environ['REPLACEMENT_B64']).decode('utf-8')
+          path.write_text(text[:start] + replacement + text[end:], encoding='utf-8')
+      - run: npm ci
+      - run: npm run build:lojista
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "galego-ai"
+          git config user.email "elismarribeiro298@gmail.com"
+          git add apps/lojista/app/page.tsx
+          git commit -m "perf: consolidar consultas do painel lojista"
+          git push
