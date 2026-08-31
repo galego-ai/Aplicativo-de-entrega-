@@ -9,7 +9,7 @@ export default {
     const role=String(ctx.userClaims!.appMetadata?.clickfood_role??"");
     if(!["SUPER_ADMIN","ADMIN","SUPPORT"].includes(role))return Response.json({error:"ADMIN_REQUIRED"},{status:403});
 
-    const[healthResult,paymentResult,payoutResult,ticketResult,pushResult,driverPendingResult,docPendingResult,docExpiredResult,storeGpsResult,storeCityResult,legalResult]=await Promise.all([
+    const[healthResult,paymentResult,payoutResult,ticketResult,pushResult,driverPendingResult,docPendingResult,docExpiredResult,storeGpsResult,storeCityResult,legalResult,staleCashResult]=await Promise.all([
       ctx.supabaseAdmin.schema("private").rpc("admin_operational_health"),
       ctx.supabaseAdmin.from("payment_provider_configs").select("provider,display_name,environment,enabled,credentials_configured,supported_methods,updated_at").eq("provider","EFI").maybeSingle(),
       ctx.supabaseAdmin.from("payout_provider_configs").select("provider,display_name,environment,enabled,credentials_configured,automatic_processing,validated_at,updated_at").eq("provider","EFI_PIX_SEND").maybeSingle(),
@@ -21,12 +21,13 @@ export default {
       ctx.supabaseAdmin.from("stores").select("id",{count:"exact",head:true}).eq("status","ACTIVE").or("latitude.is.null,longitude.is.null"),
       ctx.supabaseAdmin.from("stores").select("id",{count:"exact",head:true}).eq("status","ACTIVE").is("city_id",null),
       ctx.supabaseAdmin.from("legal_documents").select("document_type,audience").eq("active",true).not("published_at","is",null),
+      ctx.supabaseAdmin.from("cash_sessions").select("id",{count:"exact",head:true}).eq("status","OPEN").lt("opened_at",new Date(Date.now()-24*60*60*1000).toISOString()),
     ]);
 
     if(healthResult.error)return Response.json({error:"HEALTH_CHECK_FAILED"},{status:500});
     const health:any=healthResult.data??{};const payment:any=paymentResult.data??null;const payout:any=payoutResult.data??null;
     const paymentMethods:string[]=Array.isArray(payment?.supported_methods)?payment.supported_methods:[];
-    const pushTokens=pushResult.count??0,pendingDrivers=driverPendingResult.count??0,pendingDocuments=docPendingResult.count??0,expiredDocuments=docExpiredResult.count??0,storesWithoutGps=storeGpsResult.count??0,storesWithoutCity=storeCityResult.count??0;
+    const pushTokens=pushResult.count??0,pendingDrivers=driverPendingResult.count??0,pendingDocuments=docPendingResult.count??0,expiredDocuments=docExpiredResult.count??0,storesWithoutGps=storeGpsResult.count??0,storesWithoutCity=storeCityResult.count??0,staleCashSessions=staleCashResult.count??0;
     const legalRows=(legalResult.data??[]) as Array<{document_type:string;audience:string}>;
     const audiences=["CUSTOMER","DRIVER","STORE"] as const;
     const covered=(type:string,audience:string)=>legalRows.some(row=>String(row.document_type)===type&&["ALL",audience].includes(String(row.audience)));
@@ -42,6 +43,7 @@ export default {
 
     const readiness:ReadinessItem[]=[
       {key:"core_integrity",label:"Núcleo operacional e financeiro",status:Number(health?.total_issues??0)===0?"READY":"ATTENTION",detail:Number(health?.total_issues??0)===0?"Pedidos, pagamentos, estoque, entregas, caixas, estornos, repasses e jobs estão consistentes.":`${Number(health?.total_issues??0)} alerta(s) precisam ser tratados na Saúde Operacional.`,blocking:Number(health?.total_issues??0)>0},
+      {key:"stale_cash",label:"Caixas abertos por mais de 24 horas",status:staleCashSessions===0?"READY":"ATTENTION",detail:staleCashSessions===0?"Nenhum caixa está aberto além do período preventivo de 24 horas.":`${staleCashSessions} caixa(s) está(ão) aberto(s) há mais de 24 horas. O lojista deve conferir e fechar manualmente ao encerrar o turno.`,blocking:false},
       {key:"efi_pix",label:"Efí PIX para cobrança de clientes",status:payment?.enabled&&payment?.credentials_configured&&paymentMethods.includes("PIX")?"READY":"ATTENTION",detail:payment?.enabled&&payment?.credentials_configured&&paymentMethods.includes("PIX")?`${payment.environment} validado, PIX liberado e credenciais protegidas no backend.`:"PIX Efí ainda não está completamente validado/ativado.",blocking:!(payment?.enabled&&payment?.credentials_configured&&paymentMethods.includes("PIX"))},
       {key:"efi_card",label:"Cartão Efí",status:payment?.enabled&&paymentMethods.includes("CREDIT_CARD")?"READY":"PENDING_EXTERNAL",detail:payment?.enabled&&paymentMethods.includes("CREDIT_CARD")?"Cartão de crédito Efí validado e liberado.":"Infraestrutura pronta; falta a validação externa específica da API de Cobranças/EFI_ACCOUNT_ID antes de liberar ao cliente.",blocking:false},
       {key:"efi_payout",label:"Repasses Pix pela Efí",status:payout?.credentials_configured&&payout?.validated_at?(payout.enabled?"READY":"READY_PROTECTED"):"PENDING_EXTERNAL",detail:payout?.credentials_configured&&payout?.validated_at?(payout.enabled?`Envio Efí ativo; processamento automático ${payout.automatic_processing?"ON":"OFF"}.`:"Credenciais e escopos já validados; envio permanece protegido/OFF até decisão da Matriz."):"Validação externa do envio Pix ainda pendente.",blocking:false},
