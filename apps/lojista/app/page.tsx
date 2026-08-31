@@ -112,22 +112,6 @@ export default function Home() {
     setLoading(false);
   }
 
-  async function loadStoreRefunds(orderRows: any[]) {
-    const orderIds = orderRows.map((order) => String(order.id));
-    if (!orderIds.length) { setRefundByOrder({}); return; }
-    const { data: payments, error: paymentError } = await supabase.from("payments").select("id,order_id").in("order_id", orderIds).in("method", ["PIX","CREDIT_CARD"]);
-    if (paymentError || !payments?.length) { setRefundByOrder({}); return; }
-    const paymentToOrder = new Map(payments.map((payment: any) => [String(payment.id), String(payment.order_id)]));
-    const { data: refunds, error: refundError } = await supabase.from("refunds").select("payment_id,status,amount,created_at,completed_at").in("payment_id", payments.map((payment: any) => payment.id)).order("created_at", { ascending: false });
-    if (refundError) { setRefundByOrder({}); return; }
-    const next: Record<string, RefundInfo> = {};
-    for (const raw of refunds ?? []) {
-      const orderId = paymentToOrder.get(String((raw as any).payment_id));
-      if (orderId && !next[orderId]) next[orderId] = { ...(raw as any), amount: Number((raw as any).amount) } as RefundInfo;
-    }
-    setRefundByOrder(next);
-  }
-
   async function loadStoreData(currentStore = store) {
     if (!currentStore) return;
     const [dashboardResult, cashResult] = await Promise.all([
