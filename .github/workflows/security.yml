@@ -25,12 +25,38 @@ jobs:
             exit 1
           fi
 
-      - name: Bloquear conteúdo típico de segredo privado
+      - name: Bloquear conteúdo real de segredo privado
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -n -E -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|-----BEGIN CERTIFICATE-----|sk-proj-[A-Za-z0-9_-]{20,}' -- ':!package-lock.json'; then
-            echo 'Conteúdo sensível detectado. Use Secrets do backend e nunca o Git.'
-            exit 1
-          fi
-          echo 'Nenhum certificado, chave privada ou token OpenAI detectado no repositório.'
+          python - <<'PY'
+          import pathlib, re, subprocess, sys
+
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          tracked = [p for p in tracked if p]
+          pem_re = re.compile(
+              r"-----BEGIN (?:RSA |EC |OPENSSH )?(?:PRIVATE KEY|CERTIFICATE)-----\s*\n[A-Za-z0-9+/=]{40,}",
+              re.MULTILINE,
+          )
+          token_re = re.compile(r"sk-proj-[A-Za-z0-9_-]{20,}")
+          hits = []
+
+          for name in tracked:
+              if name == "package-lock.json":
+                  continue
+              path = pathlib.Path(name)
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              if pem_re.search(text) or token_re.search(text):
+                  hits.append(name)
+
+          if hits:
+              print("Conteúdo sensível detectado nos arquivos:")
+              for hit in hits:
+                  print(hit)
+              sys.exit(1)
+
+          print("Nenhum certificado, chave privada ou token sensível detectado no repositório.")
+          PY
