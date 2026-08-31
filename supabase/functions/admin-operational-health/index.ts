@@ -20,14 +20,25 @@ export default {
       ctx.supabaseAdmin.from("driver_documents").select("id",{count:"exact",head:true}).lt("expires_at",new Date().toISOString().slice(0,10)).neq("status","REJECTED"),
       ctx.supabaseAdmin.from("stores").select("id",{count:"exact",head:true}).eq("status","ACTIVE").or("latitude.is.null,longitude.is.null"),
       ctx.supabaseAdmin.from("stores").select("id",{count:"exact",head:true}).eq("status","ACTIVE").is("city_id",null),
-      ctx.supabaseAdmin.from("legal_documents").select("document_type").eq("active",true).not("published_at","is",null),
+      ctx.supabaseAdmin.from("legal_documents").select("document_type,audience").eq("active",true).not("published_at","is",null),
     ]);
 
     if(healthResult.error)return Response.json({error:"HEALTH_CHECK_FAILED"},{status:500});
     const health:any=healthResult.data??{};const payment:any=paymentResult.data??null;const payout:any=payoutResult.data??null;
     const paymentMethods:string[]=Array.isArray(payment?.supported_methods)?payment.supported_methods:[];
     const pushTokens=pushResult.count??0,pendingDrivers=driverPendingResult.count??0,pendingDocuments=docPendingResult.count??0,expiredDocuments=docExpiredResult.count??0,storesWithoutGps=storeGpsResult.count??0,storesWithoutCity=storeCityResult.count??0;
-    const legalTypes=new Set((legalResult.data??[]).map((row:any)=>String(row.document_type)));const termsReady=legalTypes.has("TERMS"),privacyReady=legalTypes.has("PRIVACY"),legalDocuments=(legalResult.data??[]).length;
+    const legalRows=(legalResult.data??[]) as Array<{document_type:string;audience:string}>;
+    const audiences=["CUSTOMER","DRIVER","STORE"] as const;
+    const covered=(type:string,audience:string)=>legalRows.some(row=>String(row.document_type)===type&&["ALL",audience].includes(String(row.audience)));
+    const missingTerms=audiences.filter(audience=>!covered("TERMS",audience));
+    const missingPrivacy=audiences.filter(audience=>!covered("PRIVACY",audience));
+    const legalReady=missingTerms.length===0&&missingPrivacy.length===0;
+    const legalDocuments=legalRows.length;
+    const audienceLabel:Record<string,string>={CUSTOMER:"Clientes",DRIVER:"Entregadores",STORE:"Lojistas"};
+    const legalPending=[
+      missingTerms.length?`Termos: ${missingTerms.map(x=>audienceLabel[x]).join(", ")}`:"",
+      missingPrivacy.length?`Privacidade: ${missingPrivacy.map(x=>audienceLabel[x]).join(", ")}`:"",
+    ].filter(Boolean).join(" • ");
 
     const readiness:ReadinessItem[]=[
       {key:"core_integrity",label:"Núcleo operacional e financeiro",status:Number(health?.total_issues??0)===0?"READY":"ATTENTION",detail:Number(health?.total_issues??0)===0?"Pedidos, pagamentos, estoque, entregas, caixas, estornos, repasses e jobs estão consistentes.":`${Number(health?.total_issues??0)} alerta(s) precisam ser tratados na Saúde Operacional.`,blocking:Number(health?.total_issues??0)>0},
@@ -36,7 +47,7 @@ export default {
       {key:"efi_payout",label:"Repasses Pix pela Efí",status:payout?.credentials_configured&&payout?.validated_at?(payout.enabled?"READY":"READY_PROTECTED"):"PENDING_EXTERNAL",detail:payout?.credentials_configured&&payout?.validated_at?(payout.enabled?`Envio Efí ativo; processamento automático ${payout.automatic_processing?"ON":"OFF"}.`:"Credenciais e escopos já validados; envio permanece protegido/OFF até decisão da Matriz."):"Validação externa do envio Pix ainda pendente.",blocking:false},
       {key:"driver_onboarding",label:"Cadastro e documentos de entregadores",status:pendingDrivers===0&&pendingDocuments===0&&expiredDocuments===0?"READY":"ATTENTION",detail:pendingDrivers===0&&pendingDocuments===0&&expiredDocuments===0?"Nenhum cadastro/documento pendente ou vencido.":`${pendingDrivers} cadastro(s) pendente(s), ${pendingDocuments} documento(s) em análise e ${expiredDocuments} vencido(s).`,blocking:false},
       {key:"store_location",label:"Localização operacional das lojas",status:storesWithoutGps===0&&storesWithoutCity===0?"READY":"ATTENTION",detail:storesWithoutGps===0&&storesWithoutCity===0?"Todas as lojas ativas possuem cidade e coordenadas operacionais.":`${storesWithoutGps} loja(s) ativa(s) sem GPS e ${storesWithoutCity} sem cidade.`,blocking:storesWithoutGps>0||storesWithoutCity>0},
-      {key:"legal",label:"Termos e Política de Privacidade",status:termsReady&&privacyReady?"READY":"PENDING_EXTERNAL",detail:termsReady&&privacyReady?"Termos de Uso e Política de Privacidade estão ativos/publicados e o aceite é versionado.":`Termos de Uso: ${termsReady?"publicados":"pendentes"}. Política de Privacidade: ${privacyReady?"publicada":"aguardando texto revisado/aprovado na área Legal"}.`,blocking:false},
+      {key:"legal",label:"Termos e Política de Privacidade",status:legalReady?"READY":"PENDING_EXTERNAL",detail:legalReady?"Termos e Política de Privacidade publicados cobrem Clientes, Entregadores e Lojistas; o aceite é versionado.":`Documentos publicados, mas ainda falta cobertura por público: ${legalPending||"revise os documentos ativos na área Legal"}.`,blocking:false},
       {key:"mobile_push",label:"Build EAS e push em aparelho real",status:pushTokens>0?"READY":"PENDING_EXTERNAL",detail:pushTokens>0?`${pushTokens} dispositivo(s) com push ativo registrado(s).`:"Backend de push está pronto; ainda não há dispositivo registrado porque falta instalar um build EAS vinculado ao projeto Expo.",blocking:false},
       {key:"maps",label:"Google Maps / Mapbox",status:"DEFERRED",detail:"Programado deliberadamente para a etapa final, depois de todos os módulos funcionais e financeiros.",blocking:false},
     ];
