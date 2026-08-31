@@ -130,34 +130,46 @@ export default function Home() {
 
   async function loadStoreData(currentStore = store) {
     if (!currentStore) return;
-    const [dashboardResult, productsResult, ordersResult, cashResult, inventoryResult, financeResult, deliveriesResult, bonusWalletResult, bonusTxResult, loyaltyResult] = await Promise.all([
+    const [dashboardResult, cashResult] = await Promise.all([
       supabase.functions.invoke("store-dashboard-read", { body: { storeId: currentStore.id } }),
-      supabase.from("products").select("id,name,price,promotional_price,active").eq("store_id", currentStore.id).order("name"),
-      supabase.from("orders").select("id,order_number,customer_id,total,status,payment_status,delivery_type,source,created_at").eq("store_id", currentStore.id).order("created_at", { ascending: false }).limit(100),
       supabase.functions.invoke("cash-session-action", { body: { action: "STATUS", storeId: currentStore.id } }),
-      supabase.from("inventory_items").select("id,product_id,quantity,minimum_quantity,products(name)").eq("store_id", currentStore.id),
-      supabase.from("financial_transactions").select("id,transaction_type,direction,amount,status,created_at").eq("store_id", currentStore.id).order("created_at", { ascending: false }).limit(100),
-      supabase.from("deliveries").select("id,status,delivery_fee,driver_earning,created_at,orders!inner(order_number,total,store_id)").eq("orders.store_id", currentStore.id).order("created_at", { ascending: false }).limit(50),
-      supabase.from("store_bonus_wallets").select("id,balance").eq("store_id", currentStore.id).maybeSingle(),
-      supabase.from("store_bonus_transactions").select("id,transaction_type,points,description,created_at,store_bonus_wallets!inner(store_id)").eq("store_bonus_wallets.store_id", currentStore.id).order("created_at", { ascending: false }).limit(50),
-      supabase.from("loyalty_programs").select("id,points_per_currency,active").eq("store_id", currentStore.id).maybeSingle(),
     ]);
 
-    if (dashboardResult.data?.metrics) setMetrics({ ...emptyMetrics, ...(dashboardResult.data.metrics as Metrics) });
-    if (productsResult.data) setProducts(productsResult.data.map((item: any) => ({ ...item, price: Number(item.price), promotional_price: item.promotional_price == null ? null : Number(item.promotional_price) })));
-    if (ordersResult.data) { const normalizedOrders=ordersResult.data.map((item: any) => ({ ...item, total: Number(item.total) })); setOrders(normalizedOrders); await loadStoreRefunds(normalizedOrders); }
+    if (dashboardResult.error || dashboardResult.data?.error) {
+      setMessage("Não foi possível atualizar os dados da loja.");
+      return;
+    }
+
+    const payload: any = dashboardResult.data ?? {};
+    if (payload.metrics) setMetrics({ ...emptyMetrics, ...(payload.metrics as Metrics) });
+    setProducts((payload.products ?? []).map((item: any) => ({ ...item, price: Number(item.price), promotional_price: item.promotional_price == null ? null : Number(item.promotional_price) })));
+
+    const normalizedOrders = (payload.orders ?? []).map((item: any) => ({ ...item, total: Number(item.total) }));
+    setOrders(normalizedOrders);
+
+    const refundMap: Record<string, RefundInfo> = {};
+    for (const [orderId, raw] of Object.entries(payload.refundsByOrder ?? {})) {
+      const item: any = raw;
+      refundMap[orderId] = { ...item, amount: Number(item.amount) } as RefundInfo;
+    }
+    setRefundByOrder(refundMap);
+
     setCashSession(cashResult.data?.session ? { ...cashResult.data.session, opening_balance: Number(cashResult.data.session.opening_balance) } : null);
-    if (inventoryResult.data) setInventory(inventoryResult.data.map((item: any) => ({ ...item, quantity: Number(item.quantity), minimum_quantity: Number(item.minimum_quantity) })));
-    if (Array.isArray(dashboardResult.data?.coupons)) setCoupons(dashboardResult.data.coupons.map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));
-    if (financeResult.data) setFinance(financeResult.data.map((item: any) => ({ ...item, amount: Number(item.amount) })));
-    if (deliveriesResult.data) setDeliveries(deliveriesResult.data.map((item: any) => ({ ...item, delivery_fee: Number(item.delivery_fee), driver_earning: Number(item.driver_earning) })));
-    setBonusBalance(Number(bonusWalletResult.data?.balance ?? 0));
-    if (bonusTxResult.data) setBonusTransactions(bonusTxResult.data as unknown as BonusTx[]);
-    if (loyaltyResult.data) {
-      setLoyaltyProgramId(loyaltyResult.data.id);
-      setLoyaltyPoints(String(Number(loyaltyResult.data.points_per_currency)));
-      const rewardResult = await supabase.from("loyalty_rewards").select("id,name,points_cost,reward_type,reward_value,active").eq("program_id", loyaltyResult.data.id).order("points_cost");
-      setRewards((rewardResult.data ?? []).map((item: any) => ({ ...item, reward_value: item.reward_value == null ? null : Number(item.reward_value) })));
+    setInventory((payload.inventory ?? []).map((item: any) => ({ ...item, quantity: Number(item.quantity), minimum_quantity: Number(item.minimum_quantity) })));
+    setCoupons((payload.coupons ?? []).map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));
+    setFinance((payload.finance ?? []).map((item: any) => ({ ...item, amount: Number(item.amount) })));
+    setDeliveries((payload.deliveries ?? []).map((item: any) => ({ ...item, delivery_fee: Number(item.delivery_fee), driver_earning: Number(item.driver_earning) })));
+    setBonusBalance(Number(payload.bonusWallet?.balance ?? 0));
+    setBonusTransactions((payload.bonusTransactions ?? []) as BonusTx[]);
+
+    if (payload.loyaltyProgram) {
+      setLoyaltyProgramId(String(payload.loyaltyProgram.id));
+      setLoyaltyPoints(String(Number(payload.loyaltyProgram.points_per_currency)));
+      setRewards((payload.loyaltyRewards ?? []).map((item: any) => ({ ...item, reward_value: item.reward_value == null ? null : Number(item.reward_value) })));
+    } else {
+      setLoyaltyProgramId("");
+      setLoyaltyPoints("1");
+      setRewards([]);
     }
   }
 
