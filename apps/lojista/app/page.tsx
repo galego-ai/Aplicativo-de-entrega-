@@ -168,7 +168,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!store) return;
-    const timer = setInterval(() => loadStoreData(store), 20000);
+    const timer = setInterval(() => loadStoreData(store), 60000);
     return () => clearInterval(timer);
   }, [store?.id]);
 
