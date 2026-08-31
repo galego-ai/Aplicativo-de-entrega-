@@ -135,7 +135,7 @@ export default function Home() {
       supabase.from("orders").select("id,order_number,customer_id,total,status,payment_status,delivery_type,source,created_at").eq("store_id", currentStore.id).order("created_at", { ascending: false }).limit(100),
       supabase.functions.invoke("cash-session-action", { body: { action: "STATUS", storeId: currentStore.id } }),
       supabase.from("inventory_items").select("id,product_id,quantity,minimum_quantity,products(name)").eq("store_id", currentStore.id),
-      supabase.from("coupons").select("id,code,discount_type,discount_value,minimum_order,max_uses,ends_at,active").eq("store_id", currentStore.id).order("created_at", { ascending: false }),
+      supabase.rpc("store_coupon_list", { p_store_id: currentStore.id }),
       supabase.from("financial_transactions").select("id,transaction_type,direction,amount,status,created_at").eq("store_id", currentStore.id).order("created_at", { ascending: false }).limit(100),
       supabase.from("deliveries").select("id,status,delivery_fee,driver_earning,created_at,orders!inner(order_number,total,store_id)").eq("orders.store_id", currentStore.id).order("created_at", { ascending: false }).limit(50),
       supabase.from("store_bonus_wallets").select("id,balance").eq("store_id", currentStore.id).maybeSingle(),
@@ -148,7 +148,7 @@ export default function Home() {
     if (ordersResult.data) { const normalizedOrders=ordersResult.data.map((item: any) => ({ ...item, total: Number(item.total) })); setOrders(normalizedOrders); await loadStoreRefunds(normalizedOrders); }
     setCashSession(cashResult.data?.session ? { ...cashResult.data.session, opening_balance: Number(cashResult.data.session.opening_balance) } : null);
     if (inventoryResult.data) setInventory(inventoryResult.data.map((item: any) => ({ ...item, quantity: Number(item.quantity), minimum_quantity: Number(item.minimum_quantity) })));
-    if (couponsResult.data) setCoupons(couponsResult.data.map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));
+    if (Array.isArray(couponsResult.data)) setCoupons(couponsResult.data.map((item: any) => ({ ...item, discount_value: Number(item.discount_value), minimum_order: Number(item.minimum_order) })));
     if (financeResult.data) setFinance(financeResult.data.map((item: any) => ({ ...item, amount: Number(item.amount) })));
     if (deliveriesResult.data) setDeliveries(deliveriesResult.data.map((item: any) => ({ ...item, delivery_fee: Number(item.delivery_fee), driver_earning: Number(item.driver_earning) })));
     setBonusBalance(Number(bonusWalletResult.data?.balance ?? 0));
