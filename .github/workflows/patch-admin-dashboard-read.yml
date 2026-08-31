@@ -20,7 +20,7 @@ jobs:
           node-version: 24
           cache: npm
       - name: Patch admin dashboard reads
-        shell: python
+        shell: python {0}
         run: |
           from pathlib import Path
           path = Path('apps/admin/app/page.tsx')
