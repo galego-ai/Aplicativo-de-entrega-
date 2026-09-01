@@ -1,6 +1,6 @@
 name: CLICK-FOOD Android Runtime Smoke
 
-# Smoke final v5: bundle Release, APK x86_64, instalação e abertura real no Android.
+# Smoke final v6: bundle Release, metadado Maps, APK x86_64, instalação e abertura real no Android.
 on:
   workflow_dispatch:
   push:
@@ -8,6 +8,15 @@ on:
     paths:
       - '.github/workflows/mobile-runtime-smoke.yml'
       - '.github/scripts/android-runtime-smoke.sh'
+      - 'apps/cliente/app.config.ts'
+      - 'apps/cliente/app.json'
+      - 'apps/cliente/metro.config.js'
+      - 'apps/cliente/package.json'
+      - 'apps/entregador/app.config.ts'
+      - 'apps/entregador/app.json'
+      - 'apps/entregador/metro.config.js'
+      - 'apps/entregador/package.json'
+      - 'package-lock.json'
 
 permissions:
   contents: read
@@ -50,6 +59,11 @@ jobs:
       - name: Gerar Android ${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}
         run: NODE_ENV=production CI=1 npx expo prebuild --platform android
+      - name: Validar metadado nativo do Google Maps
+        run: |
+          MANIFEST="apps/${{ matrix.app }}/android/app/src/main/AndroidManifest.xml"
+          test -f "$MANIFEST"
+          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST"
       - name: Compilar Release ${{ matrix.app }} para smoke
         working-directory: apps/${{ matrix.app }}/android
         run: |
