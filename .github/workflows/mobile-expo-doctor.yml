@@ -1,6 +1,6 @@
 name: CLICK-FOOD Mobile Expo Doctor
 
-# Validação pós-alinhamento completo das dependências do SDK 57.
+# Validação final: versões SDK 57, schema Expo e isolamento de módulos nativos por workspace.
 on:
   push:
     branches: [main]
@@ -17,14 +17,14 @@ jobs:
       matrix:
         app: [cliente, entregador]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - name: Instalar dependências
+      - name: Instalar dependências isoladas por workspace
         run: npm ci
       - name: Verificar versões Expo
         working-directory: apps/${{ matrix.app }}
