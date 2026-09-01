@@ -1,12 +1,13 @@
 name: CLICK-FOOD Android Runtime Smoke
 
-# Smoke final v3: compila Release, instala no Android e confirma que o processo permanece vivo.
+# Smoke final v4: bundle Release, APK x86_64, instalação e abertura real no Android.
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - '.github/workflows/mobile-runtime-smoke.yml'
+      - '.github/scripts/android-runtime-smoke.sh'
 
 permissions:
   contents: read
@@ -49,11 +50,11 @@ jobs:
       - name: Gerar Android ${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}
         run: CI=1 npx expo prebuild --platform android
-      - name: Compilar Release ${{ matrix.app }}
+      - name: Compilar Release ${{ matrix.app }} para smoke
         working-directory: apps/${{ matrix.app }}/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=x86_64
       - name: Habilitar KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -66,25 +67,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: |
-            APK="apps/${{ matrix.app }}/android/app/build/outputs/apk/release/app-release.apk"
-            adb install -r "$APK"
-            adb logcat -c
-            adb shell monkey -p "${{ matrix.package }}" -c android.intent.category.LAUNCHER 1
-            sleep 20
-            adb logcat -d -v threadtime > "${{ matrix.app }}-logcat.txt"
-            PID=$(adb shell pidof "${{ matrix.package }}" | tr -d '\r')
-            echo "PID=$PID"
-            if [ -z "$PID" ]; then
-              echo "APP_ENCERROU_INESPERADAMENTE"
-              grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError|Invalid hook" "${{ matrix.app }}-logcat.txt" | tail -250 || true
-              exit 1
-            fi
-            if grep -q "Process: ${{ matrix.package }}" "${{ matrix.app }}-logcat.txt" && grep -q "FATAL EXCEPTION" "${{ matrix.app }}-logcat.txt"; then
-              grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError|Invalid hook" "${{ matrix.app }}-logcat.txt" | tail -250 || true
-              exit 1
-            fi
-            grep -n -E "ReactNativeJS|AndroidRuntime|FATAL EXCEPTION|TypeError|ReferenceError|Invalid hook" "${{ matrix.app }}-logcat.txt" | tail -120 || true
+          script: bash .github/scripts/android-runtime-smoke.sh "${{ matrix.package }}" "apps/${{ matrix.app }}/android/app/build/outputs/apk/release/app-release.apk" "${{ matrix.app }}"
       - name: Publicar logcat
         if: always()
         uses: actions/upload-artifact@v4
