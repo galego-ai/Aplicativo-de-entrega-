@@ -3,6 +3,7 @@ import "./globals.css";
 import "./operational.css";
 import "./management.css";
 import "./map.css";
+import "./premium.css";
 import LegalConsentGate from "./LegalConsentGate";
 
 export const metadata: Metadata = {
@@ -11,5 +12,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="pt-BR"><body><LegalConsentGate><><nav className="globalTools"><a href="/">Painel</a><a href="/mapa">Mapa</a><a href="/configuracao">Configuração</a><a href="/chat">Chat</a><a href="/entregadores">Entregadores</a><a href="/estoque">Estoque</a><a href="/catalogo-avancado">Catálogo avançado</a><a href="/midia">Mídia</a><a href="/recibos">Recibos</a><a href="/repasses">Repasses</a><a href="/usuarios">Usuários</a><a href="/suporte">Suporte</a><a href="/relatorios">Relatórios</a></nav>{children}</></LegalConsentGate></body></html>;
+  return <html lang="pt-BR"><body><LegalConsentGate><><nav className="globalTools"><a href="/">Painel</a><a href="/produtos">Produtos</a><a href="/estoque">Estoque</a><a href="/catalogo-avancado">Catálogo avançado</a><a href="/mapa">Mapa</a><a href="/configuracao">Configuração</a><a href="/chat">Chat</a><a href="/entregadores">Entregadores</a><a href="/midia">Mídia</a><a href="/recibos">Recibos</a><a href="/repasses">Repasses</a><a href="/usuarios">Usuários</a><a href="/suporte">Suporte</a><a href="/relatorios">Relatórios</a></nav>{children}</></LegalConsentGate></body></html>;
 }
