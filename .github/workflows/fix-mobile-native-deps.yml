@@ -1,0 +1,41 @@
+name: CLICK-FOOD Fix Mobile Native Dependencies
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-mobile-native-deps.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Alinhar versões nativas com Expo SDK 57
+        run: |
+          npm install -w @clickfood/cliente expo-location@~57.0.14 expo-notifications@~57.0.15
+          npm install -w @clickfood/entregador expo-location@~57.0.14 expo-notifications@~57.0.15 expo-task-manager@~57.0.14
+      - name: Conferir alterações
+        run: |
+          git diff -- apps/cliente/package.json apps/entregador/package.json package-lock.json
+      - name: Commitar correção
+        run: |
+          git config user.name "galego-ai"
+          git config user.email "elismarribeiro298@gmail.com"
+          git add apps/cliente/package.json apps/entregador/package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo "Sem alterações"
+            exit 0
+          fi
+          git commit -m "fix(mobile): alinhar módulos Expo nativos"
+          git push origin HEAD:main
