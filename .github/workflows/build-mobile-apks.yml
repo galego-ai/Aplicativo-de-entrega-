@@ -1,0 +1,101 @@
+name: CLICK-FOOD Apps Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-mobile-apks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cliente:
+    name: APK Cliente
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Instalar dependências
+        run: npm ci
+      - name: Gerar Android Cliente
+        working-directory: apps/cliente
+        run: npx expo prebuild --platform android --non-interactive
+      - name: Compilar Cliente
+        working-directory: apps/cliente/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+      - name: Preparar Cliente
+        run: |
+          test -f apps/cliente/android/app/build/outputs/apk/release/app-release.apk
+          mkdir -p artifacts
+          cp apps/cliente/android/app/build/outputs/apk/release/app-release.apk artifacts/CLICK-FOOD-Cliente.apk
+      - name: Publicar Cliente
+        uses: actions/upload-artifact@v4
+        with:
+          name: CLICK-FOOD-Cliente-APK
+          path: artifacts/CLICK-FOOD-Cliente.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  entregador:
+    name: APK Entregador
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Instalar dependências
+        run: npm ci
+      - name: Gerar Android Entregador
+        working-directory: apps/entregador
+        run: npx expo prebuild --platform android --non-interactive
+      - name: Validar serviço da bolinha
+        run: |
+          test -f apps/entregador/android/app/src/main/java/br/com/clickfood/entregador/floatingbubble/FloatingBubbleService.kt
+          grep -q 'SYSTEM_ALERT_WINDOW' apps/entregador/android/app/src/main/AndroidManifest.xml
+          grep -q 'FloatingBubbleService' apps/entregador/android/app/src/main/AndroidManifest.xml
+      - name: Compilar Entregador
+        working-directory: apps/entregador/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+      - name: Preparar Entregador
+        run: |
+          test -f apps/entregador/android/app/build/outputs/apk/release/app-release.apk
+          mkdir -p artifacts
+          cp apps/entregador/android/app/build/outputs/apk/release/app-release.apk artifacts/CLICK-FOOD-Entregador.apk
+      - name: Publicar Entregador
+        uses: actions/upload-artifact@v4
+        with:
+          name: CLICK-FOOD-Entregador-APK
+          path: artifacts/CLICK-FOOD-Entregador.apk
+          if-no-files-found: error
+          retention-days: 30
