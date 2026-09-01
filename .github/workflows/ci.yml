@@ -25,6 +25,29 @@ jobs:
       - name: Testar regras críticas compartilhadas
         run: npm run test:shared
 
+      - name: Proteger pedidos contra desvio para canais externos
+        shell: bash
+        run: |
+          set -euo pipefail
+          CATALOG="supabase/functions/store-catalog/index.ts"
+          CHAT="supabase/functions/send-message/index.ts"
+          CLIENT="apps/cliente/App.tsx"
+
+          if grep -E 'select\("[^"]*(phone|whatsapp|instagram|email)' "$CATALOG"; then
+            echo "ERRO: catálogo público voltou a selecionar contato administrativo da loja."
+            exit 1
+          fi
+
+          if grep -E 'selectedStore\.(phone|whatsapp|instagram|email)|store\.(phone|whatsapp|instagram|email)' "$CLIENT"; then
+            echo "ERRO: app Cliente está tentando exibir contato administrativo da loja."
+            exit 1
+          fi
+
+          grep -q 'CONTACT_SHARING_BLOCKED' "$CHAT"
+          grep -q 'name:"PHONE"' "$CHAT"
+          grep -q 'name:"DOMAIN"' "$CHAT"
+          grep -q 'name:"SOCIAL_HANDLE"' "$CHAT"
+
       - name: Build Painel Matriz
         run: npm run build:admin
 
