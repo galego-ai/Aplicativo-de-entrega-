@@ -1,6 +1,6 @@
 name: CLICK-FOOD Android Runtime Smoke
 
-# Smoke final: Metro isolado por app, bundle Release, instalação e abertura real no Android.
+# Smoke final v2: React do app primeiro, dependências hoistadas depois, APK Release aberto no Android.
 on:
   workflow_dispatch:
   push:
