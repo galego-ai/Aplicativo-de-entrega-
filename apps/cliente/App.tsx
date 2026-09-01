@@ -35,6 +35,7 @@ type LoyaltyReward = { id:string; name:string; points_cost:number; reward_type:s
 type LoyaltyRedemption = { id:string; reward_id:string; points_spent:number; status:string; expires_at:string; used_at:string|null; rewardName:string; coupon:{id:string;code:string;discount_type:string;discount_value:number;active:boolean;ends_at:string|null}|null };
 type LoyaltyWallet = { id:string; storeId:string; storeName:string; storeLogo:string|null; balance:number; pointsPerCurrency:number; rewards:LoyaltyReward[]; redemptions:LoyaltyRedemption[]; transactions:Array<{id:string;transaction_type:string;points:number;created_at:string}> };
 type ProductGroupLink = { product_id:string; option_group_id:string };
+type DeliveryPreview = { quoteId:string; storeId:string; addressId:string; distanceKm:number; fee:number; expiresAt:string };
 
 const brl=(value:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value||0);
 const terminalStatuses=new Set(["DELIVERED","CANCELLED","REJECTED","PAYMENT_FAILED","REFUNDED"]);
@@ -100,6 +101,7 @@ export default function App(){
   const[selectedStore,setSelectedStore]=useState<Store|null>(null); const[products,setProducts]=useState<ProductWithMedia[]>([]); const[categories,setCategories]=useState<MenuCategory[]>([]); const[selectedCategoryId,setSelectedCategoryId]=useState("ALL"); const[cart,setCart]=useState<CartItem[]>([]);
   const[variants,setVariants]=useState<CustomerVariant[]>([]); const[optionGroups,setOptionGroups]=useState<CustomerOptionGroup[]>([]); const[productOptions,setProductOptions]=useState<CustomerOption[]>([]); const[productGroupLinks,setProductGroupLinks]=useState<ProductGroupLink[]>([]); const[promotions,setPromotions]=useState<CustomerPromotion[]>([]); const[selectedProduct,setSelectedProduct]=useState<ProductWithMedia|null>(null);
   const[addresses,setAddresses]=useState<Address[]>([]); const[selectedAddressId,setSelectedAddressId]=useState(""); const[deliveryType,setDeliveryType]=useState<DeliveryType>("DELIVERY"); const[coupon,setCoupon]=useState(""); const[placing,setPlacing]=useState(false);
+  const[deliveryPreview,setDeliveryPreview]=useState<DeliveryPreview|null>(null); const[deliveryPreviewBusy,setDeliveryPreviewBusy]=useState(false);
   const[paymentMethod,setPaymentMethod]=useState<PaymentMethod>("CASH"); const[availablePaymentMethods,setAvailablePaymentMethods]=useState<PaymentMethod[]>(["CASH"]); const[pixCharge,setPixCharge]=useState<PixCharge|null>(null); const[pixBusy,setPixBusy]=useState(false);
   const[cardTokenization,setCardTokenization]=useState<CardTokenizationConfig|null>(null); const[pendingCardOrder,setPendingCardOrder]=useState<PendingCardOrder|null>(null);
   const[refundByOrder,setRefundByOrder]=useState<Record<string,RefundInfo>>({}); const[refundBusyOrderId,setRefundBusyOrderId]=useState<string|null>(null);
@@ -112,6 +114,11 @@ export default function App(){
     const extras=item.options.reduce((s,o)=>s+o.price*o.quantity,0);
     return sum+(item.unitPrice+extras)*item.quantity;
   },0),[cart]);
+  const minimumMissing=selectedStore?Math.max(0,Number(selectedStore.minimum_order)-cartSubtotal):0;
+  const freeDeliveryApplies=useMemo(()=>promotions.some(p=>p.promotion_type==="FREE_DELIVERY"&&(!p.product_id||cart.some(item=>item.productId===p.product_id))),[promotions,cart]);
+  const deliveryPreviewUsable=Boolean(deliveryPreview&&selectedStore&&deliveryPreview.storeId===selectedStore.id&&deliveryPreview.addressId===selectedAddressId&&new Date(deliveryPreview.expiresAt).getTime()>Date.now()+5000);
+  const estimatedDeliveryFee=deliveryType==="PICKUP"?0:deliveryPreviewUsable&&deliveryPreview?(freeDeliveryApplies?0:deliveryPreview.fee):null;
+  const checkoutEstimatedTotal=cartSubtotal+(estimatedDeliveryFee??0);
 
   useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false);});const{data}=supabase.auth.onAuthStateChange((_event,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[]);
   useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();loadLoyalty();}else{setTracking(null);setDriverCard(null);setOrders([]);setPixCharge(null);setLoyaltyWallets([]);setLoyaltyTotal(0);}},[session]);
@@ -121,6 +128,7 @@ export default function App(){
   useEffect(()=>{if(!session)return;const timer=setInterval(()=>loadStores(),60000);return()=>clearInterval(timer);},[session?.user.id]);
   useEffect(()=>{if(session&&cardTokenization)void loadOrders();},[session?.user.id,cardTokenization?.accountId]);
   useEffect(()=>{if(!selectedStore)return;const deliveryEnabled=selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled;if(deliveryType==="DELIVERY"&&!deliveryEnabled&&selectedStore.pickup_enabled)setDeliveryType("PICKUP");else if(deliveryType==="PICKUP"&&!selectedStore.pickup_enabled&&deliveryEnabled)setDeliveryType("DELIVERY");},[selectedStore?.id,selectedStore?.pickup_enabled,selectedStore?.clickfood_delivery_enabled,selectedStore?.own_delivery_enabled,deliveryType]);
+  useEffect(()=>{setDeliveryPreview(null);},[selectedStore?.id,selectedAddressId,deliveryType]);
 
   async function loadLoyalty(){
     if(!session)return;
@@ -261,7 +269,7 @@ export default function App(){
   }
 
   async function openStore(store:Store){
-    setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);setSelectedCategoryId("ALL");
+    setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);setSelectedCategoryId("ALL");setDeliveryPreview(null);
     const deliveryEnabled=store.clickfood_delivery_enabled||store.own_delivery_enabled;
     setDeliveryType(deliveryEnabled?"DELIVERY":store.pickup_enabled?"PICKUP":"DELIVERY");
     const[productResult,categoryResult]=await Promise.all([
@@ -339,6 +347,21 @@ export default function App(){
     setAddressForm({label:"Casa",street:"",number:"",district:"",reference:""});await loadAddresses();if(data?.id)setSelectedAddressId(data.id);setMessage("Endereço salvo e localização registrada.");setSavingAddress(false);
   }
 
+  async function previewDeliveryQuote(){
+    if(!selectedStore||deliveryType!=="DELIVERY")return;
+    if(!selectedAddressId){setMessage("Selecione um endereço para calcular o frete.");return;}
+    setDeliveryPreviewBusy(true);setMessage("");
+    const quoteResult=await supabase.functions.invoke("quote-delivery",{body:{storeId:selectedStore.id,addressId:selectedAddressId}});
+    if(quoteResult.error||quoteResult.data?.error){
+      const code=quoteResult.data?.error;
+      const quoteErrors:Record<string,string>={OUTSIDE_DELIVERY_RADIUS:"Este endereço está fora da área de entrega.",STORE_CLOSED:"Esta loja está fechada agora. Consulte o horário e tente novamente quando ela abrir.",STORE_UNAVAILABLE:"Esta loja está temporariamente indisponível.",DELIVERY_DISABLED:"A loja não está aceitando entregas neste momento.",LOCATION_COORDINATES_REQUIRED:"Não foi possível calcular o frete porque faltam coordenadas da loja ou do endereço.",ADDRESS_NOT_FOUND:"Este endereço não está mais disponível. Atualize seus endereços."};
+      setDeliveryPreview(null);setMessage(quoteErrors[code]??"Não foi possível calcular o frete. Confira a localização do endereço.");setDeliveryPreviewBusy(false);return;
+    }
+    const quote=quoteResult.data?.quote;
+    setDeliveryPreview({quoteId:String(quote.id),storeId:selectedStore.id,addressId:selectedAddressId,distanceKm:Number(quote.distance_km),fee:Number(quote.fee),expiresAt:String(quote.expires_at)});
+    setDeliveryPreviewBusy(false);
+  }
+
   async function placeOrder(){
     if(!session||!selectedStore||!cart.length)return;
     const deliveryEnabled=selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled;
@@ -350,13 +373,18 @@ export default function App(){
     setPlacing(true);setMessage("");
     let deliveryQuoteId:string|undefined;let deliveryFee=0;
     if(deliveryType==="DELIVERY"){
-      const quoteResult=await supabase.functions.invoke("quote-delivery",{body:{storeId:selectedStore.id,addressId:selectedAddressId}});
-      if(quoteResult.error||quoteResult.data?.error){
-        const code=quoteResult.data?.error;
-        const quoteErrors:Record<string,string>={OUTSIDE_DELIVERY_RADIUS:"Este endereço está fora da área de entrega.",STORE_CLOSED:"Esta loja está fechada agora. Consulte o horário e tente novamente quando ela abrir.",STORE_UNAVAILABLE:"Esta loja está temporariamente indisponível.",DELIVERY_DISABLED:"A loja não está aceitando entregas neste momento.",LOCATION_COORDINATES_REQUIRED:"Não foi possível calcular o frete porque faltam coordenadas da loja ou do endereço."};
-        setMessage(quoteErrors[code]??"Não foi possível calcular o frete. Confira a localização do endereço.");setPlacing(false);return;
+      const previewStillValid=Boolean(deliveryPreview&&deliveryPreview.storeId===selectedStore.id&&deliveryPreview.addressId===selectedAddressId&&new Date(deliveryPreview.expiresAt).getTime()>Date.now()+5000);
+      if(previewStillValid&&deliveryPreview){
+        deliveryQuoteId=deliveryPreview.quoteId;deliveryFee=deliveryPreview.fee;
+      }else{
+        const quoteResult=await supabase.functions.invoke("quote-delivery",{body:{storeId:selectedStore.id,addressId:selectedAddressId}});
+        if(quoteResult.error||quoteResult.data?.error){
+          const code=quoteResult.data?.error;
+          const quoteErrors:Record<string,string>={OUTSIDE_DELIVERY_RADIUS:"Este endereço está fora da área de entrega.",STORE_CLOSED:"Esta loja está fechada agora. Consulte o horário e tente novamente quando ela abrir.",STORE_UNAVAILABLE:"Esta loja está temporariamente indisponível.",DELIVERY_DISABLED:"A loja não está aceitando entregas neste momento.",LOCATION_COORDINATES_REQUIRED:"Não foi possível calcular o frete porque faltam coordenadas da loja ou do endereço."};
+          setMessage(quoteErrors[code]??"Não foi possível calcular o frete. Confira a localização do endereço.");setPlacing(false);return;
+        }
+        deliveryQuoteId=quoteResult.data.quote.id;deliveryFee=Number(quoteResult.data.quote.fee);
       }
-      deliveryQuoteId=quoteResult.data.quote.id;deliveryFee=Number(quoteResult.data.quote.fee);
     }
     const result=await supabase.functions.invoke("create-order",{body:{
       storeId:selectedStore.id,
@@ -391,12 +419,15 @@ export default function App(){
         INSUFFICIENT_STOCK:"Um dos produtos não possui quantidade suficiente em estoque.",
         INVENTORY_NOT_CONFIGURED:"Um produto com controle de estoque precisa ser ajustado pela loja antes da venda.",
         PRODUCT_UNAVAILABLE:"Um dos produtos ficou indisponível. Atualize o cardápio.",
+        DELIVERY_QUOTE_ALREADY_USED:"A cotação de frete expirou ou já foi utilizada. Calcule o frete novamente.",
       };
       setMessage(errors[code]??"Não foi possível enviar o pedido. Atualize o cardápio e tente novamente.");setPlacing(false);return;
     }
     const total=Number(result.data.total);
     const promo=Number(result.data.promotionDiscount??0);
+    const finalDeliveryFee=Number(result.data.deliveryFee??deliveryFee);
     const orderId=String(result.data.orderId);
+    setDeliveryPreview(null);
     if(paymentMethod==="PIX"){
       const pixResult=await supabase.functions.invoke("efi-pix-create",{body:{orderId}});
       if(pixResult.error||pixResult.data?.error||!pixResult.data?.charge?.brcode){
@@ -417,7 +448,7 @@ export default function App(){
       setMessage(`Pedido criado. Finalize o pagamento seguro de ${brl(total)} com cartão.`);
       setPlacing(false);return;
     }else{
-      setMessage(`Pedido enviado! Total ${brl(total)}${deliveryFee?` • entrega calculada ${brl(deliveryFee)}`:""}${promo>0?` • economia ${brl(promo)}`:""}.`);
+      setMessage(`Pedido enviado! Total ${brl(total)}${finalDeliveryFee?` • entrega ${brl(finalDeliveryFee)}`:deliveryType==="DELIVERY"?" • frete grátis":""}${promo>0?` • economia ${brl(promo)}`:""}.`);
     }
     setCart([]);setCoupon("");setSelectedStore(null);setSelectedProduct(null);setTab("orders");await loadOrders();setPlacing(false);
   }
@@ -558,6 +589,7 @@ export default function App(){
           <View style={styles.qty}><Pressable onPress={()=>changeQty(item.cartKey,-1)}><Text>−</Text></Pressable><Text>{item.quantity}</Text><Pressable onPress={()=>changeQty(item.cartKey,1)}><Text>+</Text></Pressable></View>
         </View>;
       }):<Text style={styles.empty}>Adicione itens para continuar.</Text>}
+      {!!cart.length&&<View style={[styles.minimumOrderCard,minimumMissing>0?styles.minimumOrderPending:styles.minimumOrderReached]}><Text style={styles.minimumOrderTitle}>{minimumMissing>0?`Faltam ${brl(minimumMissing)} para o pedido mínimo`:"✓ Pedido mínimo atingido"}</Text><Text style={styles.minimumOrderMeta}>Mínimo da loja: {brl(selectedStore.minimum_order)} • Itens: {brl(cartSubtotal)}</Text></View>}
 
       {(selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled||selectedStore.pickup_enabled)&&<View style={styles.segment}>
         {(selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled)&&<Pressable style={[styles.segmentButton,deliveryType==="DELIVERY"&&styles.segmentActive]} onPress={()=>setDeliveryType("DELIVERY")}><Text style={deliveryType==="DELIVERY"?styles.segmentActiveText:undefined}>Entrega</Text></Pressable>}
@@ -569,6 +601,7 @@ export default function App(){
         {addresses.map(address=><Pressable key={address.id} style={[styles.addressCard,selectedAddressId===address.id&&styles.addressSelected]} onPress={()=>setSelectedAddressId(address.id)}>
           <Text style={styles.productName}>{address.label||"Endereço"}</Text><Text style={styles.meta}>{address.street}, {address.number}{address.district?` • ${address.district}`:""}</Text>
         </Pressable>)}
+        {!!selectedAddressId&&<View style={styles.deliveryPreviewCard}><View style={{flex:1}}><Text style={styles.deliveryPreviewTitle}>{deliveryPreviewUsable&&deliveryPreview?`Frete para ${deliveryPreview.distanceKm.toFixed(2)} km`:"Calcule o frete antes de finalizar"}</Text><Text style={styles.deliveryPreviewMeta}>{deliveryPreviewUsable&&deliveryPreview?(freeDeliveryApplies&&deliveryPreview.fee>0?`Promoção ativa: de ${brl(deliveryPreview.fee)} por grátis`:`Cotação válida por até 10 minutos`):"A cotação valida distância, raio e tabela configurada pela loja."}</Text></View>{deliveryPreviewUsable&&deliveryPreview&&<Text style={styles.deliveryPreviewPrice}>{freeDeliveryApplies?"GRÁTIS":brl(deliveryPreview.fee)}</Text>}<Pressable style={[styles.deliveryPreviewButton,deliveryPreviewBusy&&styles.disabled]} disabled={deliveryPreviewBusy} onPress={previewDeliveryQuote}><Text style={styles.deliveryPreviewButtonText}>{deliveryPreviewBusy?"CALCULANDO...":deliveryPreviewUsable?"RECALCULAR":"CALCULAR FRETE"}</Text></Pressable></View>}
         <View style={styles.addressForm}>
           <Text style={styles.formTitle}>Adicionar endereço usando minha localização atual</Text>
           <TextInput style={styles.input} placeholder="Nome (Casa, Trabalho...)" value={addressForm.label} onChangeText={value=>setAddressForm({...addressForm,label:value})}/>
@@ -589,8 +622,8 @@ export default function App(){
         {availablePaymentMethods.includes("CREDIT_CARD")&&cardTokenization&&<Pressable style={[styles.segmentButton,paymentMethod==="CREDIT_CARD"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CREDIT_CARD")}><Text style={paymentMethod==="CREDIT_CARD"?styles.segmentActiveText:undefined}>Cartão • Efí</Text></Pressable>}
       </View>
       {!availablePaymentMethods.includes("PIX")&&<Text style={styles.meta}>PIX será exibido automaticamente quando a Efí Bank estiver ativada pela Matriz.</Text>}
-      <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão, número e CVV são tokenizados pela Efí dentro de uma tela segura e não ficam armazenados no CLICK-FOOD.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
-      <Pressable style={[styles.checkout,(!cart.length||!selectedStore.open_now||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||placing||!selectedStore.open_now||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
+      <View style={styles.totalBox}><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>Itens</Text><Text style={styles.checkoutSummaryValue}>{brl(cartSubtotal)}</Text></View><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>{deliveryType==="PICKUP"?"Retirada":"Frete"}</Text><Text style={styles.checkoutSummaryValue}>{deliveryType==="PICKUP"?"Grátis":estimatedDeliveryFee==null?"Calcule acima":estimatedDeliveryFee===0?"Grátis":brl(estimatedDeliveryFee)}</Text></View>{deliveryType==="DELIVERY"&&deliveryPreviewUsable&&deliveryPreview&&freeDeliveryApplies&&deliveryPreview.fee>0&&<Text style={styles.checkoutSaving}>Você economiza {brl(deliveryPreview.fee)} no frete com a promoção ativa.</Text>}<View style={styles.checkoutDivider}/><Text style={styles.checkoutTotalLabel}>Total estimado antes do cupom</Text><Text style={styles.total}>{brl(checkoutEstimatedTotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão, número e CVV são tokenizados pela Efí dentro de uma tela segura e não ficam armazenados no CLICK-FOOD.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
+      <Pressable style={[styles.checkout,(!cart.length||minimumMissing>0||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||minimumMissing>0||placing||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":minimumMissing>0?`FALTAM ${brl(minimumMissing)}`:deliveryType==="DELIVERY"&&!selectedAddressId?"SELECIONE UM ENDEREÇO":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
     </ScrollView>
     {pendingCardOrder&&cardTokenization&&<EfiCardPayment visible config={cardTokenization} order={pendingCardOrder} defaults={{name:String(session.user.user_metadata?.full_name??""),email:String(session.user.email??""),phone:String(session.user.user_metadata?.phone??"")}} onCancel={cancelPendingCardPayment} onComplete={completeCardPayment}/>}
     </SafeAreaView>;
@@ -693,10 +726,10 @@ const styles=StyleSheet.create({
   storeStatus:{fontSize:9,fontWeight:"900",paddingHorizontal:7,paddingVertical:4,borderRadius:999,alignSelf:"flex-start",marginTop:6,overflow:"hidden"},storeOpen:{backgroundColor:"#ddf6e6",color:"#1d7342"},storeClosed:{backgroundColor:"#fde5e1",color:"#992f29"},storeStatusBanner:{padding:10,borderRadius:12,fontSize:11,fontWeight:"900",marginTop:10,textAlign:"center"},storeOpenBanner:{backgroundColor:"#ddf6e6",color:"#1d7342"},storeClosedBanner:{backgroundColor:"#fde5e1",color:"#992f29",padding:10,borderRadius:12,fontSize:11,fontWeight:"900",marginTop:10,textAlign:"center"},storeSlogan:{fontSize:10,fontWeight:"900",letterSpacing:.8,color:"#8d7000",textTransform:"uppercase"},storeAccent:{height:4,borderRadius:999,marginTop:8,marginBottom:8},serviceChips:{flexDirection:"row",flexWrap:"wrap",gap:6,marginTop:10},serviceChip:{backgroundColor:"#f0f1f3",borderRadius:999,paddingHorizontal:9,paddingVertical:6},serviceChipText:{fontSize:9,fontWeight:"800",color:"#4b5159"},
   productRow:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:12,marginBottom:9,flexDirection:"row",alignItems:"center",gap:10},productImage:{width:74,height:74,borderRadius:12,backgroundColor:"#eee"},productImageFallback:{width:74,height:74,borderRadius:12,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},productImageFallbackText:{fontSize:28},productName:{fontWeight:"900",fontSize:15},meta:{color:"#777",fontSize:11,marginTop:4},price:{fontWeight:"900",color:"#8d7000",marginTop:6},addButton:{width:42,height:42,borderRadius:13,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},addText:{fontSize:24,fontWeight:"900"},
   customHint:{fontSize:10,color:"#555",fontWeight:"800",marginTop:4},discountHint:{fontSize:10,color:"#26804a",fontWeight:"800",marginTop:3},promoBanner:{backgroundColor:"#dcf7e7",color:"#17673b",padding:10,borderRadius:11,fontWeight:"800",fontSize:11,marginTop:12},offersHeader:{marginTop:18,marginBottom:9,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},offersKicker:{fontSize:9,fontWeight:"900",letterSpacing:1.1,color:"#9a6900"},offersTitle:{fontSize:20,fontWeight:"900",marginTop:2},offersEmoji:{fontSize:27},offersScroll:{marginHorizontal:-2,marginBottom:4},offersList:{gap:10,paddingHorizontal:2,paddingBottom:2},offerCard:{width:184,backgroundColor:"#111",borderRadius:17,overflow:"hidden"},offerImage:{width:"100%",height:92,backgroundColor:"#333"},offerImageFallback:{height:92,backgroundColor:"#292929",alignItems:"center",justifyContent:"center"},offerImageFallbackText:{fontSize:34},offerBody:{padding:11},offerBadge:{alignSelf:"flex-start",backgroundColor:"#f4c400",color:"#111",fontSize:9,fontWeight:"900",paddingHorizontal:8,paddingVertical:5,borderRadius:999,overflow:"hidden"},offerName:{color:"#fff",fontSize:14,fontWeight:"900",marginTop:8},offerMeta:{color:"#bfc2c7",fontSize:9.5,lineHeight:13,marginTop:4},categoryScroll:{marginHorizontal:-2,marginBottom:10},categoryVisualList:{gap:8,paddingHorizontal:2,paddingBottom:2},categoryVisualCard:{width:102,backgroundColor:"#fff",borderWidth:1,borderColor:"#e3e3e3",borderRadius:15,padding:6},categoryVisualCardActive:{backgroundColor:"#111",borderColor:"#111"},categoryVisualImage:{width:"100%",height:58,borderRadius:10,backgroundColor:"#eee"},categoryVisualFallback:{height:58,borderRadius:10,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},categoryVisualEmoji:{fontSize:26},categoryVisualText:{fontSize:10,fontWeight:"900",color:"#4b4f56",textAlign:"center",marginTop:7,marginBottom:2},categoryVisualTextActive:{color:"#f4c400"},categoryHeading:{backgroundColor:"#fffbea",borderRadius:14,padding:12,marginBottom:10},categoryHeadingTitle:{fontSize:17,fontWeight:"900"},
-  cartRow:{backgroundColor:"#fff",borderRadius:14,padding:13,marginBottom:8,flexDirection:"row",alignItems:"center"},cartOptions:{fontSize:10,color:"#666",marginTop:4,lineHeight:14},qty:{flexDirection:"row",gap:14,alignItems:"center",borderWidth:1,borderColor:"#ddd",borderRadius:10,paddingVertical:8,paddingHorizontal:10},
+  cartRow:{backgroundColor:"#fff",borderRadius:14,padding:13,marginBottom:8,flexDirection:"row",alignItems:"center"},cartOptions:{fontSize:10,color:"#666",marginTop:4,lineHeight:14},qty:{flexDirection:"row",gap:14,alignItems:"center",borderWidth:1,borderColor:"#ddd",borderRadius:10,paddingVertical:8,paddingHorizontal:10},minimumOrderCard:{borderRadius:13,padding:12,marginTop:8,borderWidth:1},minimumOrderPending:{backgroundColor:"#fff7dd",borderColor:"#e9d386"},minimumOrderReached:{backgroundColor:"#e4f7ea",borderColor:"#a4d9b4"},minimumOrderTitle:{fontSize:12,fontWeight:"900",color:"#333"},minimumOrderMeta:{fontSize:9.5,color:"#666",marginTop:4},
   segment:{flexDirection:"row",gap:7,marginTop:18},segmentButton:{flex:1,borderWidth:1,borderColor:"#ddd",padding:12,borderRadius:12,alignItems:"center"},segmentActive:{backgroundColor:"#111",borderColor:"#111"},segmentActiveText:{color:"#fff",fontWeight:"900"},
-  addressCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e2e2e2",borderRadius:13,padding:12,marginBottom:7},addressSelected:{borderColor:"#d4ae00",backgroundColor:"#fffbea"},addressForm:{backgroundColor:"#eeeae0",borderRadius:16,padding:14,marginTop:10},formTitle:{fontWeight:"900",marginBottom:10},
-  secondaryButton:{backgroundColor:"#fff",borderWidth:1,borderColor:"#ccc",padding:13,borderRadius:12,alignItems:"center"},secondaryText:{fontWeight:"900"},totalBox:{backgroundColor:"#fff",padding:16,borderRadius:15,marginTop:12},total:{fontSize:25,fontWeight:"900",marginTop:4},paymentHint:{fontSize:10,color:"#777",marginTop:10,lineHeight:14},checkout:{backgroundColor:"#f4c400",padding:16,borderRadius:14,alignItems:"center",marginTop:10},checkoutText:{fontWeight:"900"},back:{fontWeight:"900",color:"#856a00",fontSize:15},empty:{color:"#777",paddingVertical:20,textAlign:"center"},
+  addressCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e2e2e2",borderRadius:13,padding:12,marginBottom:7},addressSelected:{borderColor:"#d4ae00",backgroundColor:"#fffbea"},deliveryPreviewCard:{backgroundColor:"#111",borderRadius:15,padding:13,marginTop:10,flexDirection:"row",alignItems:"center",flexWrap:"wrap",gap:10},deliveryPreviewTitle:{color:"#fff",fontSize:12,fontWeight:"900"},deliveryPreviewMeta:{color:"#b8bcc2",fontSize:9.5,lineHeight:13,marginTop:4},deliveryPreviewPrice:{color:"#f4c400",fontSize:16,fontWeight:"900"},deliveryPreviewButton:{width:"100%",backgroundColor:"#f4c400",borderRadius:10,paddingVertical:10,alignItems:"center"},deliveryPreviewButtonText:{fontSize:10,fontWeight:"900",color:"#111"},addressForm:{backgroundColor:"#eeeae0",borderRadius:16,padding:14,marginTop:10},formTitle:{fontWeight:"900",marginBottom:10},
+  secondaryButton:{backgroundColor:"#fff",borderWidth:1,borderColor:"#ccc",padding:13,borderRadius:12,alignItems:"center"},secondaryText:{fontWeight:"900"},totalBox:{backgroundColor:"#fff",padding:16,borderRadius:15,marginTop:12},checkoutSummaryRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:8},checkoutSummaryLabel:{fontSize:11,color:"#666",fontWeight:"700"},checkoutSummaryValue:{fontSize:12,fontWeight:"900",color:"#222"},checkoutSaving:{fontSize:9.5,fontWeight:"800",color:"#24774b",marginTop:2,marginBottom:8},checkoutDivider:{height:1,backgroundColor:"#ececec",marginVertical:6},checkoutTotalLabel:{fontSize:10,color:"#777",fontWeight:"800"},total:{fontSize:25,fontWeight:"900",marginTop:4},paymentHint:{fontSize:10,color:"#777",marginTop:10,lineHeight:14},checkout:{backgroundColor:"#f4c400",padding:16,borderRadius:14,alignItems:"center",marginTop:10},checkoutText:{fontWeight:"900"},back:{fontWeight:"900",color:"#856a00",fontSize:15},empty:{color:"#777",paddingVertical:20,textAlign:"center"},
   orderBlock:{marginBottom:10},orderCard:{backgroundColor:"#fff",borderRadius:14,padding:14,flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:10},rowBetween:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},link:{color:"#8d7000",fontWeight:"900"},
   refundBanner:{marginTop:7,borderRadius:12,padding:11,borderWidth:1},refundPending:{backgroundColor:"#fff8dd",borderColor:"#ead47a"},refundDone:{backgroundColor:"#e2f7e9",borderColor:"#9fd7b1"},refundFailed:{backgroundColor:"#fde9e6",borderColor:"#e2aaa2"},refundText:{fontSize:11,fontWeight:"900",color:"#333"},refundButton:{marginTop:9,backgroundColor:"#111",borderRadius:9,paddingVertical:9,paddingHorizontal:11,alignSelf:"flex-start"},refundButtonStandalone:{marginTop:7,backgroundColor:"#111",borderRadius:10,padding:11,alignItems:"center"},refundButtonText:{color:"#fff",fontSize:10,fontWeight:"900"},
   trackingCard:{backgroundColor:"#111",borderRadius:20,padding:14,marginBottom:16,overflow:"hidden"},trackingKicker:{color:"#f4c400",fontWeight:"900",fontSize:9,letterSpacing:1.2},trackingTitle:{color:"#fff",fontSize:20,fontWeight:"900",marginTop:5},trackingStatus:{color:"#ccc",fontSize:12,marginTop:4,marginBottom:12},driverCardBox:{backgroundColor:"#242424",borderRadius:14,padding:11,marginBottom:12,flexDirection:"row",alignItems:"center",gap:10},driverAvatar:{width:48,height:48,borderRadius:24,backgroundColor:"#444"},driverAvatarFallback:{width:48,height:48,borderRadius:24,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},driverAvatarInitials:{fontWeight:"900",color:"#111"},driverCardBody:{flex:1},driverCardName:{color:"#fff",fontSize:15,fontWeight:"900"},driverCardMeta:{color:"#ccc",fontSize:10,marginTop:4},trackingMap:{height:250,borderRadius:15,overflow:"hidden"},mapWaiting:{height:180,borderRadius:15,backgroundColor:"#292929",alignItems:"center",justifyContent:"center",padding:20},mapPin:{backgroundColor:"#fff",borderRadius:18,padding:7,borderWidth:2,borderColor:"#111"},driverPin:{backgroundColor:"#f4c400",borderRadius:22,padding:8,borderWidth:2,borderColor:"#111"},driverEmoji:{fontSize:25},liveHint:{color:"#aaa",fontSize:10,marginTop:9,lineHeight:14},arrivedBanner:{backgroundColor:"#f4c400",borderRadius:13,padding:13,marginBottom:12},arrivedTitle:{fontSize:18,fontWeight:"900"},arrivedText:{fontSize:11,marginTop:3},
