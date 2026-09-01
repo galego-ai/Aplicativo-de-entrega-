@@ -13,6 +13,7 @@ import {
 } from "./BackgroundLocation";
 import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
 import DriverWallet from "./DriverWallet";
+import DriverLiveMap from "./DriverLiveMap";
 
 type Screen = "home" | "history" | "wallet" | "profile";
 type Driver = { id: string; status: string; online: boolean; rating: number; acceptance_rate: number; city_id: string | null };
@@ -24,6 +25,7 @@ type ActiveDelivery = {
   destination: { street: string; number: string | null; complement: string | null; district: string | null; reference: string | null; latitude: number | null; longitude: number | null } | null;
 };
 type HistoryItem = { id:string; orderNumber:number|null; storeName:string; deliveryFee:number; driverEarning:number; pickupAt:string|null; deliveredAt:string|null; durationMinutes:number|null };
+type DriverLocation = { latitude:number; longitude:number; heading:number|null; recordedAt:string };
 
 const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
 
@@ -96,22 +98,24 @@ export default function App() {
   const [screen,setScreen]=useState<Screen>("home"); const [offer,setOffer]=useState<Offer|null>(null); const [active,setActive]=useState<ActiveDelivery|null>(null);
   const [history,setHistory]=useState<HistoryItem[]>([]); const [code,setCode]=useState(""); const [message,setMessage]=useState(""); const [loading,setLoading]=useState(true);
   const [incidentModal,setIncidentModal]=useState(false); const [incidentReason,setIncidentReason]=useState(""); const [incidentBusy,setIncidentBusy]=useState(false);
+  const [driverLocation,setDriverLocation]=useState<DriverLocation|null>(null);
 
   useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)});const {data}=supabase.auth.onAuthStateChange((_e,s)=>setSession(s));return()=>data.subscription.unsubscribe();},[]);
-  useEffect(()=>{if(session) bootstrap(); else {setDriver(null);setActive(null);setOffer(null)}},[session]);
+  useEffect(()=>{if(session) bootstrap(); else {setDriver(null);setActive(null);setOffer(null);setDriverLocation(null)}},[session]);
   useEffect(()=>{if(!driver?.online||driver.status!=="ACTIVE") return; const timer=setInterval(()=>{loadOffers();loadActive();},6000);loadOffers();loadActive();return()=>clearInterval(timer);},[driver?.online,driver?.status]);
   useEffect(()=>{if(!offer){Vibration.cancel();return;}Vibration.vibrate([0,650,350,650,350,950],true);return()=>Vibration.cancel();},[offer?.id]);
-  useEffect(()=>{if(!driver?.online||driver.status!=="ACTIVE") return; let subscription:Location.LocationSubscription|undefined; (async()=>{const permission=await Location.requestForegroundPermissionsAsync();if(permission.status!=="granted"){setMessage("Ative a localização para receber entregas próximas.");return;}subscription=await Location.watchPositionAsync({accuracy:Location.Accuracy.High,distanceInterval:20,timeInterval:10000},async position=>{await supabase.from("driver_locations").upsert({driver_id:driver.id,latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,speed:position.coords.speed,accuracy:position.coords.accuracy,recorded_at:new Date().toISOString()},{onConflict:"driver_id"});});})();return()=>subscription?.remove();},[driver?.online,driver?.id,driver?.status]);
+  useEffect(()=>{if(!driver?.online||driver.status!=="ACTIVE") return; let subscription:Location.LocationSubscription|undefined; (async()=>{const permission=await Location.requestForegroundPermissionsAsync();if(permission.status!=="granted"){setMessage("Ative a localização para receber entregas próximas.");return;}subscription=await Location.watchPositionAsync({accuracy:Location.Accuracy.High,distanceInterval:20,timeInterval:10000},async position=>{const recordedAt=new Date(position.timestamp||Date.now()).toISOString();setDriverLocation({latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,recordedAt});await supabase.from("driver_locations").upsert({driver_id:driver.id,latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,speed:position.coords.speed,accuracy:position.coords.accuracy,recorded_at:recordedAt},{onConflict:"driver_id"});});})();return()=>subscription?.remove();},[driver?.online,driver?.id,driver?.status]);
 
   useEffect(()=>{
     if(driver?.id&&driver.online&&driver.status==="ACTIVE")void resumeBackgroundTrackingIfAuthorized(driver.id);
     else void disableBackgroundTracking();
   },[driver?.id,driver?.online,driver?.status]);
 
-  async function bootstrap(){setLoading(true);const [{data:cityData},{data:driverData}]=await Promise.all([supabase.from("cities").select("id,name,state").eq("active",true).order("name"),supabase.from("drivers").select("id,status,online,rating,acceptance_rate,city_id").maybeSingle()]);setCities(cityData??[]);if(driverData){setDriver({...driverData,rating:Number(driverData.rating),acceptance_rate:Number(driverData.acceptance_rate)} as Driver);await Promise.all([loadActive(),loadHistory(driverData.id)]);}else setDriver(null);setLoading(false);}
+  async function bootstrap(){setLoading(true);const [{data:cityData},{data:driverData}]=await Promise.all([supabase.from("cities").select("id,name,state").eq("active",true).order("name"),supabase.from("drivers").select("id,status,online,rating,acceptance_rate,city_id").maybeSingle()]);setCities(cityData??[]);if(driverData){setDriver({...driverData,rating:Number(driverData.rating),acceptance_rate:Number(driverData.acceptance_rate)} as Driver);await Promise.all([loadActive(),loadHistory(driverData.id),loadDriverLocation(driverData.id)]);}else{setDriver(null);setDriverLocation(null)}setLoading(false);}
   async function loadOffers(){const {data}=await supabase.functions.invoke("driver-offers",{body:{}});const next=(data?.offers??[])[0] as Offer|undefined;setOffer(next??null);}
   async function loadActive(){const {data}=await supabase.functions.invoke("driver-active-delivery",{body:{}});setActive(data?.delivery??null);}
   async function loadHistory(_driverId?:string){const {data,error}=await supabase.functions.invoke("driver-delivery-history",{body:{}});if(error||data?.error){setMessage("Não foi possível atualizar o histórico de entregas.");return;}setHistory((data?.history??[]) as HistoryItem[]);}
+  async function loadDriverLocation(driverId:string){const {data}=await supabase.from("driver_locations").select("latitude,longitude,heading,recorded_at").eq("driver_id",driverId).maybeSingle();if(!data)return;setDriverLocation({latitude:Number(data.latitude),longitude:Number(data.longitude),heading:data.heading==null?null:Number(data.heading),recordedAt:String(data.recorded_at)});}
   async function toggleOnline(){
     if(!driver)return;
     setMessage("");
@@ -156,7 +160,7 @@ export default function App() {
   const home=<ScrollView contentContainerStyle={styles.content}><View style={styles.header}><View><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.subtitle}>ENTREGADOR</Text></View><View style={[styles.dot,driver.online&&styles.dotOnline]}/></View>
     <View style={styles.earningsCard}><Text style={styles.earningsLabel}>GANHOS CONCLUÍDOS</Text><Text style={styles.earningsValue}>{brl(completedTotal)}</Text><View style={styles.stats}><View><Text style={styles.statValue}>{history.length}</Text><Text style={styles.statLabel}>entregas</Text></View><View><Text style={styles.statValue}>{driver.rating.toFixed(1)} ★</Text><Text style={styles.statLabel}>avaliação</Text></View><View><Text style={styles.statValue}>{Math.round(driver.acceptance_rate)}%</Text><Text style={styles.statLabel}>aceitação</Text></View></View></View>
     {!!message&&<Text style={styles.notice}>{message}</Text>}<Pressable style={[styles.onlineButton,driver.online&&styles.offlineButton]} onPress={toggleOnline}><Text style={styles.onlineText}>{driver.online?"FICAR OFFLINE":"FICAR ONLINE"}</Text></Pressable>
-    <View style={styles.map}><Text style={styles.mapTitle}>{active?"Entrega ativa":driver.online?"Você está disponível":"Fique online para receber entregas"}</Text><Text style={styles.mapEmoji}>{active?"🛵":"📍"}</Text><Text style={styles.mapText}>{active?`${active.pickup.storeName} • Pedido #${active.orderNumber}`:"Sua localização será enviada somente enquanto você estiver online."}</Text></View>
+    <DriverLiveMap online={driver.online} location={driverLocation} active={active}/>
     {active&&<View style={styles.deliveryCard}><Text style={styles.deliveryBadge}>PEDIDO #{active.orderNumber}</Text><Text style={styles.deliveryTitle}>{active.status.includes("CUSTOMER")||active.status==="PICKUP_CONFIRMED"?"Entrega ao cliente":active.pickup.storeName}</Text><Text style={styles.deliveryMeta}>Status: {active.status}</Text>{active.destination&&active.status!=="DRIVER_ASSIGNED"&&active.status!=="DRIVER_TO_STORE"&&active.status!=="DRIVER_AT_STORE"&&<Text style={styles.address}>{active.destination.street}, {active.destination.number??"s/n"}{active.destination.district?` • ${active.destination.district}`:""}</Text>}{needsCode&&<TextInput style={styles.codeInput} placeholder="Código de 4 dígitos" keyboardType="number-pad" maxLength={4} value={code} onChangeText={setCode}/>} {nextAction&&<Pressable style={styles.actionButton} onPress={()=>deliveryAction(nextAction[0])}><Text style={styles.actionText}>{nextAction[1]}</Text></Pressable>}{active.status==="DRIVER_AT_CUSTOMER"&&<Pressable style={styles.problemSecondary} onPress={()=>Alert.alert("Cliente não encontrado","Confirme apenas se você já está no endereço e tentou localizar o cliente.",[{text:"VOLTAR",style:"cancel"},{text:"CONFIRMAR",style:"destructive",onPress:()=>reportDeliveryProblem("CUSTOMER_UNAVAILABLE")}])}><Text style={styles.problemSecondaryText}>CLIENTE NÃO ENCONTRADO</Text></Pressable>}{["DRIVER_ASSIGNED","DRIVER_TO_STORE","DRIVER_AT_STORE","PICKUP_CONFIRMED","DRIVER_TO_CUSTOMER","DRIVER_AT_CUSTOMER","RETURN_REQUIRED"].includes(active.status)&&<Pressable style={styles.problemButton} onPress={()=>{setIncidentReason("");setIncidentModal(true)}}><Text style={styles.problemText}>REPORTAR PROBLEMA</Text></Pressable>}{["CUSTOMER_UNAVAILABLE","INCIDENT","RETURN_REQUIRED"].includes(active.status)&&<Text style={styles.supportActive}>Suporte acionado. Aguarde orientação no aplicativo.</Text>}<Text style={styles.earning}>Ganho desta entrega: {brl(active.earning)}</Text></View>}
   </ScrollView>;
 
