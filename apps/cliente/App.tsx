@@ -105,7 +105,9 @@ export default function App(){
 
   useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false);});const{data}=supabase.auth.onAuthStateChange((_event,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[]);
   useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();loadLoyalty();}else{setTracking(null);setDriverCard(null);setOrders([]);setPixCharge(null);setLoyaltyWallets([]);setLoyaltyTotal(0);}},[session]);
-  useEffect(()=>{if(!session||tab!=="orders")return;const timer=setInterval(()=>loadOrders(),6000);return()=>clearInterval(timer);},[session?.user.id,tab]);
+  useEffect(()=>{if(!session||tab!=="orders")return;const timer=setInterval(()=>loadOrders(),20000);return()=>clearInterval(timer);},[session?.user.id,tab]);
+  useEffect(()=>{if(!session||tab!=="orders")return;let refreshTimer:ReturnType<typeof setTimeout>|undefined;const refresh=()=>{if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>{void loadOrders();},180);};const channel=supabase.channel(`customer-orders-live-${session.user.id}`).on("postgres_changes",{event:"*",schema:"public",table:"orders",filter:`customer_id=eq.${session.user.id}`},refresh).on("postgres_changes",{event:"*",schema:"public",table:"deliveries"},refresh).subscribe();return()=>{if(refreshTimer)clearTimeout(refreshTimer);void supabase.removeChannel(channel);};},[session?.user.id,tab]);
+  useEffect(()=>{if(!session||tab!=="orders"||!tracking?.driverId)return;const driverId=tracking.driverId;const channel=supabase.channel(`customer-driver-live-${driverId}`).on("postgres_changes",{event:"*",schema:"public",table:"driver_locations",filter:`driver_id=eq.${driverId}`},payload=>{const row=(payload.new??{}) as any;const latitude=Number(row.latitude),longitude=Number(row.longitude);if(!Number.isFinite(latitude)||!Number.isFinite(longitude))return;setTracking(current=>current&&current.driverId===driverId?{...current,driverLat:latitude,driverLng:longitude}:current);}).subscribe();return()=>{void supabase.removeChannel(channel);};},[session?.user.id,tab,tracking?.driverId]);
   useEffect(()=>{if(!session)return;const timer=setInterval(()=>loadStores(),60000);return()=>clearInterval(timer);},[session?.user.id]);
   useEffect(()=>{if(session&&cardTokenization)void loadOrders();},[session?.user.id,cardTokenization?.accountId]);
 
@@ -575,7 +577,7 @@ export default function App(){
         {tracking.destinationLat!=null&&tracking.destinationLng!=null&&<Marker coordinate={{latitude:tracking.destinationLat,longitude:tracking.destinationLng}} title="Seu endereço"><View style={styles.mapPin}><Text>🏠</Text></View></Marker>}
         {tracking.driverLat!=null&&tracking.driverLng!=null&&<Marker coordinate={{latitude:tracking.driverLat,longitude:tracking.driverLng}} title="Seu entregador"><View style={styles.driverPin}><Text style={styles.driverEmoji}>🛵</Text></View></Marker>}
       </MapView>:<View style={styles.mapWaiting}><Text style={styles.driverEmoji}>🛵</Text><Text style={styles.meta}>{tracking.driverId?"Aguardando atualização da localização do entregador.":"Aguardando um entregador aceitar o chamado."}</Text></View>}
-      <Text style={styles.liveHint}>{tracking.driverId?"O ícone do veículo é atualizado enquanto o entregador estiver online e na entrega.":"Assim que um entregador aceitar, ele aparecerá aqui."}</Text>
+      <Text style={styles.liveHint}>{tracking.driverId?"O ícone do veículo agora acompanha as atualizações do GPS em tempo real enquanto o entregador estiver online e na entrega.":"Assim que um entregador aceitar, ele aparecerá aqui."}</Text>
     </View>}
     {orders.length?orders.map(order=>{
       const rel=Array.isArray(order.stores)?order.stores[0]:order.stores;const reviewed=reviewedOrderIds.has(order.id);
