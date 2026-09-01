@@ -24,7 +24,7 @@ export default{
     ]=await Promise.all([
       ctx.supabaseAdmin.rpc("store_dashboard_metrics",{p_store_id:storeId}),
       ctx.supabaseAdmin.from("coupons").select("id,code,discount_type,discount_value,minimum_order,max_uses,ends_at,active").eq("store_id",storeId).order("created_at",{ascending:false}),
-      ctx.supabaseAdmin.from("products").select("id,name,price,promotional_price,active").eq("store_id",storeId).order("name"),
+      ctx.supabaseAdmin.from("products").select("id,name,description,image_url,price,promotional_price,active,category_id,available_delivery,available_pos,control_inventory").eq("store_id",storeId).order("name"),
       ctx.supabaseAdmin.from("orders").select("id,order_number,customer_id,total,status,payment_status,delivery_type,source,created_at").eq("store_id",storeId).order("created_at",{ascending:false}).limit(100),
       ctx.supabaseAdmin.from("inventory_items").select("id,product_id,quantity,minimum_quantity,products(name)").eq("store_id",storeId),
       ctx.supabaseAdmin.from("financial_transactions").select("id,transaction_type,direction,amount,status,created_at").eq("store_id",storeId).order("created_at",{ascending:false}).limit(100),
