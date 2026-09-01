@@ -13,6 +13,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
+    name: config.name ?? "CLICK-FOOD Entregador",
+    slug: config.slug ?? "click-food-entregador",
     plugins,
   };
 };
