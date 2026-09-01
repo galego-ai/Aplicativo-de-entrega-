@@ -8,6 +8,7 @@ import "./pdv.css";
 import "./store-settings.css";
 import "./kds.css";
 import "./categories.css";
+import "./promotions.css";
 import LegalConsentGate from "./LegalConsentGate";
 import DashboardSectionRouter from "./DashboardSectionRouter";
 import StoreRealtimeOrderAlarm from "./StoreRealtimeOrderAlarm";
@@ -18,5 +19,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="pt-BR"><body><LegalConsentGate><><DashboardSectionRouter/><StoreRealtimeOrderAlarm/><nav className="globalTools"><a href="/">Painel</a><a href="/cozinha">Cozinha</a><a href="/pdv">PDV</a><a href="/produtos">Produtos</a><a href="/categorias">Categorias</a><a href="/estoque">Estoque</a><a href="/catalogo-avancado">Catálogo avançado</a><a href="/mapa">Mapa</a><a href="/configuracao">Configuração</a><a href="/chat">Chat</a><a href="/entregadores">Entregadores</a><a href="/midia">Mídia</a><a href="/recibos">Recibos</a><a href="/repasses">Repasses</a><a href="/usuarios">Usuários</a><a href="/suporte">Suporte</a><a href="/relatorios">Relatórios</a></nav>{children}</></LegalConsentGate></body></html>;
+  return <html lang="pt-BR"><body><LegalConsentGate><><DashboardSectionRouter/><StoreRealtimeOrderAlarm/><nav className="globalTools"><a href="/">Painel</a><a href="/cozinha">Cozinha</a><a href="/pdv">PDV</a><a href="/produtos">Produtos</a><a href="/categorias">Categorias</a><a href="/promocoes">Promoções</a><a href="/estoque">Estoque</a><a href="/catalogo-avancado">Catálogo avançado</a><a href="/mapa">Mapa</a><a href="/configuracao">Configuração</a><a href="/chat">Chat</a><a href="/entregadores">Entregadores</a><a href="/midia">Mídia</a><a href="/recibos">Recibos</a><a href="/repasses">Repasses</a><a href="/usuarios">Usuários</a><a href="/suporte">Suporte</a><a href="/relatorios">Relatórios</a></nav>{children}</></LegalConsentGate></body></html>;
 }
