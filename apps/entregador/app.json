@@ -2,6 +2,7 @@
   "expo": {
     "name": "CLICK-FOOD Entregador",
     "slug": "click-food-entregador",
+    "owner": "galego-ais-team",
     "scheme": "clickfood-entregador",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -18,7 +19,13 @@
           "isIosBackgroundLocationEnabled": true
         }
       ],
-      ["expo-notifications", {"color": "#F4C400", "defaultChannel": "clickfood-default"}]
+      [
+        "expo-notifications",
+        {
+          "color": "#F4C400",
+          "defaultChannel": "clickfood-default"
+        }
+      ]
     ],
     "android": {
       "package": "br.com.clickfood.entregador"
@@ -26,6 +33,11 @@
     "ios": {
       "bundleIdentifier": "br.com.clickfood.entregador",
       "supportsTablet": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": "7647708c-4646-4e28-a4e1-e037acaec186"
+      }
     }
   }
 }
