@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./management.css";
+import "./premium.css";
 import AdminDriverRealtimeRefresh from "./AdminDriverRealtimeRefresh";
 
 export const metadata: Metadata = {
