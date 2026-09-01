@@ -19,7 +19,7 @@ import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
 import CustomerOrderReceipt from "./CustomerOrderReceipt";
 
 type Tab = "home" | "search" | "orders" | "support" | "profile";
-type Store = { id:string; name:string; slogan:string|null; description:string|null; logo_url:string|null; cover_url:string|null; primary_color:string; secondary_color:string; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean; pickup_enabled:boolean; clickfood_delivery_enabled:boolean; own_delivery_enabled:boolean; max_radius_km:number|null };
+type Store = { id:string; name:string; slogan:string|null; description:string|null; logo_url:string|null; cover_url:string|null; primary_color:string; secondary_color:string; minimum_order:number; average_preparation_time:number; timezone:string; orders_paused:boolean; open_now:boolean; pickup_enabled:boolean; clickfood_delivery_enabled:boolean; own_delivery_enabled:boolean; max_radius_km:number|null };
 type MenuCategory = { id:string; name:string; description:string|null; image_url:string|null; sort_order:number };
 type ProductWithMedia = Product & { image_url:string|null; category_id:string|null };
 type Address = { id:string; label:string|null; street:string; number:string|null; district:string|null; reference:string|null };
@@ -349,6 +349,7 @@ export default function App(){
 
   async function previewDeliveryQuote(){
     if(!selectedStore||deliveryType!=="DELIVERY")return;
+    if(selectedStore.orders_paused){setMessage("Esta loja pausou temporariamente novos pedidos. O cálculo de frete ficará disponível quando ela retomar.");return;}
     if(!selectedAddressId){setMessage("Selecione um endereço para calcular o frete.");return;}
     setDeliveryPreviewBusy(true);setMessage("");
     const quoteResult=await supabase.functions.invoke("quote-delivery",{body:{storeId:selectedStore.id,addressId:selectedAddressId}});
@@ -365,6 +366,7 @@ export default function App(){
   async function placeOrder(){
     if(!session||!selectedStore||!cart.length)return;
     const deliveryEnabled=selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled;
+    if(selectedStore.orders_paused){setMessage("Esta loja pausou temporariamente novos pedidos. Você ainda pode consultar o cardápio.");return;}
     if(!selectedStore.open_now){setMessage("Esta loja está fechada agora. Você pode consultar o cardápio, mas o pedido só poderá ser enviado quando ela abrir.");return;}
     if(deliveryType==="DELIVERY"&&!deliveryEnabled){setMessage("Esta loja não está aceitando entrega neste momento. Escolha retirada, se disponível.");return;}
     if(deliveryType==="PICKUP"&&!selectedStore.pickup_enabled){setMessage("A retirada na loja está desativada neste momento.");return;}
@@ -523,7 +525,8 @@ export default function App(){
       <View style={[styles.storeAccent,{backgroundColor:selectedStore.primary_color||"#f4c400"}]}/>
       <Text style={styles.meta}>Pedido mínimo {brl(selectedStore.minimum_order)} • preparo médio {selectedStore.average_preparation_time} min</Text>
       <View style={styles.serviceChips}>{selectedStore.clickfood_delivery_enabled&&<View style={styles.serviceChip}><Text style={styles.serviceChipText}>🛵 Entrega CLICK-FOOD</Text></View>}{selectedStore.own_delivery_enabled&&<View style={styles.serviceChip}><Text style={styles.serviceChipText}>🏪 Entrega da loja</Text></View>}{selectedStore.pickup_enabled&&<View style={styles.serviceChip}><Text style={styles.serviceChipText}>🥡 Retirada</Text></View>}{selectedStore.max_radius_km!=null&&(selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled)&&<View style={styles.serviceChip}><Text style={styles.serviceChipText}>Até {selectedStore.max_radius_km} km</Text></View>}</View>
-      <Text style={[styles.storeStatusBanner,selectedStore.open_now?styles.storeOpenBanner:styles.storeClosedBanner]}>{selectedStore.open_now?"ABERTA AGORA":"FECHADA AGORA"}</Text>
+      <Text style={[styles.storeStatusBanner,selectedStore.open_now?styles.storeOpenBanner:styles.storeClosedBanner]}>{selectedStore.orders_paused?"PEDIDOS PAUSADOS":selectedStore.open_now?"ABERTA AGORA":"FECHADA AGORA"}</Text>
+      {selectedStore.orders_paused&&<Text style={styles.meta}>A loja pausou novos pedidos temporariamente. O cardápio continua disponível para consulta.</Text>}
       {!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled&&<Text style={styles.storeClosedBanner}>Pedidos temporariamente indisponíveis nesta loja.</Text>}
       {!!message&&<Text style={styles.notice}>{message}</Text>}
 
@@ -623,7 +626,7 @@ export default function App(){
       </View>
       {!availablePaymentMethods.includes("PIX")&&<Text style={styles.meta}>PIX será exibido automaticamente quando a Efí Bank estiver ativada pela Matriz.</Text>}
       <View style={styles.totalBox}><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>Itens</Text><Text style={styles.checkoutSummaryValue}>{brl(cartSubtotal)}</Text></View><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>{deliveryType==="PICKUP"?"Retirada":"Frete"}</Text><Text style={styles.checkoutSummaryValue}>{deliveryType==="PICKUP"?"Grátis":estimatedDeliveryFee==null?"Calcule acima":estimatedDeliveryFee===0?"Grátis":brl(estimatedDeliveryFee)}</Text></View>{deliveryType==="DELIVERY"&&deliveryPreviewUsable&&deliveryPreview&&freeDeliveryApplies&&deliveryPreview.fee>0&&<Text style={styles.checkoutSaving}>Você economiza {brl(deliveryPreview.fee)} no frete com a promoção ativa.</Text>}<View style={styles.checkoutDivider}/><Text style={styles.checkoutTotalLabel}>Total estimado antes do cupom</Text><Text style={styles.total}>{brl(checkoutEstimatedTotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão, número e CVV são tokenizados pela Efí dentro de uma tela segura e não ficam armazenados no CLICK-FOOD.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
-      <Pressable style={[styles.checkout,(!cart.length||minimumMissing>0||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||minimumMissing>0||placing||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":minimumMissing>0?`FALTAM ${brl(minimumMissing)}`:deliveryType==="DELIVERY"&&!selectedAddressId?"SELECIONE UM ENDEREÇO":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
+      <Pressable style={[styles.checkout,(!cart.length||minimumMissing>0||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||minimumMissing>0||placing||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{selectedStore.orders_paused?"PEDIDOS PAUSADOS":!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":minimumMissing>0?`FALTAM ${brl(minimumMissing)}`:deliveryType==="DELIVERY"&&!selectedAddressId?"SELECIONE UM ENDEREÇO":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
     </ScrollView>
     {pendingCardOrder&&cardTokenization&&<EfiCardPayment visible config={cardTokenization} order={pendingCardOrder} defaults={{name:String(session.user.user_metadata?.full_name??""),email:String(session.user.email??""),phone:String(session.user.user_metadata?.phone??"")}} onCancel={cancelPendingCardPayment} onComplete={completeCardPayment}/>}
     </SafeAreaView>;
@@ -638,12 +641,13 @@ export default function App(){
         <View style={styles.discoveryTopRow}>
           {store.logo_url?<Image source={{uri:store.logo_url}} style={styles.discoveryLogo}/>:<View style={[styles.discoveryLogoFallback,{backgroundColor:store.primary_color||"#f4c400"}]}><Text style={styles.discoveryLogoText}>CF</Text></View>}
           <View style={styles.discoveryTitleBlock}>{!!store.slogan&&<Text numberOfLines={1} style={styles.discoverySlogan}>{store.slogan}</Text>}<Text numberOfLines={1} style={styles.discoveryName}>{store.name}</Text></View>
-          <Text style={[styles.storeStatus,store.open_now&&orderingEnabled?styles.storeOpen:styles.storeClosed]}>{!orderingEnabled?"INDISPONÍVEL":store.open_now?"ABERTA":"FECHADA"}</Text>
+          <Text style={[styles.storeStatus,store.open_now&&orderingEnabled?styles.storeOpen:styles.storeClosed]}>{!orderingEnabled?"INDISPONÍVEL":store.orders_paused?"PAUSADA":store.open_now?"ABERTA":"FECHADA"}</Text>
         </View>
         <Text numberOfLines={2} style={styles.discoveryDescription}>{store.description||"Cardápio disponível no CLICK-FOOD"}</Text>
         <View style={styles.discoveryServices}>{store.clickfood_delivery_enabled&&<View style={styles.discoveryServiceChip}><Text style={styles.discoveryServiceText}>🛵 CLICK-FOOD</Text></View>}{store.own_delivery_enabled&&<View style={styles.discoveryServiceChip}><Text style={styles.discoveryServiceText}>🏪 Entrega da loja</Text></View>}{store.pickup_enabled&&<View style={styles.discoveryServiceChip}><Text style={styles.discoveryServiceText}>🥡 Retirada</Text></View>}{store.max_radius_km!=null&&deliveryEnabled&&<View style={styles.discoveryServiceChip}><Text style={styles.discoveryServiceText}>Até {store.max_radius_km} km</Text></View>}</View>
         <View style={styles.discoveryMetaRow}><Text style={styles.discoveryMeta}>Pedido mínimo {brl(store.minimum_order)}</Text><Text style={styles.discoveryDot}>•</Text><Text style={styles.discoveryMeta}>Preparo ~{store.average_preparation_time} min</Text></View>
         {!orderingEnabled&&<Text style={styles.discoveryUnavailableText}>Pedidos temporariamente indisponíveis</Text>}
+        {store.orders_paused&&orderingEnabled&&<Text style={styles.discoveryUnavailableText}>Novos pedidos pausados temporariamente</Text>}
       </View>
     </Pressable>;
   };
