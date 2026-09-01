@@ -605,15 +605,8 @@ export default function App(){
           <Text style={styles.productName}>{address.label||"Endereço"}</Text><Text style={styles.meta}>{address.street}, {address.number}{address.district?` • ${address.district}`:""}</Text>
         </Pressable>)}
         {!!selectedAddressId&&<View style={styles.deliveryPreviewCard}><View style={{flex:1}}><Text style={styles.deliveryPreviewTitle}>{deliveryPreviewUsable&&deliveryPreview?`Frete para ${deliveryPreview.distanceKm.toFixed(2)} km`:"Calcule o frete antes de finalizar"}</Text><Text style={styles.deliveryPreviewMeta}>{deliveryPreviewUsable&&deliveryPreview?(freeDeliveryApplies&&deliveryPreview.fee>0?`Promoção ativa: de ${brl(deliveryPreview.fee)} por grátis`:`Cotação válida por até 10 minutos`):"A cotação valida distância, raio e tabela configurada pela loja."}</Text></View>{deliveryPreviewUsable&&deliveryPreview&&<Text style={styles.deliveryPreviewPrice}>{freeDeliveryApplies?"GRÁTIS":brl(deliveryPreview.fee)}</Text>}<Pressable style={[styles.deliveryPreviewButton,deliveryPreviewBusy&&styles.disabled]} disabled={deliveryPreviewBusy} onPress={previewDeliveryQuote}><Text style={styles.deliveryPreviewButtonText}>{deliveryPreviewBusy?"CALCULANDO...":deliveryPreviewUsable?"RECALCULAR":"CALCULAR FRETE"}</Text></Pressable></View>}
-        <View style={styles.addressForm}>
-          <Text style={styles.formTitle}>Adicionar endereço usando minha localização atual</Text>
-          <TextInput style={styles.input} placeholder="Nome (Casa, Trabalho...)" value={addressForm.label} onChangeText={value=>setAddressForm({...addressForm,label:value})}/>
-          <TextInput style={styles.input} placeholder="Rua/Avenida" value={addressForm.street} onChangeText={value=>setAddressForm({...addressForm,street:value})}/>
-          <TextInput style={styles.input} placeholder="Número" value={addressForm.number} onChangeText={value=>setAddressForm({...addressForm,number:value})}/>
-          <TextInput style={styles.input} placeholder="Bairro" value={addressForm.district} onChangeText={value=>setAddressForm({...addressForm,district:value})}/>
-          <TextInput style={styles.input} placeholder="Referência" value={addressForm.reference} onChangeText={value=>setAddressForm({...addressForm,reference:value})}/>
-          <Pressable style={styles.secondaryButton} onPress={saveAddressWithLocation} disabled={savingAddress}><Text style={styles.secondaryText}>{savingAddress?"SALVANDO...":"SALVAR ENDEREÇO + GPS"}</Text></Pressable>
-        </View>
+        {!addresses.length&&<Text style={styles.notice}>Você ainda não possui endereço salvo. Use o menu ☰ no topo e abra “Meus endereços” para cadastrar o local exato no mapa.</Text>}
+        <Text style={styles.meta}>Para adicionar, editar ou ajustar a localização GPS, use Menu ☰ → Meus endereços.</Text>
       </>}
 
       <Text style={styles.section}>Cupom</Text>
