@@ -5,28 +5,30 @@ import { supabase } from "../../lib/supabase";
 
 type StoreAccess={id:string;name:string;role:string};
 type Category={id:string;name:string;active:boolean};
-type Product={id:string;name:string;description:string|null;image_url:string|null;price:number;promotional_price:number|null;active:boolean;category_id:string|null};
+type Product={id:string;name:string;description:string|null;image_url:string|null;price:number;promotional_price:number|null;active:boolean;category_id:string|null;available_delivery:boolean;available_pos:boolean;control_inventory:boolean};
+type ProductForm={name:string;description:string;price:string;promotionalPrice:string;categoryId:string;availableDelivery:boolean;availablePos:boolean};
 
 const brl=(v:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v||0);
 const allowedTypes=new Set(["image/jpeg","image/png","image/webp"]);
 const maxImageBytes=8*1024*1024;
+const blankForm:ProductForm={name:"",description:"",price:"",promotionalPrice:"",categoryId:"",availableDelivery:true,availablePos:true};
 
 export default function ProdutosPage(){
- const[loading,setLoading]=useState(true);const[store,setStore]=useState<StoreAccess|null>(null);const[categories,setCategories]=useState<Category[]>([]);const[products,setProducts]=useState<Product[]>([]);const[notice,setNotice]=useState("");const[saving,setSaving]=useState(false);const[imageFile,setImageFile]=useState<File|null>(null);const[imagePreview,setImagePreview]=useState("");
- const[form,setForm]=useState({name:"",description:"",price:"",promotionalPrice:"",categoryId:""});
+ const[loading,setLoading]=useState(true);const[store,setStore]=useState<StoreAccess|null>(null);const[categories,setCategories]=useState<Category[]>([]);const[products,setProducts]=useState<Product[]>([]);const[notice,setNotice]=useState("");const[saving,setSaving]=useState(false);const[imageFile,setImageFile]=useState<File|null>(null);const[imagePreview,setImagePreview]=useState("");const[categoryName,setCategoryName]=useState("");
+ const[form,setForm]=useState<ProductForm>(blankForm);const[editing,setEditing]=useState<Product|null>(null);const[editForm,setEditForm]=useState<ProductForm>(blankForm);
  const canManage=store?.role==="OWNER"||store?.role==="MANAGER";
- const activeCount=products.filter(p=>p.active).length;const withImage=products.filter(p=>Boolean(p.image_url)).length;
+ const activeCount=products.filter(p=>p.active).length;const withImage=products.filter(p=>Boolean(p.image_url)).length;const deliveryCount=products.filter(p=>p.active&&p.available_delivery).length;const posCount=products.filter(p=>p.active&&p.available_pos).length;
  const selectedCategory=useMemo(()=>new Map(categories.map(c=>[c.id,c.name])),[categories]);
 
  async function load(){
-  setLoading(true);setNotice("");
+  setLoading(true);
   const{data:s}=await supabase.auth.getSession();
   if(!s.session){setStore(null);setNotice("Entre no Painel Lojista primeiro.");setLoading(false);return;}
   const{data:m,error:membershipError}=await supabase.from("store_memberships").select("store_id,role,stores!inner(name)").eq("user_id",s.session.user.id).eq("active",true).limit(1);
   if(membershipError||!m?.length){setStore(null);setNotice("Sua conta ainda não está vinculada a uma loja.");setLoading(false);return;}
   const row:any=m[0],rel=Array.isArray(row.stores)?row.stores[0]:row.stores;const access={id:String(row.store_id),name:String(rel?.name??"Minha loja"),role:String(row.role)};setStore(access);
   const[pR,cR]=await Promise.all([
-   supabase.from("products").select("id,name,description,image_url,price,promotional_price,active,category_id").eq("store_id",access.id).order("created_at",{ascending:false}),
+   supabase.from("products").select("id,name,description,image_url,price,promotional_price,active,category_id,available_delivery,available_pos,control_inventory").eq("store_id",access.id).order("created_at",{ascending:false}),
    supabase.from("categories").select("id,name,active").eq("store_id",access.id).order("sort_order").order("name")
   ]);
   if(pR.error||cR.error){setNotice("Não foi possível carregar o catálogo agora.");setLoading(false);return;}
@@ -35,61 +37,48 @@ export default function ProdutosPage(){
  useEffect(()=>{void load();},[]);
  useEffect(()=>()=>{if(imagePreview.startsWith("blob:"))URL.revokeObjectURL(imagePreview)},[imagePreview]);
 
- function selectImage(e:ChangeEvent<HTMLInputElement>){
-  const file=e.target.files?.[0]??null;
-  if(!file){setImageFile(null);setImagePreview("");return;}
-  if(!allowedTypes.has(file.type)){setNotice("Use uma imagem JPG, PNG ou WEBP.");e.target.value="";return;}
-  if(file.size>maxImageBytes){setNotice("A imagem deve ter no máximo 8 MB.");e.target.value="";return;}
-  if(imagePreview.startsWith("blob:"))URL.revokeObjectURL(imagePreview);setImageFile(file);setImagePreview(URL.createObjectURL(file));setNotice("");
- }
+ function validateProductForm(value:ProductForm){const price=Number(value.price.replace(",","."));const promotionalPrice=value.promotionalPrice.trim()?Number(value.promotionalPrice.replace(",",".")):null;if(!value.name.trim()||!Number.isFinite(price)||price<=0)return{error:"Informe o nome e um preço válido.",price:0,promotionalPrice:null};if(promotionalPrice!=null&&(!Number.isFinite(promotionalPrice)||promotionalPrice<=0||promotionalPrice>=price))return{error:"O preço promocional deve ser maior que zero e menor que o preço normal.",price,promotionalPrice:null};if(!value.availableDelivery&&!value.availablePos)return{error:"O produto precisa estar disponível no Delivery, no PDV ou nos dois.",price,promotionalPrice};return{error:"",price,promotionalPrice};}
+ function selectImage(e:ChangeEvent<HTMLInputElement>){const file=e.target.files?.[0]??null;if(!file){setImageFile(null);setImagePreview("");return;}if(!allowedTypes.has(file.type)){setNotice("Use uma imagem JPG, PNG ou WEBP.");e.target.value="";return;}if(file.size>maxImageBytes){setNotice("A imagem deve ter no máximo 8 MB.");e.target.value="";return;}if(imagePreview.startsWith("blob:"))URL.revokeObjectURL(imagePreview);setImageFile(file);setImagePreview(URL.createObjectURL(file));setNotice("");}
+ async function uploadProductImage(file:File){if(!store)throw new Error("STORE_REQUIRED");const ext=file.type==="image/png"?"png":file.type==="image/webp"?"webp":"jpg";const path=`${store.id}/products/${crypto.randomUUID()}.${ext}`;const{error}=await supabase.storage.from("store-media").upload(path,file,{contentType:file.type,cacheControl:"3600",upsert:false});if(error)throw error;const url=supabase.storage.from("store-media").getPublicUrl(path).data.publicUrl;return{path,url};}
 
- async function uploadProductImage(file:File){
-  if(!store)throw new Error("STORE_REQUIRED");
-  const ext=file.type==="image/png"?"png":file.type==="image/webp"?"webp":"jpg";const path=`${store.id}/products/${crypto.randomUUID()}.${ext}`;
-  const{error}=await supabase.storage.from("store-media").upload(path,file,{contentType:file.type,cacheControl:"3600",upsert:false});if(error)throw error;
-  const url=supabase.storage.from("store-media").getPublicUrl(path).data.publicUrl;return{path,url};
- }
+ async function createCategory(e:FormEvent){e.preventDefault();if(!store||!canManage||!categoryName.trim())return;const{error}=await supabase.from("categories").insert({store_id:store.id,name:categoryName.trim(),active:true});if(error){setNotice("Não foi possível criar a categoria.");return;}setCategoryName("");setNotice("Categoria criada.");await load();}
 
  async function createProduct(e:FormEvent){
-  e.preventDefault();if(!store||!canManage)return;
-  const price=Number(form.price.replace(",","."));const promotionalPrice=form.promotionalPrice.trim()?Number(form.promotionalPrice.replace(",",".")):null;
-  if(!form.name.trim()||!Number.isFinite(price)||price<=0){setNotice("Informe o nome e um preço válido.");return;}
-  if(promotionalPrice!=null&&(!Number.isFinite(promotionalPrice)||promotionalPrice<=0||promotionalPrice>=price)){setNotice("O preço promocional deve ser maior que zero e menor que o preço normal.");return;}
+  e.preventDefault();if(!store||!canManage)return;const parsed=validateProductForm(form);if(parsed.error){setNotice(parsed.error);return;}
   setSaving(true);setNotice("");let uploadedPath="";
-  try{
-   let imageUrl:string|null=null;
-   if(imageFile){const uploaded=await uploadProductImage(imageFile);uploadedPath=uploaded.path;imageUrl=uploaded.url;}
-   const{error}=await supabase.from("products").insert({store_id:store.id,category_id:form.categoryId||null,name:form.name.trim(),description:form.description.trim()||null,image_url:imageUrl,price,promotional_price:promotionalPrice,active:true,available_delivery:true,available_pos:true,control_inventory:false});
-   if(error){if(uploadedPath)await supabase.storage.from("store-media").remove([uploadedPath]);throw error;}
-   setForm({name:"",description:"",price:"",promotionalPrice:"",categoryId:""});setImageFile(null);if(imagePreview.startsWith("blob:"))URL.revokeObjectURL(imagePreview);setImagePreview("");setNotice("Produto cadastrado com sucesso. A foto já ficará disponível no cardápio do cliente.");await load();
-  }catch{setNotice("Não foi possível cadastrar o produto. Verifique os dados e tente novamente.");}finally{setSaving(false);}
+  try{let imageUrl:string|null=null;if(imageFile){const uploaded=await uploadProductImage(imageFile);uploadedPath=uploaded.path;imageUrl=uploaded.url;}const{error}=await supabase.from("products").insert({store_id:store.id,category_id:form.categoryId||null,name:form.name.trim(),description:form.description.trim()||null,image_url:imageUrl,price:parsed.price,promotional_price:parsed.promotionalPrice,active:true,available_delivery:form.availableDelivery,available_pos:form.availablePos,control_inventory:false});if(error){if(uploadedPath)await supabase.storage.from("store-media").remove([uploadedPath]);throw error;}setForm(blankForm);setImageFile(null);if(imagePreview.startsWith("blob:"))URL.revokeObjectURL(imagePreview);setImagePreview("");setNotice("Produto cadastrado. A foto e a disponibilidade já foram publicadas para os canais escolhidos.");await load();}catch{setNotice("Não foi possível cadastrar o produto. Verifique os dados e tente novamente.");}finally{setSaving(false);}
  }
 
- async function toggleProduct(p:Product){if(!store||!canManage)return;const{error}=await supabase.from("products").update({active:!p.active,updated_at:new Date().toISOString()}).eq("id",p.id).eq("store_id",store.id);setNotice(error?"Não foi possível alterar o produto.":p.active?"Produto pausado.":"Produto ativado.");if(!error)await load();}
-
- async function replaceImage(p:Product,file:File|null){
-  if(!store||!canManage||!file)return;if(!allowedTypes.has(file.type)||file.size>maxImageBytes){setNotice("Use JPG, PNG ou WEBP de até 8 MB.");return;}setNotice("Enviando nova foto...");
-  try{const uploaded=await uploadProductImage(file);const{error}=await supabase.from("products").update({image_url:uploaded.url,updated_at:new Date().toISOString()}).eq("id",p.id).eq("store_id",store.id);if(error){await supabase.storage.from("store-media").remove([uploaded.path]);throw error;}setNotice("Foto do produto atualizada.");await load();}catch{setNotice("Não foi possível atualizar a foto do produto.");}
- }
+ function startEdit(p:Product){setEditing(p);setEditForm({name:p.name,description:p.description??"",price:String(p.price).replace(".",","),promotionalPrice:p.promotional_price==null?"":String(p.promotional_price).replace(".",","),categoryId:p.category_id??"",availableDelivery:p.available_delivery,availablePos:p.available_pos});setNotice("");}
+ async function saveEdit(e:FormEvent){e.preventDefault();if(!store||!editing||!canManage)return;const parsed=validateProductForm(editForm);if(parsed.error){setNotice(parsed.error);return;}setSaving(true);const{error}=await supabase.from("products").update({name:editForm.name.trim(),description:editForm.description.trim()||null,price:parsed.price,promotional_price:parsed.promotionalPrice,category_id:editForm.categoryId||null,available_delivery:editForm.availableDelivery,available_pos:editForm.availablePos,updated_at:new Date().toISOString()}).eq("id",editing.id).eq("store_id",store.id);setSaving(false);if(error){setNotice("Não foi possível salvar as alterações do produto.");return;}setNotice("Produto atualizado em todos os canais.");setEditing(null);await load();}
+ async function toggleProduct(p:Product){if(!store||!canManage)return;const{error}=await supabase.from("products").update({active:!p.active,updated_at:new Date().toISOString()}).eq("id",p.id).eq("store_id",store.id);setNotice(error?"Não foi possível alterar o produto.":p.active?"Produto pausado. Ele deixa de aparecer para novas vendas.":"Produto ativado.");if(!error)await load();}
+ async function replaceImage(p:Product,file:File|null){if(!store||!canManage||!file)return;if(!allowedTypes.has(file.type)||file.size>maxImageBytes){setNotice("Use JPG, PNG ou WEBP de até 8 MB.");return;}setNotice("Enviando nova foto...");try{const uploaded=await uploadProductImage(file);const{error}=await supabase.from("products").update({image_url:uploaded.url,updated_at:new Date().toISOString()}).eq("id",p.id).eq("store_id",store.id);if(error){await supabase.storage.from("store-media").remove([uploaded.path]);throw error;}setNotice("Foto do produto atualizada. O cliente verá a nova imagem no cardápio.");await load();}catch{setNotice("Não foi possível atualizar a foto do produto.");}}
 
  if(loading)return <main className="productAdminPage"><div className="productAdminShell">Carregando produtos...</div></main>;
  if(!store)return <main className="productAdminPage"><div className="productAdminShell"><h1>Produtos</h1><p>{notice}</p><a className="productBack" href="/">Voltar ao painel</a></div></main>;
  return <main className="productAdminPage"><div className="productAdminShell">
-  <header className="productHero"><div><span className="productEyebrow">CATÁLOGO CLICK-FOOD</span><h1>Produtos</h1><p>{store.name} • cadastre fotos, preços e disponibilidade que aparecem para o cliente.</p></div><div className="productHeroActions"><a className="productBack" href="/">← Painel</a><button onClick={()=>void load()}>Atualizar</button></div></header>
+  <header className="productHero"><div><span className="productEyebrow">CATÁLOGO CLICK-FOOD</span><h1>Produtos</h1><p>{store.name} • fotos, preços, promoções e disponibilidade do Delivery/PDV em um só lugar.</p></div><div className="productHeroActions"><a className="productBack" href="/">← Painel</a><a className="productBack" href="/estoque">Estoque</a><a className="productBack" href="/catalogo-avancado">Adicionais</a><button onClick={()=>void load()}>Atualizar</button></div></header>
   {notice&&<div className="productNotice">{notice}</div>}
-  <section className="productStats"><article><span>Produtos</span><b>{products.length}</b></article><article><span>Ativos</span><b>{activeCount}</b></article><article><span>Com foto</span><b>{withImage}</b></article><article><span>Sem foto</span><b>{products.length-withImage}</b></article></section>
-  <section className="productWorkspace">
+  <section className="productStats"><article><span>Produtos</span><b>{products.length}</b></article><article><span>Delivery ativos</span><b>{deliveryCount}</b></article><article><span>PDV ativos</span><b>{posCount}</b></article><article><span>Com foto</span><b>{withImage}/{products.length}</b></article></section>
+
+  {editing&&<section className="productCatalogCard" style={{marginBottom:16,border:"2px solid #e2bd00"}}><div className="productSectionTitle"><div><span>EDITANDO PRODUTO</span><h2>{editing.name}</h2></div><button onClick={()=>setEditing(null)}>Fechar</button></div><form onSubmit={saveEdit} style={{display:"grid",gap:10}}><div className="productFormRow"><label>Nome<input value={editForm.name} onChange={e=>setEditForm({...editForm,name:e.target.value})}/></label><label>Categoria<select value={editForm.categoryId} onChange={e=>setEditForm({...editForm,categoryId:e.target.value})}><option value="">Sem categoria</option>{categories.filter(c=>c.active||c.id===editing.category_id).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label></div><label style={{display:"grid",gap:6,fontSize:12,fontWeight:800}}>Descrição<textarea style={{minHeight:80,border:"1px solid #dfe2e7",borderRadius:12,padding:11}} value={editForm.description} onChange={e=>setEditForm({...editForm,description:e.target.value})}/></label><div className="productFormRow"><label>Preço<input value={editForm.price} inputMode="decimal" onChange={e=>setEditForm({...editForm,price:e.target.value})}/></label><label>Preço promocional<input value={editForm.promotionalPrice} inputMode="decimal" onChange={e=>setEditForm({...editForm,promotionalPrice:e.target.value})}/></label></div><div style={{display:"flex",gap:18,flexWrap:"wrap",padding:"8px 0"}}><label><input type="checkbox" checked={editForm.availableDelivery} onChange={e=>setEditForm({...editForm,availableDelivery:e.target.checked})}/> Disponível no Delivery</label><label><input type="checkbox" checked={editForm.availablePos} onChange={e=>setEditForm({...editForm,availablePos:e.target.checked})}/> Disponível no PDV</label></div><button className="productPrimary" disabled={saving}>{saving?"SALVANDO...":"SALVAR ALTERAÇÕES"}</button></form></section>}
+
+  <section style={{display:"grid",gridTemplateColumns:"minmax(300px,390px) 1fr",gap:16,alignItems:"start",marginBottom:16}}>
    <form className="productFormCard" onSubmit={createProduct}><div className="productSectionTitle"><div><span>NOVO PRODUTO</span><h2>Cadastro completo</h2></div></div>
     <div className="productPhotoDrop">{imagePreview?<img src={imagePreview} alt="Prévia do produto"/>:<div><strong>📷</strong><b>Foto do produto</b><small>JPG, PNG ou WEBP • até 8 MB</small></div>}<label>Escolher imagem<input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectImage}/></label></div>
     <label>Nome do produto<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Ex.: X-Bacon" required/></label>
     <label>Descrição<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Ingredientes, tamanho e detalhes que ajudam o cliente a escolher."/></label>
     <div className="productFormRow"><label>Categoria<select value={form.categoryId} onChange={e=>setForm({...form,categoryId:e.target.value})}><option value="">Sem categoria</option>{categories.filter(c=>c.active).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Preço<input value={form.price} onChange={e=>setForm({...form,price:e.target.value})} inputMode="decimal" placeholder="0,00" required/></label></div>
     <label>Preço promocional <small>(opcional)</small><input value={form.promotionalPrice} onChange={e=>setForm({...form,promotionalPrice:e.target.value})} inputMode="decimal" placeholder="0,00"/></label>
+    <div style={{display:"grid",gap:7,margin:"10px 0",fontSize:12,fontWeight:750}}><label><input type="checkbox" checked={form.availableDelivery} onChange={e=>setForm({...form,availableDelivery:e.target.checked})}/> Vender no app Delivery</label><label><input type="checkbox" checked={form.availablePos} onChange={e=>setForm({...form,availablePos:e.target.checked})}/> Vender no PDV/balcão</label></div>
     <button className="productPrimary" disabled={saving||!canManage}>{saving?"SALVANDO...":"CADASTRAR PRODUTO"}</button>{!canManage&&<p className="productHint">Somente proprietário ou gerente pode cadastrar produtos.</p>}
    </form>
-   <section className="productCatalogCard"><div className="productSectionTitle"><div><span>CATÁLOGO</span><h2>Produtos cadastrados</h2></div><b>{products.length}</b></div>
-    <div className="productCards">{products.map(p=><article className="productCard" key={p.id}><div className="productThumb">{p.image_url?<img src={p.image_url} alt={p.name}/>:<div><span>🍽️</span><small>Sem foto</small></div>}<span className={`productStatus ${p.active?"isActive":"isPaused"}`}>{p.active?"ATIVO":"PAUSADO"}</span></div><div className="productCardBody"><div><h3>{p.name}</h3><p>{p.description||"Sem descrição"}</p></div><div className="productPrice">{p.promotional_price!=null&&<small>{brl(p.price)}</small>}<strong>{brl(p.promotional_price??p.price)}</strong></div><div className="productMeta">{p.category_id?selectedCategory.get(p.category_id)??"Categoria":"Sem categoria"}</div><div className="productCardActions"><label>📷 {p.image_url?"Trocar foto":"Adicionar foto"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>void replaceImage(p,e.target.files?.[0]??null)}/></label><button onClick={()=>void toggleProduct(p)} disabled={!canManage}>{p.active?"Pausar":"Ativar"}</button></div></div></article>)}{!products.length&&<div className="productEmpty">Nenhum produto cadastrado ainda.</div>}</div>
-   </section>
+
+   <section className="productCatalogCard"><div className="productSectionTitle"><div><span>ORGANIZAÇÃO</span><h2>Categorias do cardápio</h2></div><b>{categories.length}</b></div><form onSubmit={createCategory} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,marginBottom:14}}><input style={{border:"1px solid #dfe2e7",borderRadius:12,padding:"11px 12px"}} placeholder="Ex.: Hambúrgueres, Bebidas, Sobremesas" value={categoryName} onChange={e=>setCategoryName(e.target.value)}/><button className="productPrimary" style={{margin:0,width:"auto"}} disabled={!canManage}>CRIAR</button></form><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{categories.map(c=><span key={c.id} style={{padding:"8px 10px",borderRadius:999,background:c.active?"#fff4b8":"#eef0f3",fontSize:11,fontWeight:800}}>{c.name}{!c.active?" • pausada":""}</span>)}{!categories.length&&<span className="productHint">Crie categorias para organizar melhor a experiência do cliente.</span>}</div><div style={{marginTop:20,padding:16,borderRadius:15,background:"#f7f8fa"}}><b>Fluxo recomendado</b><p style={{fontSize:12,color:"#6f7580",lineHeight:1.5}}>1. Crie categorias. 2. Cadastre produtos com fotos. 3. Configure tamanhos e adicionais em <a href="/catalogo-avancado">Catálogo avançado</a>. 4. Se usar controle de saldo, configure em <a href="/estoque">Estoque</a>.</p></div></section>
+  </section>
+
+  <section className="productCatalogCard"><div className="productSectionTitle"><div><span>CATÁLOGO</span><h2>Produtos cadastrados</h2></div><b>{products.length}</b></div>
+   <div className="productCards">{products.map(p=><article className="productCard" key={p.id}><div className="productThumb">{p.image_url?<img src={p.image_url} alt={p.name}/>:<div><span>🍽️</span><small>Sem foto</small></div>}<span className={`productStatus ${p.active?"isActive":"isPaused"}`}>{p.active?"ATIVO":"PAUSADO"}</span></div><div className="productCardBody"><div><h3>{p.name}</h3><p>{p.description||"Sem descrição"}</p></div><div className="productPrice">{p.promotional_price!=null&&<small>{brl(p.price)}</small>}<strong>{brl(p.promotional_price??p.price)}</strong></div><div className="productMeta">{p.category_id?selectedCategory.get(p.category_id)??"Categoria":"Sem categoria"} • {p.available_delivery?"Delivery":""}{p.available_delivery&&p.available_pos?" + ":""}{p.available_pos?"PDV":""}{p.control_inventory?" • Estoque controlado":""}</div><div className="productCardActions"><label>📷 {p.image_url?"Trocar foto":"Adicionar foto"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>void replaceImage(p,e.target.files?.[0]??null)}/></label><button onClick={()=>startEdit(p)} disabled={!canManage}>Editar</button><button onClick={()=>void toggleProduct(p)} disabled={!canManage}>{p.active?"Pausar":"Ativar"}</button></div></div></article>)}{!products.length&&<div className="productEmpty">Nenhum produto cadastrado ainda.</div>}</div>
   </section>
  </div></main>;
 }
