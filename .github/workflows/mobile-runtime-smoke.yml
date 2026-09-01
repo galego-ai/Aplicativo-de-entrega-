@@ -1,6 +1,6 @@
 name: CLICK-FOOD Android Runtime Smoke
 
-# Smoke final v2: React do app primeiro, dependências hoistadas depois, APK Release aberto no Android.
+# Smoke final v3: compila Release, instala no Android e confirma que o processo permanece vivo.
 on:
   workflow_dispatch:
   push:
@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 50
     env:
       GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+      NODE_ENV: production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,7 +48,7 @@ jobs:
         run: npx expo export --platform android --output-dir /tmp/export-${{ matrix.app }} --clear
       - name: Gerar Android ${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}
-        run: npx expo prebuild --platform android --non-interactive
+        run: CI=1 npx expo prebuild --platform android
       - name: Compilar Release ${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}/android
         run: |
@@ -66,20 +67,20 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            set -o pipefail
             APK="apps/${{ matrix.app }}/android/app/build/outputs/apk/release/app-release.apk"
             adb install -r "$APK"
             adb logcat -c
             adb shell monkey -p "${{ matrix.package }}" -c android.intent.category.LAUNCHER 1
-            sleep 15
+            sleep 20
             adb logcat -d -v threadtime > "${{ matrix.app }}-logcat.txt"
-            echo "PID=$(adb shell pidof '${{ matrix.package }}' | tr -d '\r')"
-            if ! adb shell pidof "${{ matrix.package }}" >/dev/null; then
+            PID=$(adb shell pidof "${{ matrix.package }}" | tr -d '\r')
+            echo "PID=$PID"
+            if [ -z "$PID" ]; then
               echo "APP_ENCERROU_INESPERADAMENTE"
               grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError|Invalid hook" "${{ matrix.app }}-logcat.txt" | tail -250 || true
               exit 1
             fi
-            if grep -qE "FATAL EXCEPTION.*${{ matrix.package }}|Process: ${{ matrix.package }}.*FATAL" "${{ matrix.app }}-logcat.txt"; then
+            if grep -q "Process: ${{ matrix.package }}" "${{ matrix.app }}-logcat.txt" && grep -q "FATAL EXCEPTION" "${{ matrix.app }}-logcat.txt"; then
               grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError|Invalid hook" "${{ matrix.app }}-logcat.txt" | tail -250 || true
               exit 1
             fi
