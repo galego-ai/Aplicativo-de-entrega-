@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 
@@ -37,6 +37,7 @@ export default function DriverLiveMap({
   location: DriverLocation | null;
   active: ActiveDelivery | null;
 }) {
+  const mapRef = useRef<MapView | null>(null);
   const pickup = coordinate(active?.pickup.latitude, active?.pickup.longitude);
   const destination = coordinate(active?.destination?.latitude, active?.destination?.longitude);
   const current = location ? { latitude: location.latitude, longitude: location.longitude } : null;
@@ -47,6 +48,25 @@ export default function DriverLiveMap({
   );
   const navigationTarget = customerPhase ? destination : pickup;
   const navigationLabel = customerPhase ? "ABRIR ROTA ATÉ O CLIENTE" : "ABRIR ROTA ATÉ A LOJA";
+  const targetLabel = customerPhase ? "CLIENTE" : "LOJA";
+
+  function fitMap() {
+    if (!mapRef.current || !center) return;
+    const points = [current, navigationTarget].filter((item): item is Coordinate => Boolean(item));
+    if (points.length >= 2) {
+      mapRef.current.fitToCoordinates(points, {
+        animated: true,
+        edgePadding: { top: 56, right: 48, bottom: 56, left: 48 },
+      });
+      return;
+    }
+    mapRef.current.animateToRegion({ ...center, latitudeDelta: 0.018, longitudeDelta: 0.018 }, 350);
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(fitMap, 120);
+    return () => clearTimeout(timer);
+  }, [location?.latitude, location?.longitude, active?.status, active?.orderNumber]);
 
   async function openNavigation() {
     if (!navigationTarget) return;
@@ -59,13 +79,17 @@ export default function DriverLiveMap({
       <View style={{ flex: 1 }}>
         <Text style={styles.kicker}>{active ? `PEDIDO #${active.orderNumber}` : online ? "DISPONÍVEL" : "OFFLINE"}</Text>
         <Text style={styles.title}>{active ? "Mapa da entrega" : online ? "Sua posição no mapa" : "Última posição conhecida"}</Text>
+        {active && <Text style={styles.nextTarget}>PRÓXIMO DESTINO: {targetLabel}</Text>}
       </View>
       <View style={[styles.statusDot, online && styles.statusDotOnline]} />
     </View>
 
     {center ? <MapView
+      ref={mapRef}
       style={styles.map}
-      region={{ ...center, latitudeDelta: 0.018, longitudeDelta: 0.018 }}
+      initialRegion={{ ...center, latitudeDelta: 0.018, longitudeDelta: 0.018 }}
+      onMapReady={fitMap}
+      onLayout={fitMap}
       showsCompass
       showsScale={false}
       toolbarEnabled={false}
@@ -85,7 +109,11 @@ export default function DriverLiveMap({
     </View>}
 
     <Text style={styles.hint}>
-      {online ? "Sua posição é atualizada pelo GPS e enviada ao CLICK-FOOD enquanto você estiver online." : "O rastreamento fica pausado quando você está offline."}
+      {active && navigationTarget
+        ? `O mapa acompanha sua posição e mantém o próximo destino (${targetLabel.toLowerCase()}) visível automaticamente.`
+        : online
+          ? "Sua posição é atualizada pelo GPS e enviada ao CLICK-FOOD enquanto você estiver online."
+          : "O rastreamento fica pausado quando você está offline."}
     </Text>
 
     {active && navigationTarget && <Pressable style={styles.routeButton} onPress={openNavigation}>
@@ -99,6 +127,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 15, paddingBottom: 12, flexDirection: "row", alignItems: "center", gap: 10 },
   kicker: { color: "#f4c400", fontSize: 9, fontWeight: "900", letterSpacing: 1.2 },
   title: { color: "#fff", fontSize: 17, fontWeight: "900", marginTop: 4 },
+  nextTarget: { color: "#aaa", fontSize: 9, fontWeight: "800", marginTop: 5, letterSpacing: 0.5 },
   statusDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: "#777" },
   statusDotOnline: { backgroundColor: "#29a764" },
   map: { height: 270, width: "100%" },
