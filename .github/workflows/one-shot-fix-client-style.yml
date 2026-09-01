@@ -1,0 +1,38 @@
+name: CLICK-FOOD One-shot Fix Client Style
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-fix-client-style.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-client-style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Corrigir peso de fonte React Native
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('apps/cliente/App.tsx')
+          text = path.read_text()
+          old = 'categoryChipText:{fontSize:10,fontWeight:"850",color:"#4b4f56"}'
+          new = 'categoryChipText:{fontSize:10,fontWeight:"900",color:"#4b4f56"}'
+          if text.count(old) != 1:
+              raise SystemExit(f'Trecho esperado não encontrado exatamente uma vez: {text.count(old)}')
+          path.write_text(text.replace(old,new,1))
+          PY
+      - name: Commitar correção
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/cliente/App.tsx
+          git commit -m "Corrigir tipagem dos estilos do cardápio Cliente"
+          git push origin HEAD:main
