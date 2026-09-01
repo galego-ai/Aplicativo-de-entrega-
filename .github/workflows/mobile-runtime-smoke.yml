@@ -1,0 +1,85 @@
+name: CLICK-FOOD Android Runtime Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mobile-runtime-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: cliente
+            package: br.com.clickfood.cliente
+          - app: entregador
+            package: br.com.clickfood.entregador
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Instalar dependências
+        run: npm ci
+      - name: Gerar Android ${{ matrix.app }}
+        working-directory: apps/${{ matrix.app }}
+        run: npx expo prebuild --platform android --non-interactive
+      - name: Compilar Release ${{ matrix.app }}
+        working-directory: apps/${{ matrix.app }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+      - name: Habilitar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Abrir APK e detectar crash
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -o pipefail
+            APK="apps/${{ matrix.app }}/android/app/build/outputs/apk/release/app-release.apk"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p "${{ matrix.package }}" -c android.intent.category.LAUNCHER 1
+            sleep 15
+            adb logcat -d -v threadtime > "${{ matrix.app }}-logcat.txt"
+            echo "PID=$(adb shell pidof '${{ matrix.package }}' | tr -d '\r')"
+            if ! adb shell pidof "${{ matrix.package }}" >/dev/null; then
+              echo "APP_ENCERROU_INESPERADAMENTE"
+              grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError" "${{ matrix.app }}-logcat.txt" | tail -200 || true
+              exit 1
+            fi
+            if grep -qE "FATAL EXCEPTION.*${{ matrix.package }}|Process: ${{ matrix.package }}.*FATAL" "${{ matrix.app }}-logcat.txt"; then
+              grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError" "${{ matrix.app }}-logcat.txt" | tail -200 || true
+              exit 1
+            fi
+            grep -n -E "ReactNativeJS|AndroidRuntime|FATAL EXCEPTION|TypeError|ReferenceError" "${{ matrix.app }}-logcat.txt" | tail -100 || true
+      - name: Publicar logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-log-${{ matrix.app }}
+          path: ${{ matrix.app }}-logcat.txt
+          if-no-files-found: ignore
+          retention-days: 7
