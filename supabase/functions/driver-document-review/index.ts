@@ -15,7 +15,7 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   if(lookupError)return Response.json({error:"DOCUMENT_LOOKUP_FAILED"},{status:500});
   if(!doc)return Response.json({error:"DOCUMENT_NOT_FOUND"},{status:404});
   if(doc.status!=="PENDING")return Response.json({error:"DOCUMENT_ALREADY_REVIEWED"},{status:409});
-  const{data:driver}=await ctx.supabaseAdmin.from("drivers").select("id,user_id,status").eq("id",doc.driver_id).maybeSingle();
+  const{data:driver}=await ctx.supabaseAdmin.from("drivers").select("id,user_id,status,city_id").eq("id",doc.driver_id).maybeSingle();
   if(!driver)return Response.json({error:"DRIVER_NOT_FOUND"},{status:404});
 
   let avatarPath:string|null=null;
@@ -48,5 +48,28 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
 
   await ctx.supabaseAdmin.from("notifications").insert({user_id:driver.user_id,notification_type:body.action==="APPROVE"?"DRIVER_DOCUMENT_APPROVED":"DRIVER_DOCUMENT_REJECTED",title:body.action==="APPROVE"?"Documento aprovado":"Documento precisa ser reenviado",body:body.action==="APPROVE"?`${doc.document_type} aprovado pela equipe CLICK-FOOD.`:`${doc.document_type} recusado: ${body.reason!.trim().slice(0,240)}`,data:{driverId:driver.id,documentId:doc.id,documentType:doc.document_type,avatarPublished:Boolean(avatarUrl)}});
   await ctx.supabaseAdmin.from("audit_logs").insert({actor_id:actor,action:body.action==="APPROVE"?"DRIVER_DOCUMENT_APPROVED":"DRIVER_DOCUMENT_REJECTED",entity_type:"driver_document",entity_id:doc.id,after_data:{driver_id:doc.driver_id,document_type:doc.document_type,status:next,reason:patch.rejection_reason,avatar_published:Boolean(avatarUrl)}});
-  return Response.json({document:updated,avatarPublished:Boolean(avatarUrl),avatarUrl});
+
+  let driverActivated=false;
+  if(body.action==="APPROVE"&&driver.status==="PENDING"&&driver.city_id){
+    const{data:vehicle,error:vehicleError}=await ctx.supabaseAdmin.from("driver_vehicles").select("vehicle_type").eq("driver_id",driver.id).eq("active",true).limit(1).maybeSingle();
+    if(!vehicleError&&vehicle){
+      const required=vehicle.vehicle_type==="BICYCLE"?["PROFILE_PHOTO","IDENTITY"]:["PROFILE_PHOTO","IDENTITY","CNH","VEHICLE_DOCUMENT"];
+      const{data:approvedDocs,error:approvedDocsError}=await ctx.supabaseAdmin.from("driver_documents").select("document_type,expires_at").eq("driver_id",driver.id).eq("status","APPROVED");
+      if(!approvedDocsError){
+        const today=new Date().toISOString().slice(0,10);
+        const valid=new Set((approvedDocs??[]).filter(d=>!d.expires_at||d.expires_at>=today).map(d=>d.document_type));
+        const ready=required.every(type=>valid.has(type));
+        if(ready){
+          const{data:activated,error:activateError}=await ctx.supabaseAdmin.from("drivers").update({status:"ACTIVE",online:false}).eq("id",driver.id).eq("status","PENDING").select("id,user_id,status").maybeSingle();
+          if(!activateError&&activated){
+            driverActivated=true;
+            await ctx.supabaseAdmin.from("notifications").insert({user_id:driver.user_id,notification_type:"DRIVER_STATUS_CHANGED",title:"Cadastro aprovado",body:"Todos os documentos obrigatórios foram aprovados. Você já pode ficar online no CLICK-FOOD.",data:{driverId:driver.id,status:"ACTIVE",source:"DOCUMENT_REVIEW"}});
+            await ctx.supabaseAdmin.from("audit_logs").insert({actor_id:actor,action:"DRIVER_STATUS_CHANGED",entity_type:"driver",entity_id:driver.id,after_data:{status:"ACTIVE",source:"DOCUMENT_REVIEW_AUTO_ACTIVATION"}});
+          }
+        }
+      }
+    }
+  }
+
+  return Response.json({document:updated,avatarPublished:Boolean(avatarUrl),avatarUrl,driverActivated});
 })};
