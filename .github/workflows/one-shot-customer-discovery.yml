@@ -1,0 +1,27 @@
+name: CLICK-FOOD One-shot Customer Discovery
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-customer-discovery.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-customer-discovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Aplicar vitrine profissional
+        run: python3 scripts/patch-customer-discovery.py
+      - name: Commitar alteração
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/cliente/App.tsx
+          git commit -m "Criar vitrine profissional de restaurantes no Cliente"
+          git push origin HEAD:main
