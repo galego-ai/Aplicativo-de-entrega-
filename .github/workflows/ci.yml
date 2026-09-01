@@ -48,6 +48,32 @@ jobs:
           grep -q 'name:"DOMAIN"' "$CHAT"
           grep -q 'name:"SOCIAL_HANDLE"' "$CHAT"
 
+      - name: Proteger pausa operacional da loja
+        shell: bash
+        run: |
+          set -euo pipefail
+          MIGRATION="supabase/migrations/202609011830_manual_store_order_pause.sql"
+          PAUSE_FN="supabase/functions/store-order-pause/index.ts"
+          CATALOG="supabase/functions/store-catalog/index.ts"
+          CLIENT="apps/cliente/App.tsx"
+          LOJISTA="apps/lojista/app/StoreOrderPauseControl.tsx"
+          CREATE_ORDER="supabase/functions/create-order/index.ts"
+
+          grep -q 'orders_paused boolean not null default false' "$MIGRATION"
+          grep -q 'if v_orders_paused then return false' "$MIGRATION"
+          grep -q '\["OWNER","MANAGER"\]' "$PAUSE_FN"
+          grep -q 'STORE_ORDERS_PAUSED' "$PAUSE_FN"
+          grep -q 'STORE_ORDERS_RESUMED' "$PAUSE_FN"
+          grep -q 'update({orders_paused:body.paused})' "$PAUSE_FN"
+          grep -q 'orders_paused' "$CATALOG"
+          grep -q 'orders_paused' "$CLIENT"
+          grep -q 'store-order-pause' "$LOJISTA"
+          grep -q 'store_is_open' "$CREATE_ORDER"
+          if grep -E 'update\(\{[^}]*status:' "$PAUSE_FN"; then
+            echo "ERRO: pausa operacional não pode alterar o status administrativo da loja."
+            exit 1
+          fi
+
       - name: Build Painel Matriz
         run: npm run build:admin
 
