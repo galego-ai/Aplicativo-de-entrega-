@@ -1,5 +1,6 @@
 name: CLICK-FOOD Android Runtime Smoke
 
+# Smoke de runtime: compila Release, instala no Android e confirma que o processo permanece vivo.
 on:
   workflow_dispatch:
   push:
