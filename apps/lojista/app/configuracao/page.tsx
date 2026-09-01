@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import StoreSettings from "../StoreSettings";
+import StoreOrderPauseControl from "../StoreOrderPauseControl";
 import { supabase } from "../../lib/supabase";
 
 type Store={id:string;name:string;role:string};
@@ -12,5 +13,5 @@ export default function ConfiguracaoPage(){
  useEffect(()=>{void load();},[]);
  if(loading)return <main className="configPage"><div className="configShell"><p>Carregando configurações...</p></div></main>;
  if(!store)return <main className="configPage"><div className="configShell"><div className="logo"><span>CLICK</span>-FOOD</div><h1>Configuração da loja</h1><p>{message}</p><a className="backLink" href="/">Voltar ao painel</a></div></main>;
- return <main className="configPage"><div className="configShell"><header className="configHeader"><div><div className="logo"><span>CLICK</span>-FOOD</div><small>{store.name} • {store.role}</small><h1>Configuração da loja</h1><p>Identidade visual, dados administrativos, localização, atendimento e horários.</p></div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><a className="backLink" href="/produtos">Produtos</a><a className="backLink" href="/">← Voltar ao painel</a></div></header><div style={{marginBottom:16,border:"1px solid #e6cf62",background:"#fff9d8",borderRadius:14,padding:"13px 15px",color:"#4b3d00",fontSize:13,lineHeight:1.5}}><strong>🔒 Contatos são dados administrativos internos.</strong><br/>Telefone, WhatsApp, e-mail e redes sociais cadastrados nesta área servem somente para relacionamento da Matriz/suporte com a loja. Eles <strong>não são enviados ao catálogo público nem exibidos ao cliente</strong>. Toda compra e comunicação do pedido permanece dentro do CLICK-FOOD.</div><StoreSettings storeId={store.id} role={store.role} onChanged={()=>void load()}/></div></main>;
+ return <main className="configPage"><div className="configShell"><header className="configHeader"><div><div className="logo"><span>CLICK</span>-FOOD</div><small>{store.name} • {store.role}</small><h1>Configuração da loja</h1><p>Identidade visual, dados administrativos, localização, atendimento e horários.</p></div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><a className="backLink" href="/produtos">Produtos</a><a className="backLink" href="/">← Voltar ao painel</a></div></header><div style={{marginBottom:16,border:"1px solid #e6cf62",background:"#fff9d8",borderRadius:14,padding:"13px 15px",color:"#4b3d00",fontSize:13,lineHeight:1.5}}><strong>🔒 Contatos são dados administrativos internos.</strong><br/>Telefone, WhatsApp, e-mail e redes sociais cadastrados nesta área servem somente para relacionamento da Matriz/suporte com a loja. Eles <strong>não são enviados ao catálogo público nem exibidos ao cliente</strong>. Toda compra e comunicação do pedido permanece dentro do CLICK-FOOD.</div><StoreOrderPauseControl storeId={store.id}/><StoreSettings storeId={store.id} role={store.role} onChanged={()=>void load()}/></div></main>;
 }
