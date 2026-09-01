@@ -19,8 +19,9 @@ import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
 import CustomerOrderReceipt from "./CustomerOrderReceipt";
 
 type Tab = "home" | "search" | "orders" | "support" | "profile";
-type Store = { id:string; name:string; description:string|null; logo_url:string|null; cover_url:string|null; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean };
-type ProductWithMedia = Product & { image_url:string|null };
+type Store = { id:string; name:string; slogan:string|null; description:string|null; logo_url:string|null; cover_url:string|null; primary_color:string; secondary_color:string; minimum_order:number; average_preparation_time:number; timezone:string; open_now:boolean; pickup_enabled:boolean; clickfood_delivery_enabled:boolean; own_delivery_enabled:boolean; max_radius_km:number|null };
+type MenuCategory = { id:string; name:string; description:string|null; image_url:string|null; sort_order:number };
+type ProductWithMedia = Product & { image_url:string|null; category_id:string|null };
 type Address = { id:string; label:string|null; street:string; number:string|null; district:string|null; reference:string|null };
 type StoreRelation = { name:string; latitude:number|null; longitude:number|null };
 type Order = { id:string; order_number:number; store_id:string; address_id:string|null; delivery_type:string; total:number; status:string; payment_status:string; created_at:string; stores:StoreRelation|StoreRelation[]|null };
@@ -87,7 +88,7 @@ function promotionPrice(base:number,productId:string,promotions:CustomerPromotio
 export default function App(){
   const[session,setSession]=useState<Session|null>(null); const[loading,setLoading]=useState(true); const[tab,setTab]=useState<Tab>("home");
   const[stores,setStores]=useState<Store[]>([]); const[orders,setOrders]=useState<Order[]>([]); const[query,setQuery]=useState(""); const[message,setMessage]=useState("");
-  const[selectedStore,setSelectedStore]=useState<Store|null>(null); const[products,setProducts]=useState<ProductWithMedia[]>([]); const[cart,setCart]=useState<CartItem[]>([]);
+  const[selectedStore,setSelectedStore]=useState<Store|null>(null); const[products,setProducts]=useState<ProductWithMedia[]>([]); const[categories,setCategories]=useState<MenuCategory[]>([]); const[selectedCategoryId,setSelectedCategoryId]=useState("ALL"); const[cart,setCart]=useState<CartItem[]>([]);
   const[variants,setVariants]=useState<CustomerVariant[]>([]); const[optionGroups,setOptionGroups]=useState<CustomerOptionGroup[]>([]); const[productOptions,setProductOptions]=useState<CustomerOption[]>([]); const[productGroupLinks,setProductGroupLinks]=useState<ProductGroupLink[]>([]); const[promotions,setPromotions]=useState<CustomerPromotion[]>([]); const[selectedProduct,setSelectedProduct]=useState<ProductWithMedia|null>(null);
   const[addresses,setAddresses]=useState<Address[]>([]); const[selectedAddressId,setSelectedAddressId]=useState(""); const[deliveryType,setDeliveryType]=useState<DeliveryType>("DELIVERY"); const[coupon,setCoupon]=useState(""); const[placing,setPlacing]=useState(false);
   const[paymentMethod,setPaymentMethod]=useState<PaymentMethod>("CASH"); const[availablePaymentMethods,setAvailablePaymentMethods]=useState<PaymentMethod[]>(["CASH"]); const[pixCharge,setPixCharge]=useState<PixCharge|null>(null); const[pixBusy,setPixBusy]=useState(false);
@@ -110,6 +111,7 @@ export default function App(){
   useEffect(()=>{if(!session||tab!=="orders"||!tracking?.driverId)return;const driverId=tracking.driverId;const channel=supabase.channel(`customer-driver-live-${driverId}`).on("postgres_changes",{event:"*",schema:"public",table:"driver_locations",filter:`driver_id=eq.${driverId}`},payload=>{const row=(payload.new??{}) as any;const latitude=Number(row.latitude),longitude=Number(row.longitude);if(!Number.isFinite(latitude)||!Number.isFinite(longitude))return;setTracking(current=>current&&current.driverId===driverId?{...current,driverLat:latitude,driverLng:longitude}:current);}).subscribe();return()=>{void supabase.removeChannel(channel);};},[session?.user.id,tab,tracking?.driverId]);
   useEffect(()=>{if(!session)return;const timer=setInterval(()=>loadStores(),60000);return()=>clearInterval(timer);},[session?.user.id]);
   useEffect(()=>{if(session&&cardTokenization)void loadOrders();},[session?.user.id,cardTokenization?.accountId]);
+  useEffect(()=>{if(!selectedStore)return;const deliveryEnabled=selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled;if(deliveryType==="DELIVERY"&&!deliveryEnabled&&selectedStore.pickup_enabled)setDeliveryType("PICKUP");else if(deliveryType==="PICKUP"&&!selectedStore.pickup_enabled&&deliveryEnabled)setDeliveryType("DELIVERY");},[selectedStore?.id,selectedStore?.pickup_enabled,selectedStore?.clickfood_delivery_enabled,selectedStore?.own_delivery_enabled,deliveryType]);
 
   async function loadLoyalty(){
     if(!session)return;
@@ -250,11 +252,16 @@ export default function App(){
   }
 
   async function openStore(store:Store){
-    setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);
-    const{data,error}=await supabase.from("products").select("id,name,description,image_url,price,promotional_price").eq("store_id",store.id).eq("active",true).eq("available_delivery",true).order("name");
-    if(error){setMessage("Não foi possível abrir o cardápio.");return;}
-    const ps=(data??[]).map((p:any)=>({...p,price:Number(p.price),promotional_price:p.promotional_price==null?null:Number(p.promotional_price)})) as ProductWithMedia[];
-    setProducts(ps);
+    setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);setSelectedCategoryId("ALL");
+    const deliveryEnabled=store.clickfood_delivery_enabled||store.own_delivery_enabled;
+    setDeliveryType(deliveryEnabled?"DELIVERY":store.pickup_enabled?"PICKUP":"DELIVERY");
+    const[productResult,categoryResult]=await Promise.all([
+      supabase.from("products").select("id,name,description,image_url,price,promotional_price,category_id").eq("store_id",store.id).eq("active",true).eq("available_delivery",true).order("name"),
+      supabase.from("categories").select("id,name,description,image_url,sort_order").eq("store_id",store.id).eq("active",true).order("sort_order").order("name"),
+    ]);
+    if(productResult.error||categoryResult.error){setMessage("Não foi possível abrir o cardápio.");return;}
+    const ps=(productResult.data??[]).map((p:any)=>({...p,price:Number(p.price),promotional_price:p.promotional_price==null?null:Number(p.promotional_price),category_id:p.category_id==null?null:String(p.category_id)})) as ProductWithMedia[];
+    setProducts(ps);setCategories((categoryResult.data??[]) as MenuCategory[]);
     const productIds=ps.map(p=>p.id);
     if(!productIds.length){setVariants([]);setOptionGroups([]);setProductOptions([]);setProductGroupLinks([]);setPromotions([]);return;}
     const[vR,lR,promoR]=await Promise.all([
@@ -324,7 +331,10 @@ export default function App(){
 
   async function placeOrder(){
     if(!session||!selectedStore||!cart.length)return;
+    const deliveryEnabled=selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled;
     if(!selectedStore.open_now){setMessage("Esta loja está fechada agora. Você pode consultar o cardápio, mas o pedido só poderá ser enviado quando ela abrir.");return;}
+    if(deliveryType==="DELIVERY"&&!deliveryEnabled){setMessage("Esta loja não está aceitando entrega neste momento. Escolha retirada, se disponível.");return;}
+    if(deliveryType==="PICKUP"&&!selectedStore.pickup_enabled){setMessage("A retirada na loja está desativada neste momento.");return;}
     if(cartSubtotal<selectedStore.minimum_order){setMessage(`Pedido mínimo: ${brl(selectedStore.minimum_order)}.`);return;}
     if(deliveryType==="DELIVERY"&&!selectedAddressId){setMessage("Cadastre e selecione um endereço para entrega.");return;}
     setPlacing(true);setMessage("");
@@ -454,7 +464,11 @@ export default function App(){
     setReviewedOrderIds(current=>new Set([...current,order.id]));setRatingOrderId(null);setReviewComment("");setStars(5);setMessage("Obrigado pela avaliação!");setSubmittingReview(false);
   }
 
-  const filtered=useMemo(()=>stores.filter(store=>`${store.name} ${store.description??""}`.toLowerCase().includes(query.toLowerCase())),[stores,query]);
+  const filtered=useMemo(()=>stores.filter(store=>`${store.name} ${store.slogan??""} ${store.description??""}`.toLowerCase().includes(query.toLowerCase())),[stores,query]);
+  const menuCategoryIds=useMemo(()=>new Set(products.map(product=>product.category_id).filter((id):id is string=>Boolean(id))),[products]);
+  const menuCategories=useMemo(()=>categories.filter(category=>menuCategoryIds.has(category.id)),[categories,menuCategoryIds]);
+  const hasUncategorized=useMemo(()=>products.some(product=>!product.category_id),[products]);
+  const visibleProducts=useMemo(()=>selectedCategoryId==="ALL"?products:selectedCategoryId==="UNCATEGORIZED"?products.filter(product=>!product.category_id):products.filter(product=>product.category_id===selectedCategoryId),[products,selectedCategoryId]);
 
   if(loading)return <SafeAreaView style={styles.center}><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text>Carregando...</Text></SafeAreaView>;
   if(!session)return <AuthScreen/>;
@@ -462,15 +476,20 @@ export default function App(){
   if(selectedStore){
     return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><ScrollView contentContainerStyle={styles.scroll}>
       <Pressable onPress={()=>{setSelectedStore(null);setSelectedProduct(null);setMessage("");}}><Text style={styles.back}>‹ Voltar</Text></Pressable>
-      {selectedStore.cover_url?<Image source={{uri:selectedStore.cover_url}} style={styles.storeCover}/>:<View style={styles.storeCoverFallback}><Text style={styles.storeCoverFallbackText}>CLICK-FOOD</Text></View>}
-      <View style={styles.storeHeading}>{selectedStore.logo_url?<Image source={{uri:selectedStore.logo_url}} style={styles.storeLogo}/>:<View style={styles.storeLogoFallback}><Text style={styles.storeLogoFallbackText}>CF</Text></View>}<View style={{flex:1}}><Text style={styles.storeTitle}>{selectedStore.name}</Text><Text style={styles.meta}>{selectedStore.description||"Cardápio CLICK-FOOD"}</Text></View></View>
+      {selectedStore.cover_url?<Image source={{uri:selectedStore.cover_url}} style={styles.storeCover}/>:<View style={[styles.storeCoverFallback,{backgroundColor:selectedStore.secondary_color||"#111"}]}><Text style={[styles.storeCoverFallbackText,{color:selectedStore.primary_color||"#f4c400"}]}>CLICK-FOOD</Text></View>}
+      <View style={styles.storeHeading}>{selectedStore.logo_url?<Image source={{uri:selectedStore.logo_url}} style={styles.storeLogo}/>:<View style={[styles.storeLogoFallback,{backgroundColor:selectedStore.primary_color||"#f4c400"}]}><Text style={styles.storeLogoFallbackText}>CF</Text></View>}<View style={{flex:1}}>{!!selectedStore.slogan&&<Text style={styles.storeSlogan}>{selectedStore.slogan}</Text>}<Text style={styles.storeTitle}>{selectedStore.name}</Text><Text style={styles.meta}>{selectedStore.description||"Cardápio CLICK-FOOD"}</Text></View></View>
+      <View style={[styles.storeAccent,{backgroundColor:selectedStore.primary_color||"#f4c400"}]}/>
       <Text style={styles.meta}>Pedido mínimo {brl(selectedStore.minimum_order)} • preparo médio {selectedStore.average_preparation_time} min</Text>
+      <View style={styles.serviceChips}>{selectedStore.clickfood_delivery_enabled&&<View style={styles.serviceChip}><Text style={styles.serviceChipText}>🛵 Entrega CLICK-FOOD</Text></View>}{selectedStore.own_delivery_enabled&&<View style={styles.serviceChip}><Text style={styles.serviceChipText}>🏪 Entrega da loja</Text></View>}{selectedStore.pickup_enabled&&<View style={styles.serviceChip}><Text style={styles.serviceChipText}>🥡 Retirada</Text></View>}{selectedStore.max_radius_km!=null&&(selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled)&&<View style={styles.serviceChip}><Text style={styles.serviceChipText}>Até {selectedStore.max_radius_km} km</Text></View>}</View>
       <Text style={[styles.storeStatusBanner,selectedStore.open_now?styles.storeOpenBanner:styles.storeClosedBanner]}>{selectedStore.open_now?"ABERTA AGORA":"FECHADA AGORA"}</Text>
+      {!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled&&<Text style={styles.storeClosedBanner}>Pedidos temporariamente indisponíveis nesta loja.</Text>}
       {promotions.some(p=>p.promotion_type==="FREE_DELIVERY")&&<Text style={styles.promoBanner}>🚚 Entrega grátis em promoção</Text>}
       {!!message&&<Text style={styles.notice}>{message}</Text>}
 
       <Text style={styles.section}>Cardápio</Text>
-      {products.length?products.map(product=>{
+      {(menuCategories.length||hasUncategorized)&&<ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll} contentContainerStyle={styles.categoryChips}><Pressable style={[styles.categoryChip,selectedCategoryId==="ALL"&&styles.categoryChipActive]} onPress={()=>setSelectedCategoryId("ALL")}><Text style={[styles.categoryChipText,selectedCategoryId==="ALL"&&styles.categoryChipTextActive]}>Todos</Text></Pressable>{menuCategories.map(category=><Pressable key={category.id} style={[styles.categoryChip,selectedCategoryId===category.id&&styles.categoryChipActive]} onPress={()=>setSelectedCategoryId(category.id)}><Text style={[styles.categoryChipText,selectedCategoryId===category.id&&styles.categoryChipTextActive]}>{category.name}</Text></Pressable>)}{hasUncategorized&&<Pressable style={[styles.categoryChip,selectedCategoryId==="UNCATEGORIZED"&&styles.categoryChipActive]} onPress={()=>setSelectedCategoryId("UNCATEGORIZED")}><Text style={[styles.categoryChipText,selectedCategoryId==="UNCATEGORIZED"&&styles.categoryChipTextActive]}>Outros</Text></Pressable>}</ScrollView>}
+      {selectedCategoryId!=="ALL"&&<View style={styles.categoryHeading}><Text style={styles.categoryHeadingTitle}>{selectedCategoryId==="UNCATEGORIZED"?"Outros":categories.find(c=>c.id===selectedCategoryId)?.name??"Cardápio"}</Text>{selectedCategoryId!=="UNCATEGORIZED"&&!!categories.find(c=>c.id===selectedCategoryId)?.description&&<Text style={styles.meta}>{categories.find(c=>c.id===selectedCategoryId)?.description}</Text>}</View>}
+      {visibleProducts.length?visibleProducts.map(product=>{
         const hasVariants=variantsFor(product.id).length>0;
         const hasOptions=groupsFor(product.id).length>0;
         const base=Number(product.promotional_price??product.price);
@@ -512,10 +531,10 @@ export default function App(){
         </View>;
       }):<Text style={styles.empty}>Adicione itens para continuar.</Text>}
 
-      <View style={styles.segment}>
-        <Pressable style={[styles.segmentButton,deliveryType==="DELIVERY"&&styles.segmentActive]} onPress={()=>setDeliveryType("DELIVERY")}><Text style={deliveryType==="DELIVERY"?styles.segmentActiveText:undefined}>Entrega</Text></Pressable>
-        <Pressable style={[styles.segmentButton,deliveryType==="PICKUP"&&styles.segmentActive]} onPress={()=>setDeliveryType("PICKUP")}><Text style={deliveryType==="PICKUP"?styles.segmentActiveText:undefined}>Retirar na loja</Text></Pressable>
-      </View>
+      {(selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled||selectedStore.pickup_enabled)&&<View style={styles.segment}>
+        {(selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled)&&<Pressable style={[styles.segmentButton,deliveryType==="DELIVERY"&&styles.segmentActive]} onPress={()=>setDeliveryType("DELIVERY")}><Text style={deliveryType==="DELIVERY"?styles.segmentActiveText:undefined}>Entrega</Text></Pressable>}
+        {selectedStore.pickup_enabled&&<Pressable style={[styles.segmentButton,deliveryType==="PICKUP"&&styles.segmentActive]} onPress={()=>setDeliveryType("PICKUP")}><Text style={deliveryType==="PICKUP"?styles.segmentActiveText:undefined}>Retirar na loja</Text></Pressable>}
+      </View>}
 
       {deliveryType==="DELIVERY"&&<>
         <Text style={styles.section}>Endereço de entrega</Text>
@@ -543,7 +562,7 @@ export default function App(){
       </View>
       {!availablePaymentMethods.includes("PIX")&&<Text style={styles.meta}>PIX será exibido automaticamente quando a Efí Bank estiver ativada pela Matriz.</Text>}
       <View style={styles.totalBox}><Text>Subtotal estimado</Text><Text style={styles.total}>{brl(cartSubtotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão, número e CVV são tokenizados pela Efí dentro de uma tela segura e não ficam armazenados no CLICK-FOOD.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
-      <Pressable style={[styles.checkout,(!cart.length||!selectedStore.open_now)&&styles.disabled]} disabled={!cart.length||placing||!selectedStore.open_now} onPress={placeOrder}><Text style={styles.checkoutText}>{!selectedStore.open_now?"LOJA FECHADA":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
+      <Pressable style={[styles.checkout,(!cart.length||!selectedStore.open_now||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||placing||!selectedStore.open_now||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
     </ScrollView>
     {pendingCardOrder&&cardTokenization&&<EfiCardPayment visible config={cardTokenization} order={pendingCardOrder} defaults={{name:String(session.user.user_metadata?.full_name??""),email:String(session.user.email??""),phone:String(session.user.user_metadata?.phone??"")}} onCancel={cancelPendingCardPayment} onComplete={completeCardPayment}/>}
     </SafeAreaView>;
@@ -624,9 +643,9 @@ const styles=StyleSheet.create({
   header:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:18},avatar:{width:44,height:44,borderRadius:22,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},
   searchBox:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:16,marginBottom:16},hero:{backgroundColor:"#111",borderRadius:20,padding:18,flexDirection:"row",alignItems:"center"},heroKicker:{color:"#f4c400",fontWeight:"900",fontSize:10},heroTitle:{color:"#fff",fontSize:22,fontWeight:"900",marginTop:6},heroText:{color:"#aaa",fontSize:11,marginTop:7},heroEmoji:{fontSize:48},
   section:{fontSize:19,fontWeight:"900",marginTop:22,marginBottom:10},pageTitle:{fontSize:28,fontWeight:"900",marginBottom:18},storeCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:16,padding:13,flexDirection:"row",alignItems:"center",gap:12,marginBottom:9},storeIcon:{width:50,height:50,borderRadius:14,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},storeLogoCard:{width:50,height:50,borderRadius:14,backgroundColor:"#f1f1f1"},storeTitle:{fontSize:28,fontWeight:"900",marginTop:4},storeCover:{width:"100%",height:160,borderRadius:18,marginTop:12,marginBottom:12,backgroundColor:"#ddd"},storeCoverFallback:{height:130,borderRadius:18,marginTop:12,marginBottom:12,backgroundColor:"#111",alignItems:"center",justifyContent:"center"},storeCoverFallbackText:{color:"#f4c400",fontSize:24,fontWeight:"900"},storeHeading:{flexDirection:"row",alignItems:"center",gap:12,marginBottom:4},storeLogo:{width:58,height:58,borderRadius:16,backgroundColor:"#eee"},storeLogoFallback:{width:58,height:58,borderRadius:16,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},storeLogoFallbackText:{fontWeight:"900",fontSize:18},
-  storeStatus:{fontSize:9,fontWeight:"900",paddingHorizontal:7,paddingVertical:4,borderRadius:999,alignSelf:"flex-start",marginTop:6,overflow:"hidden"},storeOpen:{backgroundColor:"#ddf6e6",color:"#1d7342"},storeClosed:{backgroundColor:"#fde5e1",color:"#992f29"},storeStatusBanner:{padding:10,borderRadius:12,fontSize:11,fontWeight:"900",marginTop:10,textAlign:"center"},storeOpenBanner:{backgroundColor:"#ddf6e6",color:"#1d7342"},storeClosedBanner:{backgroundColor:"#fde5e1",color:"#992f29"},
+  storeStatus:{fontSize:9,fontWeight:"900",paddingHorizontal:7,paddingVertical:4,borderRadius:999,alignSelf:"flex-start",marginTop:6,overflow:"hidden"},storeOpen:{backgroundColor:"#ddf6e6",color:"#1d7342"},storeClosed:{backgroundColor:"#fde5e1",color:"#992f29"},storeStatusBanner:{padding:10,borderRadius:12,fontSize:11,fontWeight:"900",marginTop:10,textAlign:"center"},storeOpenBanner:{backgroundColor:"#ddf6e6",color:"#1d7342"},storeClosedBanner:{backgroundColor:"#fde5e1",color:"#992f29",padding:10,borderRadius:12,fontSize:11,fontWeight:"900",marginTop:10,textAlign:"center"},storeSlogan:{fontSize:10,fontWeight:"900",letterSpacing:.8,color:"#8d7000",textTransform:"uppercase"},storeAccent:{height:4,borderRadius:999,marginTop:8,marginBottom:8},serviceChips:{flexDirection:"row",flexWrap:"wrap",gap:6,marginTop:10},serviceChip:{backgroundColor:"#f0f1f3",borderRadius:999,paddingHorizontal:9,paddingVertical:6},serviceChipText:{fontSize:9,fontWeight:"800",color:"#4b5159"},
   productRow:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e8e8e8",borderRadius:15,padding:12,marginBottom:9,flexDirection:"row",alignItems:"center",gap:10},productImage:{width:74,height:74,borderRadius:12,backgroundColor:"#eee"},productImageFallback:{width:74,height:74,borderRadius:12,backgroundColor:"#f1f1f1",alignItems:"center",justifyContent:"center"},productImageFallbackText:{fontSize:28},productName:{fontWeight:"900",fontSize:15},meta:{color:"#777",fontSize:11,marginTop:4},price:{fontWeight:"900",color:"#8d7000",marginTop:6},addButton:{width:42,height:42,borderRadius:13,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},addText:{fontSize:24,fontWeight:"900"},
-  customHint:{fontSize:10,color:"#555",fontWeight:"800",marginTop:4},discountHint:{fontSize:10,color:"#26804a",fontWeight:"800",marginTop:3},promoBanner:{backgroundColor:"#dcf7e7",color:"#17673b",padding:10,borderRadius:11,fontWeight:"800",fontSize:11,marginTop:12},
+  customHint:{fontSize:10,color:"#555",fontWeight:"800",marginTop:4},discountHint:{fontSize:10,color:"#26804a",fontWeight:"800",marginTop:3},promoBanner:{backgroundColor:"#dcf7e7",color:"#17673b",padding:10,borderRadius:11,fontWeight:"800",fontSize:11,marginTop:12},categoryScroll:{marginHorizontal:-2,marginBottom:10},categoryChips:{gap:7,paddingHorizontal:2,paddingVertical:2},categoryChip:{borderWidth:1,borderColor:"#ddd",backgroundColor:"#fff",borderRadius:999,paddingHorizontal:13,paddingVertical:9},categoryChipActive:{backgroundColor:"#111",borderColor:"#111"},categoryChipText:{fontSize:10,fontWeight:"850",color:"#4b4f56"},categoryChipTextActive:{color:"#f4c400"},categoryHeading:{backgroundColor:"#fffbea",borderRadius:14,padding:12,marginBottom:10},categoryHeadingTitle:{fontSize:17,fontWeight:"900"},
   cartRow:{backgroundColor:"#fff",borderRadius:14,padding:13,marginBottom:8,flexDirection:"row",alignItems:"center"},cartOptions:{fontSize:10,color:"#666",marginTop:4,lineHeight:14},qty:{flexDirection:"row",gap:14,alignItems:"center",borderWidth:1,borderColor:"#ddd",borderRadius:10,paddingVertical:8,paddingHorizontal:10},
   segment:{flexDirection:"row",gap:7,marginTop:18},segmentButton:{flex:1,borderWidth:1,borderColor:"#ddd",padding:12,borderRadius:12,alignItems:"center"},segmentActive:{backgroundColor:"#111",borderColor:"#111"},segmentActiveText:{color:"#fff",fontWeight:"900"},
   addressCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e2e2e2",borderRadius:13,padding:12,marginBottom:7},addressSelected:{borderColor:"#d4ae00",backgroundColor:"#fffbea"},addressForm:{backgroundColor:"#eeeae0",borderRadius:16,padding:14,marginTop:10},formTitle:{fontWeight:"900",marginBottom:10},
