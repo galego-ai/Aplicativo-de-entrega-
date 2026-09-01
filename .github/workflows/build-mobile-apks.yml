@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  NODE_ENV: production
+
 jobs:
   cliente:
     name: APK Cliente
@@ -32,14 +35,19 @@ jobs:
           java-version: '17'
       - name: Instalar dependências
         run: npm ci
+      - name: Validar React Cliente
+        working-directory: apps/cliente
+        run: |
+          npx expo install --check
+          node -e "if(require('react/package.json').version !== '19.2.3') { console.error('React incompatível'); process.exit(1) }"
       - name: Gerar Android Cliente
         working-directory: apps/cliente
-        run: npx expo prebuild --platform android --non-interactive
+        run: CI=1 npx expo prebuild --platform android
       - name: Compilar Cliente
         working-directory: apps/cliente/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
       - name: Preparar Cliente
         run: |
           test -f apps/cliente/android/app/build/outputs/apk/release/app-release.apk
@@ -74,9 +82,14 @@ jobs:
           java-version: '17'
       - name: Instalar dependências
         run: npm ci
+      - name: Validar React Entregador
+        working-directory: apps/entregador
+        run: |
+          npx expo install --check
+          node -e "if(require('react/package.json').version !== '19.2.3') { console.error('React incompatível'); process.exit(1) }"
       - name: Gerar Android Entregador
         working-directory: apps/entregador
-        run: npx expo prebuild --platform android --non-interactive
+        run: CI=1 npx expo prebuild --platform android
       - name: Validar serviço da bolinha
         run: |
           test -f apps/entregador/android/app/src/main/java/br/com/clickfood/entregador/floatingbubble/FloatingBubbleService.kt
@@ -86,7 +99,7 @@ jobs:
         working-directory: apps/entregador/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
       - name: Preparar Entregador
         run: |
           test -f apps/entregador/android/app/build/outputs/apk/release/app-release.apk
