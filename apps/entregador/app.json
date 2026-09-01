@@ -9,6 +9,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "plugins": [
+      "./plugins/withClickFoodFloatingBubble",
       [
         "expo-location",
         {
