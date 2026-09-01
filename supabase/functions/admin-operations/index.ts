@@ -9,6 +9,7 @@ type Body=
 
 async function sha256(value:string){const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(value));return[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,"0")).join("")}
 function createCode(prefix:string){const alphabet="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";const bytes=crypto.getRandomValues(new Uint8Array(12));return`${prefix}-${[...bytes].map(b=>alphabet[b%alphabet.length]).join("")}`}
+const avatarMimes=new Set(["image/jpeg","image/png","image/webp"]);
 
 export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  if(req.method!=="POST")return Response.json({error:"METHOD_NOT_ALLOWED"},{status:405});
@@ -39,18 +40,33 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  if(body.action==="DRIVER_STATUS"){
   if(!body.driverId||!["ACTIVE","BLOCKED","PENDING"].includes(body.status))return Response.json({error:"INVALID_DRIVER_ACTION"},{status:400});
   const{data:current,error:driverLookup}=await ctx.supabaseAdmin.from("drivers").select("id,user_id,city_id,status").eq("id",body.driverId).maybeSingle();if(driverLookup)return Response.json({error:"DRIVER_LOOKUP_FAILED"},{status:500});if(!current)return Response.json({error:"DRIVER_NOT_FOUND"},{status:404});
+  let batchReviewed:string[]=[];
   if(body.status==="ACTIVE"){
     if(!current.city_id)return Response.json({error:"DRIVER_CITY_REQUIRED"},{status:409});
     const{data:vehicle}=await ctx.supabaseAdmin.from("driver_vehicles").select("vehicle_type").eq("driver_id",body.driverId).eq("active",true).limit(1).maybeSingle();if(!vehicle)return Response.json({error:"ACTIVE_VEHICLE_REQUIRED"},{status:409});
     const required=vehicle.vehicle_type==="BICYCLE"?["PROFILE_PHOTO","IDENTITY"]:["PROFILE_PHOTO","IDENTITY","CNH","VEHICLE_DOCUMENT"];
-    const{data:docs,error:docsError}=await ctx.supabaseAdmin.from("driver_documents").select("document_type,expires_at").eq("driver_id",body.driverId).eq("status","APPROVED");if(docsError)return Response.json({error:"DOCUMENT_LOOKUP_FAILED"},{status:500});
-    const today=new Date().toISOString().slice(0,10);const valid=new Set((docs??[]).filter(d=>!d.expires_at||d.expires_at>=today).map(d=>d.document_type));const missing=required.filter(t=>!valid.has(t));if(missing.length)return Response.json({error:"DRIVER_DOCUMENTS_INCOMPLETE",missing},{status:409});
+    const{data:docs,error:docsError}=await ctx.supabaseAdmin.from("driver_documents").select("id,document_type,file_path,status,expires_at,created_at").eq("driver_id",body.driverId).in("status",["APPROVED","PENDING"]).order("created_at",{ascending:false});if(docsError)return Response.json({error:"DOCUMENT_LOOKUP_FAILED"},{status:500});
+    const today=new Date().toISOString().slice(0,10);const eligible=(docs??[]).filter((d:any)=>!d.expires_at||d.expires_at>=today);
+    const selected:any[]=[];const missing:string[]=[];
+    for(const type of required){const approved=eligible.find((d:any)=>d.document_type===type&&d.status==="APPROVED");const pending=eligible.find((d:any)=>d.document_type===type&&d.status==="PENDING");const picked=approved??pending;if(!picked)missing.push(type);else selected.push(picked)}
+    if(missing.length)return Response.json({error:"DRIVER_DOCUMENTS_INCOMPLETE",missing},{status:409});
+    const now=new Date().toISOString();
+    for(const doc of selected.filter((d:any)=>d.status==="PENDING")){
+      if(doc.document_type==="PROFILE_PHOTO"){
+        const{data:file,error:downloadError}=await ctx.supabaseAdmin.storage.from("driver-documents").download(doc.file_path);if(downloadError||!file)return Response.json({error:"PROFILE_PHOTO_DOWNLOAD_FAILED"},{status:500});
+        const mime=String(file.type||"").toLowerCase();if(!avatarMimes.has(mime))return Response.json({error:"PROFILE_PHOTO_IMAGE_REQUIRED"},{status:422});
+        const avatarPath=`${current.user_id}/${doc.id}`;const{error:avatarUploadError}=await ctx.supabaseAdmin.storage.from("driver-avatars").upload(avatarPath,file,{contentType:mime,cacheControl:"3600",upsert:true});if(avatarUploadError)return Response.json({error:"PROFILE_AVATAR_PUBLISH_FAILED"},{status:500});
+        const avatarUrl=ctx.supabaseAdmin.storage.from("driver-avatars").getPublicUrl(avatarPath).data.publicUrl;const{error:profileError}=await ctx.supabaseAdmin.from("profiles").update({avatar_url:avatarUrl,updated_at:now}).eq("id",current.user_id);if(profileError)return Response.json({error:"PROFILE_AVATAR_LINK_FAILED"},{status:500});
+      }
+      const{error:reviewError}=await ctx.supabaseAdmin.from("driver_documents").update({status:"APPROVED",reviewed_by:actorId,reviewed_at:now,rejection_reason:null}).eq("id",doc.id).eq("status","PENDING");if(reviewError)return Response.json({error:"DOCUMENT_REVIEW_FAILED"},{status:500});
+      batchReviewed.push(doc.document_type);
+    }
   }
   const patch:any={status:body.status};if(body.status!=="ACTIVE")patch.online=false;
   const{data:driver,error}=await ctx.supabaseAdmin.from("drivers").update(patch).eq("id",body.driverId).select("id,user_id,status,online,rating,acceptance_rate").single();if(error)return Response.json({error:"DRIVER_UPDATE_FAILED"},{status:500});
   const messages:any={ACTIVE:["Cadastro aprovado","Seu cadastro foi aprovado. Você já pode ficar online no CLICK-FOOD."],BLOCKED:["Cadastro bloqueado","Seu acesso de entregador foi bloqueado. Consulte o suporte para mais informações."],PENDING:["Cadastro em análise","Seu cadastro voltou para análise da equipe CLICK-FOOD."]};const msg=messages[body.status];
-  await ctx.supabaseAdmin.from("notifications").insert({user_id:driver.user_id,notification_type:"DRIVER_STATUS_CHANGED",title:msg[0],body:msg[1],data:{driverId:driver.id,status:body.status}});
-  await ctx.supabaseAdmin.from("audit_logs").insert({actor_id:actorId,action:"DRIVER_STATUS_CHANGED",entity_type:"driver",entity_id:body.driverId,after_data:{status:body.status}});return Response.json({driver});
+  await ctx.supabaseAdmin.from("notifications").insert({user_id:driver.user_id,notification_type:"DRIVER_STATUS_CHANGED",title:msg[0],body:msg[1],data:{driverId:driver.id,status:body.status,documentsReviewed:batchReviewed}});
+  await ctx.supabaseAdmin.from("audit_logs").insert({actor_id:actorId,action:"DRIVER_STATUS_CHANGED",entity_type:"driver",entity_id:body.driverId,after_data:{status:body.status,documents_reviewed:batchReviewed}});return Response.json({driver,documentsReviewed:batchReviewed});
  }
  if(body.action==="REISSUE_STORE_CODE"){
   if(!body.storeId)return Response.json({error:"STORE_ID_REQUIRED"},{status:400});const{data:store}=await ctx.supabaseAdmin.from("stores").select("id").eq("id",body.storeId).maybeSingle();if(!store)return Response.json({error:"STORE_NOT_FOUND"},{status:404});
