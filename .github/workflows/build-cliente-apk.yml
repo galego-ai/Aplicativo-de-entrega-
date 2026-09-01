@@ -39,21 +39,22 @@ jobs:
         working-directory: apps/cliente
         run: npx expo prebuild --platform android --non-interactive
 
-      - name: Compilar APK de teste
+      - name: Compilar APK standalone
         working-directory: apps/cliente/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
-      - name: Preparar APK
+      - name: Verificar bundle e preparar APK
         run: |
+          test -f apps/cliente/android/app/build/outputs/apk/release/app-release.apk
           mkdir -p artifacts
-          cp apps/cliente/android/app/build/outputs/apk/debug/app-debug.apk artifacts/CLICK-FOOD-Cliente.apk
+          cp apps/cliente/android/app/build/outputs/apk/release/app-release.apk artifacts/CLICK-FOOD-Cliente-Standalone.apk
 
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CLICK-FOOD-Cliente-APK
-          path: artifacts/CLICK-FOOD-Cliente.apk
+          name: CLICK-FOOD-Cliente-Standalone-APK
+          path: artifacts/CLICK-FOOD-Cliente-Standalone.apk
           if-no-files-found: error
           retention-days: 30
