@@ -1,5 +1,6 @@
 name: CLICK-FOOD Mobile Expo Doctor
 
+# Validação pós-alinhamento completo das dependências do SDK 57.
 on:
   push:
     branches: [main]
