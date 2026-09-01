@@ -1,13 +1,12 @@
 import React from "react";
 import { registerRootComponent } from "expo";
 import App from "./App";
-import NotificationHost from "./NotificationHost";
-import OrderChatHost from "./OrderChatHost";
+import CustomerProfessionalShell from "./CustomerProfessionalShell";
 import AccountLifecycleHost from "./AccountLifecycle";
 import LegalConsentGate from "./LegalConsentGate";
 
 function Root(){
-  return <AccountLifecycleHost scheme="clickfood-cliente"><NotificationHost app="CUSTOMER" appIdentifier="br.com.clickfood.cliente"><OrderChatHost><App/><LegalConsentGate/></OrderChatHost></NotificationHost></AccountLifecycleHost>;
+  return <AccountLifecycleHost scheme="clickfood-cliente"><CustomerProfessionalShell><App/></CustomerProfessionalShell><LegalConsentGate/></AccountLifecycleHost>;
 }
 
 registerRootComponent(Root);
