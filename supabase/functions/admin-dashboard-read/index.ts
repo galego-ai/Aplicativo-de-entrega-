@@ -39,8 +39,7 @@ export default {
       ctx.supabaseAdmin.from("delivery_dispatch_settings").select("*"),
     ]);
 
-    const results = [
-      metricsResult,
+    const operationalResults = [
       storesResult,
       driversResult,
       citiesResult,
@@ -54,7 +53,7 @@ export default {
       pricingResult,
       dispatchResult,
     ];
-    if (results.some((result) => result.error)) {
+    if (operationalResults.some((result) => result.error)) {
       return Response.json({ error: "ADMIN_DASHBOARD_READ_FAILED" }, { status: 500 });
     }
 
@@ -68,7 +67,7 @@ export default {
     }
 
     return Response.json({
-      metrics: metricsResult.data ?? {},
+      metrics: metricsResult.error ? {} : (metricsResult.data ?? {}),
       stores: storesResult.data ?? [],
       drivers: drivers.map((driver) => ({ ...driver, profileName: profileNames.get(driver.user_id) ?? "Entregador" })),
       cities: citiesResult.data ?? [],
