@@ -1,5 +1,6 @@
 name: CLICK-FOOD Cliente APK
 
+# Build standalone de teste: o APK leva o bundle JavaScript dentro do aplicativo.
 on:
   workflow_dispatch:
   push:
