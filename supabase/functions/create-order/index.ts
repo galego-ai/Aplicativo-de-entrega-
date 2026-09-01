@@ -62,6 +62,10 @@ export default {
     if (storeError) return Response.json({ error: "STORE_LOOKUP_FAILED" }, { status: 500 });
     if (!store || store.status !== "ACTIVE") return Response.json({ error: "STORE_UNAVAILABLE" }, { status: 409 });
 
+    const { data: isOpen, error: hoursError } = await ctx.supabaseAdmin.rpc("store_is_open", { p_store_id: body.storeId });
+    if (hoursError) return Response.json({ error: "STORE_HOURS_LOOKUP_FAILED" }, { status: 500 });
+    if (!isOpen) return Response.json({ error: "STORE_CLOSED" }, { status: 409 });
+
     let addressId: string | null = null;
     let deliveryQuoteId: string | null = null;
     let deliveryFee = 0;
