@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./operational.css";
 import "./management.css";
+import "./map.css";
 import LegalConsentGate from "./LegalConsentGate";
 
 export const metadata: Metadata = {
