@@ -6,6 +6,15 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/build-mobile-apks.yml'
+      - 'apps/cliente/app.config.ts'
+      - 'apps/cliente/app.json'
+      - 'apps/cliente/metro.config.js'
+      - 'apps/cliente/package.json'
+      - 'apps/entregador/app.config.ts'
+      - 'apps/entregador/app.json'
+      - 'apps/entregador/metro.config.js'
+      - 'apps/entregador/package.json'
+      - 'package-lock.json'
 
 permissions:
   contents: read
