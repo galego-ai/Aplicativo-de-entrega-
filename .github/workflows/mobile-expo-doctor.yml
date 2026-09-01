@@ -1,0 +1,33 @@
+name: CLICK-FOOD Mobile Expo Doctor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mobile-expo-doctor.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  doctor:
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [cliente, entregador]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependências
+        run: npm ci
+      - name: Verificar versões Expo
+        working-directory: apps/${{ matrix.app }}
+        run: npx expo install --check
+      - name: Expo Doctor
+        working-directory: apps/${{ matrix.app }}
+        run: npx expo-doctor@latest
