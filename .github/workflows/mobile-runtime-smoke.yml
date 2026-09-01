@@ -1,6 +1,6 @@
 name: CLICK-FOOD Android Runtime Smoke
 
-# Smoke de runtime pós-alinhamento: compila Release, instala no Android e confirma que o processo permanece vivo.
+# Smoke final: Metro isolado por app, bundle Release, instalação e abertura real no Android.
 on:
   workflow_dispatch:
   push:
@@ -37,6 +37,14 @@ jobs:
           java-version: '17'
       - name: Instalar dependências
         run: npm ci
+      - name: Conferir React usado pelo app
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          node -e "console.log('react=', require.resolve('react')); console.log('version=', require('react/package.json').version); if(require('react/package.json').version !== '19.2.3') process.exit(1)"
+          node -e "console.log('react-native=', require.resolve('react-native/package.json')); console.log('rn-version=', require('react-native/package.json').version)"
+      - name: Validar bundle Metro isolado
+        working-directory: apps/${{ matrix.app }}
+        run: npx expo export --platform android --output-dir /tmp/export-${{ matrix.app }} --clear
       - name: Gerar Android ${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}
         run: npx expo prebuild --platform android --non-interactive
@@ -68,14 +76,14 @@ jobs:
             echo "PID=$(adb shell pidof '${{ matrix.package }}' | tr -d '\r')"
             if ! adb shell pidof "${{ matrix.package }}" >/dev/null; then
               echo "APP_ENCERROU_INESPERADAMENTE"
-              grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError" "${{ matrix.app }}-logcat.txt" | tail -200 || true
+              grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError|Invalid hook" "${{ matrix.app }}-logcat.txt" | tail -250 || true
               exit 1
             fi
             if grep -qE "FATAL EXCEPTION.*${{ matrix.package }}|Process: ${{ matrix.package }}.*FATAL" "${{ matrix.app }}-logcat.txt"; then
-              grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError" "${{ matrix.app }}-logcat.txt" | tail -200 || true
+              grep -n -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Invariant Violation|TypeError|ReferenceError|Invalid hook" "${{ matrix.app }}-logcat.txt" | tail -250 || true
               exit 1
             fi
-            grep -n -E "ReactNativeJS|AndroidRuntime|FATAL EXCEPTION|TypeError|ReferenceError" "${{ matrix.app }}-logcat.txt" | tail -100 || true
+            grep -n -E "ReactNativeJS|AndroidRuntime|FATAL EXCEPTION|TypeError|ReferenceError|Invalid hook" "${{ matrix.app }}-logcat.txt" | tail -120 || true
       - name: Publicar logcat
         if: always()
         uses: actions/upload-artifact@v4
