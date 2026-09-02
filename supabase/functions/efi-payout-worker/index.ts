@@ -18,14 +18,14 @@ export default{fetch:async(req:Request)=>{
  if(!workerToken?.token||!safeEq(received,String(workerToken.token)))return new Response("unauthorized",{status:401});
  const{data:config}=await supabase.from("payout_provider_configs").select("enabled,credentials_configured,automatic_processing").eq("provider","EFI_PIX_SEND").maybeSingle();
  if(!config?.enabled||!config?.credentials_configured||!config?.automatic_processing)return Response.json({ok:true,skipped:"AUTOMATIC_DISABLED"});
- const{data:next,error:nextError}=await supabase.schema("private").rpc("next_automatic_efi_payout");
+ const{data:next,error:nextError}=await supabase.rpc("service_next_automatic_efi_payout");
  if(nextError)return Response.json({error:"QUEUE_LOOKUP_FAILED"},{status:500});
  const payoutId=String(next??"");if(!payoutId)return Response.json({ok:true,skipped:"EMPTY_QUEUE"});
- const{data:prepared,error:prepareError}=await supabase.schema("private").rpc("prepare_efi_payout_send_atomic",{p_payout_id:payoutId,p_actor_id:null});
+ const{data:prepared,error:prepareError}=await supabase.rpc("service_prepare_efi_payout_send_atomic",{p_payout_id:payoutId,p_actor_id:null});
  if(prepareError){const msg=String(prepareError.message??"");if(msg.includes("ANOTHER_EFI_PAYOUT_PROCESSING"))return Response.json({ok:true,skipped:"ANOTHER_PROCESSING"});return Response.json({error:"PAYOUT_PREPARE_FAILED"},{status:409});}
  const prep=Array.isArray(prepared)?prepared[0]:prepared;const idEnvio=String(prep?.id_envio??"");if(!idEnvio)return Response.json({error:"PAYOUT_SEND_ID_MISSING"},{status:500});
  const{data:payout}=await supabase.from("payouts").select("id,amount,destination_value,status").eq("id",payoutId).maybeSingle();if(!payout)return Response.json({error:"PAYOUT_NOT_FOUND"},{status:404});
- const sync=async(status:string,e2e:string|null,payload:any,error:string|null)=>{const{data,error:rpcError}=await supabase.schema("private").rpc("sync_efi_payout_attempt_atomic",{p_id_envio:idEnvio,p_status:status,p_e2e_id:e2e,p_payload:payload,p_error:error});if(rpcError)throw rpcError;return data;};
+ const sync=async(status:string,e2e:string|null,payload:any,error:string|null)=>{const{data,error:rpcError}=await supabase.rpc("service_sync_efi_payout_attempt_atomic",{p_id_envio:idEnvio,p_status:status,p_e2e_id:e2e,p_payload:payload,p_error:error});if(rpcError)throw rpcError;return data;};
  let client:Deno.HttpClient|undefined;
  try{
   client=httpClient();const access=await token(client);
