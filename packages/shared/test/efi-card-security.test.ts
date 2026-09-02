@@ -10,15 +10,17 @@ test("tokenização Efí usa versão oficial fixada", () => {
   assert.doesNotMatch(source, /payment-token-efi@(?:latest|next)/i);
 });
 
-test("WebView do cartão usa controles restritivos", () => {
+test("WebView do cartão mantém navegação restrita e armazenamento compatível com a Efí", () => {
   assert.match(source, /originWhitelist=\{\["about:blank"\]\}/);
   assert.match(source, /javaScriptCanOpenWindowsAutomatically=\{false\}/);
-  assert.match(source, /domStorageEnabled=\{false\}/);
+  assert.match(source, /\bdomStorageEnabled\b/);
   assert.match(source, /cacheEnabled=\{false\}/);
-  assert.match(source, /\bincognito\b/);
+  assert.match(source, /\bthirdPartyCookiesEnabled\b/);
+  assert.match(source, /\bsharedCookiesEnabled\b/);
   assert.match(source, /mixedContentMode="never"/);
   assert.match(source, /setSupportMultipleWindows=\{false\}/);
   assert.match(source, /request\.url === "about:blank"/);
+  assert.doesNotMatch(source, /domStorageEnabled=\{false\}/);
 });
 
 test("ponte WebView envia somente token e dados não sensíveis necessários", () => {
