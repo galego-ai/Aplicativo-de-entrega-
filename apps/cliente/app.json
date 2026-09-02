@@ -2,6 +2,7 @@
   "expo": {
     "name": "CLICK-FOOD Cliente",
     "slug": "click-food-cliente",
+    "owner": "galego-ais-team",
     "scheme": "clickfood-cliente",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -17,6 +18,11 @@
     "ios": {
       "bundleIdentifier": "br.com.clickfood.cliente",
       "supportsTablet": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "52e2d5ff-faaa-4245-8564-47b9a4963fbb"
+      }
     }
   }
 }
