@@ -67,7 +67,7 @@ export default function StoreRealtimeOrderAlarm() {
       const id = (event as CustomEvent<SoundChangeDetail>).detail?.id;
       setSelectedSoundId(resolveOrderSound(id).id);
     };
-    const onEnable = () => setAudioEnabled(true);
+    const onEnable = () => { void enableAudio(); };
     const onPreview = (event: Event) => setPreviewing(Boolean((event as CustomEvent<SoundPreviewDetail>).detail?.active));
 
     window.addEventListener(ORDER_SOUND_EVENT, onSound as EventListener);
@@ -176,12 +176,12 @@ export default function StoreRealtimeOrderAlarm() {
 
   return <>
     {onOrdersPage && <OrderSoundSelector />}
-    {!audioEnabled && <button
+    {!audioEnabled && !onOrdersPage && <button
       type="button"
       onClick={() => void enableAudio()}
-      style={{ position: "fixed", right: 16, bottom: onOrdersPage ? 170 : 88, zIndex: 10003, border: "1px solid #d7b500", background: "#fff8cf", color: "#332b00", borderRadius: 999, padding: "10px 14px", fontWeight: 900, fontSize: 12, boxShadow: "0 8px 24px rgba(0,0,0,.14)", cursor: "pointer" }}
+      style={{ position: "fixed", right: 16, bottom: 88, zIndex: 10003, border: "1px solid #d7b500", background: "#fff8cf", color: "#332b00", borderRadius: 999, padding: "10px 14px", fontWeight: 900, fontSize: 12, boxShadow: "0 8px 24px rgba(0,0,0,.14)", cursor: "pointer" }}
     >🔔 Ativar som dos pedidos</button>}
-    {first && <aside role="alert" aria-live="assertive" style={{ position: "fixed", right: 16, top: 16, zIndex: 10001, width: "min(390px,calc(100vw - 32px))", background: "#111", color: "#fff", border: "3px solid #f4c400", borderRadius: 18, padding: 16, boxShadow: "0 18px 50px rgba(0,0,0,.35)" }}>
+    {first && !onOrdersPage && <aside role="alert" aria-live="assertive" style={{ position: "fixed", right: 16, top: 16, zIndex: 10001, width: "min(390px,calc(100vw - 32px))", background: "#111", color: "#fff", border: "3px solid #f4c400", borderRadius: 18, padding: 16, boxShadow: "0 18px 50px rgba(0,0,0,.35)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
         <div>
           <div style={{ color: "#f4c400", fontSize: 10, fontWeight: 900, letterSpacing: 1.2 }}>NOVO PEDIDO</div>
