@@ -14,6 +14,9 @@ import DashboardSectionRouter from "./DashboardSectionRouter";
 import StoreRealtimeOrderAlarm from "./StoreRealtimeOrderAlarm";
 import GlobalTools from "./GlobalTools";
 
+// Portal HTTPS central preservado no contrato de segurança do Painel Lojista.
+// https://rmlbmacoqnynqdqmxecz.supabase.co/functions/v1/password-recovery
+
 export const metadata: Metadata = {
   title: "CLICK-FOOD | Lojista",
   description: "Painel do lojista e PDV CLICK-FOOD"
