@@ -1,0 +1,46 @@
+name: CLICK-FOOD EAS Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/eas-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Verificar autenticação Expo sem expor token
+        run: |
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "EXPO_TOKEN_MISSING"
+            exit 2
+          fi
+          echo "EXPO_TOKEN_PRESENT"
+      - name: Conferir projeto EAS Entregador
+        working-directory: apps/entregador
+        run: npx --yes eas-cli@latest project:info --non-interactive
+      - name: Conferir projeto EAS Cliente
+        id: cliente_eas
+        continue-on-error: true
+        working-directory: apps/cliente
+        run: npx --yes eas-cli@latest project:info --non-interactive
+      - name: Resultado do vínculo Cliente
+        run: |
+          if [ "${{ steps.cliente_eas.outcome }}" = "success" ]; then
+            echo "CLIENTE_EAS_LINKED"
+          else
+            echo "CLIENTE_EAS_NOT_LINKED"
+          fi
