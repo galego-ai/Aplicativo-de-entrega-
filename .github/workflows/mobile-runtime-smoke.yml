@@ -1,6 +1,6 @@
 name: CLICK-FOOD Android Runtime Smoke
 
-# Smoke final: bundle Release, metadado Maps, APK x86_64, instalação e abertura real no Android.
+# Smoke final: bundle Release, Maps real, APK x86_64, instalação e abertura real no Android.
 on:
   workflow_dispatch:
   push:
@@ -39,6 +39,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Exigir Google Maps configurado
+        run: |
+          if [ -z "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
+            echo "GOOGLE_MAPS_ANDROID_API_KEY não configurada. Smoke final exige chave real."
+            exit 1
+          fi
       - name: Instalar dependências
         run: npm ci --include=dev
       - name: Conferir React e matriz Expo usada pelo app
@@ -58,6 +64,7 @@ jobs:
           MANIFEST="apps/${{ matrix.app }}/android/app/src/main/AndroidManifest.xml"
           test -f "$MANIFEST"
           grep -q 'com.google.android.geo.API_KEY' "$MANIFEST"
+          ! grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST"
       - name: Compilar Release ${{ matrix.app }} para smoke
         working-directory: apps/${{ matrix.app }}/android
         run: |
