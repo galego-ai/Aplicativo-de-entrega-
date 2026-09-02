@@ -1,4 +1,4 @@
-name: CLICK-FOOD Apps Android
+name: CLICK-FOOD Apps Android EAS
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/build-mobile-apks.yml'
+      - '.github/scripts/android-runtime-smoke.sh'
       - 'apps/cliente/**'
       - 'apps/entregador/**'
       - 'package-lock.json'
@@ -13,126 +14,149 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: click-food-eas-android-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  cliente:
-    name: APK Cliente
+  build-and-smoke:
+    name: APK ${{ matrix.label }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: cliente
+            label: Cliente
+            package: br.com.clickfood.cliente
+            filename: CLICK-FOOD-Cliente.apk
+            artifact: CLICK-FOOD-Cliente-APK
+          - app: entregador
+            label: Entregador
+            package: br.com.clickfood.entregador
+            filename: CLICK-FOOD-Entregador.apk
+            artifact: CLICK-FOOD-Entregador-APK
     env:
-      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Exigir Google Maps configurado
-        run: |
-          if [ -z "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
-            echo "GOOGLE_MAPS_ANDROID_API_KEY não configurada. APK final não pode ser publicado com chave fallback."
-            exit 1
-          fi
-          echo "Google Maps Android API key configurada no ambiente de build."
+
       - name: Instalar dependências
         run: npm ci --include=dev
-      - name: Validar React Cliente
-        working-directory: apps/cliente
+
+      - name: Validar autenticação EAS
+        run: |
+          test -n "${EXPO_TOKEN:-}" || { echo "EXPO_TOKEN não configurado."; exit 1; }
+          npx --yes eas-cli@latest whoami >/dev/null
+
+      - name: Validar projeto EAS ${{ matrix.label }}
+        working-directory: apps/${{ matrix.app }}
         run: |
           npx expo install --check
-          node -e "if(require('react/package.json').version !== '19.2.3') { console.error('React incompatível'); process.exit(1) }"
-      - name: Gerar Android Cliente
-        working-directory: apps/cliente
-        run: NODE_ENV=production CI=1 npx expo prebuild --platform android
-      - name: Validar chave nativa Maps Cliente
+          npx --yes eas-cli@latest project:info --non-interactive
+
+      - name: Compilar APK ${{ matrix.label }} no EAS
+        id: eas
+        working-directory: apps/${{ matrix.app }}
+        shell: bash
         run: |
-          MANIFEST="apps/cliente/android/app/src/main/AndroidManifest.xml"
-          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST"
-          ! grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST"
-      - name: Compilar Cliente
-        working-directory: apps/cliente/android
+          set -euo pipefail
+          BUILD_JSON="$RUNNER_TEMP/eas-${{ matrix.app }}-build.json"
+          npx --yes eas-cli@latest build \
+            --platform android \
+            --profile preview \
+            --non-interactive \
+            --wait \
+            --json > "$BUILD_JSON"
+
+          node - "$BUILD_JSON" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require('fs');
+          const [jsonPath, outputPath] = process.argv.slice(2);
+          const raw = fs.readFileSync(jsonPath, 'utf8').trim();
+          if (!raw) throw new Error('EAS não retornou JSON do build.');
+          const parsed = JSON.parse(raw);
+          const build = Array.isArray(parsed) ? parsed[parsed.length - 1] : parsed;
+          if (!build) throw new Error('Build EAS ausente na resposta.');
+          const status = String(build.status || '').toUpperCase();
+          if (status && status !== 'FINISHED') {
+            throw new Error(`Build EAS terminou com status ${status}.`);
+          }
+          const url = build.artifacts?.applicationArchiveUrl || build.artifacts?.buildUrl;
+          if (!url) throw new Error('EAS não retornou URL do APK.');
+          fs.appendFileSync(outputPath, `url=${url}\n`);
+          if (build.id) fs.appendFileSync(outputPath, `build_id=${build.id}\n`);
+          NODE
+
+      - name: Baixar e validar APK
+        shell: bash
         run: |
-          chmod +x gradlew
-          NODE_ENV=production ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
-      - name: Preparar Cliente
-        run: |
-          test -f apps/cliente/android/app/build/outputs/apk/release/app-release.apk
+          set -euo pipefail
           mkdir -p artifacts
-          cp apps/cliente/android/app/build/outputs/apk/release/app-release.apk artifacts/CLICK-FOOD-Cliente.apk
-      - name: Publicar Cliente
+          APK="artifacts/${{ matrix.filename }}"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            '${{ steps.eas.outputs.url }}' \
+            --output "$APK"
+          test -s "$APK"
+          unzip -tq "$APK" >/dev/null
+
+      - name: Garantir Google Maps real no APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="artifacts/${{ matrix.filename }}"
+          MANIFEST_STRINGS="$RUNNER_TEMP/${{ matrix.app }}-manifest-strings.txt"
+          unzip -p "$APK" AndroidManifest.xml | strings > "$MANIFEST_STRINGS"
+          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST_STRINGS"
+          if grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST_STRINGS"; then
+            echo 'APK contém chave fallback do Google Maps.'
+            exit 1
+          fi
+          rm -f "$MANIFEST_STRINGS"
+          echo 'Google Maps real confirmado no APK sem expor a chave.'
+
+      - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: CLICK-FOOD-Cliente-APK
-          path: artifacts/CLICK-FOOD-Cliente.apk
+          name: ${{ matrix.artifact }}
+          path: artifacts/${{ matrix.filename }}
           if-no-files-found: error
           retention-days: 30
 
-  entregador:
-    name: APK Entregador
-    runs-on: ubuntu-latest
-    timeout-minutes: 50
-    env:
-      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Node.js
-        uses: actions/setup-node@v4
+      - name: Habilitar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Instalar, abrir e detectar crash no Android 35
+        uses: reactivecircus/android-emulator-runner@v2
         with:
-          node-version: '22'
-          cache: npm
-      - name: Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - name: Exigir Google Maps configurado
-        run: |
-          if [ -z "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
-            echo "GOOGLE_MAPS_ANDROID_API_KEY não configurada. APK final não pode ser publicado com chave fallback."
-            exit 1
-          fi
-          echo "Google Maps Android API key configurada no ambiente de build."
-      - name: Instalar dependências
-        run: npm ci --include=dev
-      - name: Validar React Entregador
-        working-directory: apps/entregador
-        run: |
-          npx expo install --check
-          node -e "if(require('react/package.json').version !== '19.2.3') { console.error('React incompatível'); process.exit(1) }"
-      - name: Gerar Android Entregador
-        working-directory: apps/entregador
-        run: NODE_ENV=production CI=1 npx expo prebuild --platform android
-      - name: Validar chave nativa Maps Entregador
-        run: |
-          MANIFEST="apps/entregador/android/app/src/main/AndroidManifest.xml"
-          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST"
-          ! grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST"
-      - name: Validar serviço da bolinha
-        run: |
-          test -f apps/entregador/android/app/src/main/java/br/com/clickfood/entregador/floatingbubble/FloatingBubbleService.kt
-          grep -q 'SYSTEM_ALERT_WINDOW' apps/entregador/android/app/src/main/AndroidManifest.xml
-          grep -q 'FloatingBubbleService' apps/entregador/android/app/src/main/AndroidManifest.xml
-      - name: Compilar Entregador
-        working-directory: apps/entregador/android
-        run: |
-          chmod +x gradlew
-          NODE_ENV=production ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
-      - name: Preparar Entregador
-        run: |
-          test -f apps/entregador/android/app/build/outputs/apk/release/app-release.apk
-          mkdir -p artifacts
-          cp apps/entregador/android/app/build/outputs/apk/release/app-release.apk artifacts/CLICK-FOOD-Entregador.apk
-      - name: Publicar Entregador
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: bash .github/scripts/android-runtime-smoke.sh "${{ matrix.package }}" "artifacts/${{ matrix.filename }}" "${{ matrix.app }}"
+
+      - name: Publicar logcat do smoke
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CLICK-FOOD-Entregador-APK
-          path: artifacts/CLICK-FOOD-Entregador.apk
-          if-no-files-found: error
-          retention-days: 30
+          name: runtime-log-${{ matrix.app }}
+          path: ${{ matrix.app }}-logcat.txt
+          if-no-files-found: ignore
+          retention-days: 7
