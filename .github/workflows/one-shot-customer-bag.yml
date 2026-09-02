@@ -51,7 +51,7 @@ jobs:
           grep -q 'bagFloating' apps/cliente/App.tsx
           grep -q 'storeScrollRef.current?.scrollTo' apps/cliente/App.tsx
           npm ci --include=dev
-          npm run typecheck --workspace @click-food/cliente
+          npx tsc --noEmit -p apps/cliente/tsconfig.json
       - name: Commitar e remover workflow temporário
         run: |
           git config user.name 'galego-ai'
