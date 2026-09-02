@@ -87,12 +87,12 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
 
  if(body.action==="DRIVER_SUMMARY"){
   const{data:driver}=await ctx.supabaseAdmin.from("drivers").select("id").eq("user_id",userId).maybeSingle();
-  if(!driver)return Response.json({error:"DRIVER_REQUIRED"},{status:403});
-  const[{data:available,error:balanceError},{data:payouts}]=await Promise.all([
-   ctx.supabaseAdmin.schema("private").rpc("driver_available_balance",{p_driver_id:driver.id}),
+  if(!driver)return Response.json({driverId:null,availableBalance:0,payouts:[]});
+  const[{data:available,error:balanceError},{data:payouts,error:payoutError}]=await Promise.all([
+   ctx.supabaseAdmin.rpc("service_driver_available_balance",{p_driver_id:driver.id}),
    ctx.supabaseAdmin.from("payouts").select("id,amount,method,status,destination_value,requested_at,processed_at,review_notes,provider_id").eq("recipient_type","DRIVER").eq("driver_id",driver.id).order("requested_at",{ascending:false}).limit(30),
   ]);
-  if(balanceError)return Response.json({error:"DRIVER_BALANCE_FAILED"},{status:500});
+  if(balanceError||payoutError)return Response.json({error:"DRIVER_BALANCE_FAILED"},{status:500});
   const balance=Math.max(0,Math.round(Number(available??0)*100)/100);
   return Response.json({driverId:driver.id,availableBalance:balance,payouts:(payouts??[]).map((p:any)=>({...p,amount:Number(p.amount)}))});
  }
@@ -100,7 +100,7 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  if(body.action==="REQUEST"){
   if(!body.storeId)return Response.json({error:"STORE_REQUIRED"},{status:400});
   const prepared=prepareRequest(body.amount,body.method,body.destinationValue);if("error" in prepared)return Response.json({error:prepared.error},{status:400});
-  const{data,error}=await ctx.supabaseAdmin.schema("private").rpc("request_store_payout_atomic",{p_store_id:body.storeId,p_user_id:userId,p_amount:prepared.amount,p_method:prepared.method,p_destination_value:prepared.destination});
+  const{data,error}=await ctx.supabaseAdmin.rpc("service_request_store_payout_atomic",{p_store_id:body.storeId,p_user_id:userId,p_amount:prepared.amount,p_method:prepared.method,p_destination_value:prepared.destination});
   if(error)return Response.json({error:errorCode(error.message)},{status:error.message?.includes("INSUFFICIENT")?409:400});
   return Response.json({payoutId:data,amount:prepared.amount,method:prepared.method},{status:201});
  }
@@ -109,7 +109,7 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   const prepared=prepareRequest(body.amount,body.method,body.destinationValue);if("error" in prepared)return Response.json({error:prepared.error},{status:400});
   const{data:driver}=await ctx.supabaseAdmin.from("drivers").select("id").eq("user_id",userId).maybeSingle();
   if(!driver)return Response.json({error:"DRIVER_REQUIRED"},{status:403});
-  const{data,error}=await ctx.supabaseAdmin.schema("private").rpc("request_driver_payout_atomic",{p_driver_id:driver.id,p_user_id:userId,p_amount:prepared.amount,p_method:prepared.method,p_destination_value:prepared.destination});
+  const{data,error}=await ctx.supabaseAdmin.rpc("service_request_driver_payout_atomic",{p_driver_id:driver.id,p_user_id:userId,p_amount:prepared.amount,p_method:prepared.method,p_destination_value:prepared.destination});
   if(error)return Response.json({error:errorCode(error.message)},{status:error.message?.includes("INSUFFICIENT")?409:400});
   return Response.json({payoutId:data,amount:prepared.amount,method:prepared.method},{status:201});
  }
@@ -119,7 +119,7 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   if(!payout?.store_id)return Response.json({error:"PAYOUT_NOT_FOUND"},{status:404});
   const{data:membership}=await ctx.supabaseAdmin.from("store_memberships").select("id").eq("store_id",payout.store_id).eq("user_id",userId).eq("active",true).in("role",["OWNER","MANAGER"]).maybeSingle();
   if(!membership)return Response.json({error:"STORE_MANAGER_REQUIRED"},{status:403});
-  const{data,error}=await ctx.supabaseAdmin.schema("private").rpc("review_store_payout_atomic",{p_payout_id:body.payoutId,p_target_status:"CANCELLED",p_actor_id:userId,p_notes:"Cancelado pelo lojista",p_provider_id:null});
+  const{data,error}=await ctx.supabaseAdmin.rpc("service_review_store_payout_atomic",{p_payout_id:body.payoutId,p_target_status:"CANCELLED",p_actor_id:userId,p_notes:"Cancelado pelo lojista",p_provider_id:null});
   if(error)return Response.json({error:errorCode(error.message)},{status:409});return Response.json({payout:data});
  }
 
@@ -128,7 +128,7 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   if(!payout?.driver_id)return Response.json({error:"PAYOUT_NOT_FOUND"},{status:404});
   const{data:driver}=await ctx.supabaseAdmin.from("drivers").select("id").eq("id",payout.driver_id).eq("user_id",userId).maybeSingle();
   if(!driver)return Response.json({error:"DRIVER_REQUIRED"},{status:403});
-  const{data,error}=await ctx.supabaseAdmin.schema("private").rpc("review_driver_payout_atomic",{p_payout_id:body.payoutId,p_target_status:"CANCELLED",p_actor_id:userId,p_notes:"Cancelado pelo entregador",p_provider_id:null});
+  const{data,error}=await ctx.supabaseAdmin.rpc("service_review_driver_payout_atomic",{p_payout_id:body.payoutId,p_target_status:"CANCELLED",p_actor_id:userId,p_notes:"Cancelado pelo entregador",p_provider_id:null});
   if(error)return Response.json({error:errorCode(error.message)},{status:409});return Response.json({payout:data});
  }
 
@@ -136,8 +136,8 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
   if(!["SUPER_ADMIN","ADMIN"].includes(platformRole))return Response.json({error:"ADMIN_REQUIRED"},{status:403});
   const{data:payout}=await ctx.supabaseAdmin.from("payouts").select("recipient_type").eq("id",body.payoutId).maybeSingle();
   if(!payout)return Response.json({error:"PAYOUT_NOT_FOUND"},{status:404});
-  const rpc=payout.recipient_type==="DRIVER"?"review_driver_payout_atomic":"review_store_payout_atomic";
-  const{data,error}=await ctx.supabaseAdmin.schema("private").rpc(rpc,{p_payout_id:body.payoutId,p_target_status:body.status,p_actor_id:userId,p_notes:body.notes??null,p_provider_id:body.providerId??null});
+  const rpc=payout.recipient_type==="DRIVER"?"service_review_driver_payout_atomic":"service_review_store_payout_atomic";
+  const{data,error}=await ctx.supabaseAdmin.rpc(rpc,{p_payout_id:body.payoutId,p_target_status:body.status,p_actor_id:userId,p_notes:body.notes??null,p_provider_id:body.providerId??null});
   if(error)return Response.json({error:errorCode(error.message)},{status:409});return Response.json({payout:data});
  }
  return Response.json({error:"UNKNOWN_ACTION"},{status:400});
