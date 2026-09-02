@@ -1,0 +1,62 @@
+name: CLICK-FOOD One Shot Customer Bag
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-customer-bag.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Aplicar UX de sacola no Cliente
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('apps/cliente/App.tsx')
+          s = p.read_text()
+
+          replacements = [
+            ('import React, { useEffect, useMemo, useState } from "react";', 'import React, { useEffect, useMemo, useRef, useState } from "react";'),
+            ('  const[receiptOrderId,setReceiptOrderId]=useState<string|null>(null);', '  const[receiptOrderId,setReceiptOrderId]=useState<string|null>(null);\n  const storeScrollRef=useRef<ScrollView>(null); const[bagY,setBagY]=useState(0);'),
+            ('  const minimumMissing=selectedStore?Math.max(0,Number(selectedStore.minimum_order)-cartSubtotal):0;', '  const cartQuantity=useMemo(()=>cart.reduce((sum,item)=>sum+item.quantity,0),[cart]);\n  const minimumMissing=selectedStore?Math.max(0,Number(selectedStore.minimum_order)-cartSubtotal):0;'),
+            ('    setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);setSelectedCategoryId("ALL");setDeliveryPreview(null);', '    setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);setSelectedCategoryId("ALL");setDeliveryPreview(null);setBagY(0);'),
+            ('    setSelectedProduct(null);setMessage(`${item.productName} adicionado ao carrinho.`);', '    setSelectedProduct(null);setMessage(`${item.productName} adicionado à sacola.`);'),
+            ('    return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><ScrollView contentContainerStyle={styles.scroll}>', '    return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><ScrollView ref={storeScrollRef} contentContainerStyle={[styles.scroll,cart.length?styles.scrollWithBag:undefined]}>'),
+            ('      <Text style={styles.section}>Meu carrinho</Text>', '      <View onLayout={event=>setBagY(event.nativeEvent.layout.y)}><Text style={styles.section}>Minha sacola</Text></View>'),
+            ('      }):<Text style={styles.empty}>Adicione itens para continuar.</Text>}', '      }):<Text style={styles.empty}>Sua sacola está vazia. Adicione itens para continuar.</Text>}'),
+            ('    </ScrollView>\n    {pendingCardOrder&&cardTokenization&&<EfiCardPayment', '    </ScrollView>\n    {!!cart.length&&<Pressable accessibilityRole="button" accessibilityLabel={`Abrir sacola com ${cartQuantity} ${cartQuantity===1?"item":"itens"}`} style={styles.bagFloating} onPress={()=>storeScrollRef.current?.scrollTo({y:Math.max(0,bagY-14),animated:true})}><View><Text style={styles.bagFloatingTitle}>🛍️ SACOLA</Text><Text style={styles.bagFloatingMeta}>{cartQuantity} {cartQuantity===1?"item":"itens"}</Text></View><Text style={styles.bagFloatingTotal}>{brl(cartSubtotal)}</Text></Pressable>}\n    {pendingCardOrder&&cardTokenization&&<EfiCardPayment'),
+            ('  safe:{flex:1,backgroundColor:"#f7f7f7"},center:{flex:1,alignItems:"center",justifyContent:"center",gap:10},scroll:{padding:18,paddingBottom:34},authSafe:', '  safe:{flex:1,backgroundColor:"#f7f7f7"},center:{flex:1,alignItems:"center",justifyContent:"center",gap:10},scroll:{padding:18,paddingBottom:34},scrollWithBag:{paddingBottom:118},authSafe:'),
+            ('  bottom:{height:70,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e5e5e5",flexDirection:"row"},', '  bagFloating:{position:"absolute",left:16,right:16,bottom:14,backgroundColor:"#111",borderRadius:16,paddingVertical:12,paddingHorizontal:15,flexDirection:"row",alignItems:"center",justifyContent:"space-between",borderWidth:2,borderColor:"#f4c400",elevation:8,shadowColor:"#000",shadowOpacity:.18,shadowRadius:10,shadowOffset:{width:0,height:4}},bagFloatingTitle:{color:"#f4c400",fontSize:12,fontWeight:"900",letterSpacing:.7},bagFloatingMeta:{color:"#fff",fontSize:10,fontWeight:"700",marginTop:2},bagFloatingTotal:{color:"#fff",fontSize:18,fontWeight:"900"},\n  bottom:{height:70,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e5e5e5",flexDirection:"row"},'),
+          ]
+
+          for old, new in replacements:
+            count = s.count(old)
+            if count != 1:
+              raise SystemExit(f'Patch inseguro: esperado 1 match, encontrado {count}: {old[:90]}')
+            s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+      - name: Validar alteração local
+        run: |
+          grep -q 'Minha sacola' apps/cliente/App.tsx
+          grep -q 'bagFloating' apps/cliente/App.tsx
+          grep -q 'storeScrollRef.current?.scrollTo' apps/cliente/App.tsx
+          npm ci --include=dev
+          npm run typecheck --workspace @click-food/cliente
+      - name: Commitar e remover workflow temporário
+        run: |
+          git config user.name 'galego-ai'
+          git config user.email 'elismarribeiro298@gmail.com'
+          git rm .github/workflows/one-shot-customer-bag.yml
+          git add apps/cliente/App.tsx
+          git commit -m 'feat(cliente): adicionar sacola flutuante com contador e total'
+          git push origin HEAD:main
