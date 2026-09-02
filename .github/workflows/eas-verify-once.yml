@@ -12,7 +12,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     steps:
@@ -32,10 +32,9 @@ jobs:
       - name: Projeto Entregador
         working-directory: apps/entregador
         run: npx --yes eas-cli@latest project:info --non-interactive
+      - name: Vincular Cliente ao projeto EAS pelo slug
+        working-directory: apps/cliente
+        run: npx --yes eas-cli@latest init --account galego-ais-team --non-interactive --json
       - name: Projeto Cliente
-        id: cliente
-        continue-on-error: true
         working-directory: apps/cliente
         run: npx --yes eas-cli@latest project:info --non-interactive
-      - name: Resumo Cliente
-        run: echo "CLIENTE_PROJECT_INFO=${{ steps.cliente.outcome }}"
