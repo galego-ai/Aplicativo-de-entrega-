@@ -1,0 +1,39 @@
+name: CLICK-FOOD EAS Verify Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/eas-verify-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Validar EXPO_TOKEN
+        run: |
+          test -n "${EXPO_TOKEN:-}"
+          echo "EXPO_TOKEN_PRESENT"
+      - name: Identidade Expo
+        run: npx --yes eas-cli@latest whoami
+      - name: Projeto Entregador
+        working-directory: apps/entregador
+        run: npx --yes eas-cli@latest project:info --non-interactive
+      - name: Projeto Cliente
+        id: cliente
+        continue-on-error: true
+        working-directory: apps/cliente
+        run: npx --yes eas-cli@latest project:info --non-interactive
+      - name: Resumo Cliente
+        run: echo "CLIENTE_PROJECT_INFO=${{ steps.cliente.outcome }}"
