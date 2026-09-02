@@ -33,6 +33,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Exigir Google Maps configurado
+        run: |
+          if [ -z "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
+            echo "GOOGLE_MAPS_ANDROID_API_KEY não configurada. APK final não pode ser publicado com chave fallback."
+            exit 1
+          fi
+          echo "Google Maps Android API key configurada no ambiente de build."
       - name: Instalar dependências
         run: npm ci --include=dev
       - name: Validar React Cliente
@@ -43,6 +50,11 @@ jobs:
       - name: Gerar Android Cliente
         working-directory: apps/cliente
         run: NODE_ENV=production CI=1 npx expo prebuild --platform android
+      - name: Validar chave nativa Maps Cliente
+        run: |
+          MANIFEST="apps/cliente/android/app/src/main/AndroidManifest.xml"
+          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST"
+          ! grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST"
       - name: Compilar Cliente
         working-directory: apps/cliente/android
         run: |
@@ -80,6 +92,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Exigir Google Maps configurado
+        run: |
+          if [ -z "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
+            echo "GOOGLE_MAPS_ANDROID_API_KEY não configurada. APK final não pode ser publicado com chave fallback."
+            exit 1
+          fi
+          echo "Google Maps Android API key configurada no ambiente de build."
       - name: Instalar dependências
         run: npm ci --include=dev
       - name: Validar React Entregador
@@ -90,6 +109,11 @@ jobs:
       - name: Gerar Android Entregador
         working-directory: apps/entregador
         run: NODE_ENV=production CI=1 npx expo prebuild --platform android
+      - name: Validar chave nativa Maps Entregador
+        run: |
+          MANIFEST="apps/entregador/android/app/src/main/AndroidManifest.xml"
+          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST"
+          ! grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST"
       - name: Validar serviço da bolinha
         run: |
           test -f apps/entregador/android/app/src/main/java/br/com/clickfood/entregador/floatingbubble/FloatingBubbleService.kt
