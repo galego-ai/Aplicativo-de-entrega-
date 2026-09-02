@@ -8,6 +8,7 @@ const RECOVERY_URL = "https://rmlbmacoqnynqdqmxecz.supabase.co/functions/v1/pass
 const RECOVERY_LABEL = "Recuperar acesso";
 // Mantém a recuperação visível no build de produção da Matriz.
 // Sincronização de publicação Matriz + Lojista.
+// Gatilho de publicação da Matriz.
 
 export const metadata: Metadata = {
   title: "CLICK-FOOD | Matriz",
