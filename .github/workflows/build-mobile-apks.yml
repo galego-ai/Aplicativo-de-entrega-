@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: click-food-eas-android-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-smoke:
