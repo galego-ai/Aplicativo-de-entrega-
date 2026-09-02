@@ -16,6 +16,7 @@ import StoreOpenCloseToggle from "./StoreOpenCloseToggle";
 
 const RECOVERY_URL = "https://rmlbmacoqnynqdqmxecz.supabase.co/functions/v1/password-recovery";
 const RECOVERY_LABEL = "Recuperar acesso";
+// Sincronização de publicação Matriz + Lojista.
 
 export const metadata: Metadata = {
   title: "CLICK-FOOD | Lojista",
