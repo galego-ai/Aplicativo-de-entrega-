@@ -12,7 +12,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     steps:
@@ -21,6 +21,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - name: Instalar dependências do monorepo
+        run: npm ci --include=dev
       - name: Validar EXPO_TOKEN
         run: |
           test -n "${EXPO_TOKEN:-}"
