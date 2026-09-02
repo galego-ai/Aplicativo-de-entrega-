@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
 import MapView, { Marker } from "react-native-maps";
@@ -109,11 +109,13 @@ export default function App(){
   const[addressForm,setAddressForm]=useState({label:"Casa",street:"",number:"",district:"",reference:""}); const[savingAddress,setSavingAddress]=useState(false);
   const[tracking,setTracking]=useState<Tracking|null>(null); const[driverCard,setDriverCard]=useState<DriverCard|null>(null); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);
   const[receiptOrderId,setReceiptOrderId]=useState<string|null>(null);
+  const storeScrollRef=useRef<ScrollView>(null); const[bagY,setBagY]=useState(0);
 
   const cartSubtotal=useMemo(()=>cart.reduce((sum,item)=>{
     const extras=item.options.reduce((s,o)=>s+o.price*o.quantity,0);
     return sum+(item.unitPrice+extras)*item.quantity;
   },0),[cart]);
+  const cartQuantity=useMemo(()=>cart.reduce((sum,item)=>sum+item.quantity,0),[cart]);
   const minimumMissing=selectedStore?Math.max(0,Number(selectedStore.minimum_order)-cartSubtotal):0;
   const freeDeliveryApplies=useMemo(()=>promotions.some(p=>p.promotion_type==="FREE_DELIVERY"&&(!p.product_id||cart.some(item=>item.productId===p.product_id))),[promotions,cart]);
   const deliveryPreviewUsable=Boolean(deliveryPreview&&selectedStore&&deliveryPreview.storeId===selectedStore.id&&deliveryPreview.addressId===selectedAddressId&&new Date(deliveryPreview.expiresAt).getTime()>Date.now()+5000);
@@ -269,7 +271,7 @@ export default function App(){
   }
 
   async function openStore(store:Store){
-    setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);setSelectedCategoryId("ALL");setDeliveryPreview(null);
+    setMessage("");setSelectedStore(store);setCart([]);setSelectedProduct(null);setSelectedCategoryId("ALL");setDeliveryPreview(null);setBagY(0);
     const deliveryEnabled=store.clickfood_delivery_enabled||store.own_delivery_enabled;
     setDeliveryType(deliveryEnabled?"DELIVERY":store.pickup_enabled?"PICKUP":"DELIVERY");
     const[productResult,categoryResult]=await Promise.all([
@@ -329,7 +331,7 @@ export default function App(){
       const found=current.find(x=>x.cartKey===cartKey);
       return found?current.map(x=>x.cartKey===cartKey?{...x,quantity:x.quantity+item.quantity}:x):[...current,{...item,cartKey}];
     });
-    setSelectedProduct(null);setMessage(`${item.productName} adicionado ao carrinho.`);
+    setSelectedProduct(null);setMessage(`${item.productName} adicionado à sacola.`);
   }
 
   function changeQty(cartKey:string,delta:number){
@@ -518,7 +520,7 @@ export default function App(){
   if(!session)return <AuthScreen/>;
 
   if(selectedStore){
-    return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><ScrollView contentContainerStyle={styles.scroll}>
+    return <SafeAreaView style={styles.safe}><StatusBar barStyle="dark-content"/><ScrollView ref={storeScrollRef} contentContainerStyle={[styles.scroll,cart.length?styles.scrollWithBag:undefined]}>
       <Pressable onPress={()=>{setSelectedStore(null);setSelectedProduct(null);setMessage("");}}><Text style={styles.back}>‹ Voltar</Text></Pressable>
       {selectedStore.cover_url?<Image source={{uri:selectedStore.cover_url}} style={styles.storeCover}/>:<View style={[styles.storeCoverFallback,{backgroundColor:selectedStore.secondary_color||"#111"}]}><Text style={[styles.storeCoverFallbackText,{color:selectedStore.primary_color||"#f4c400"}]}>CLICK-FOOD</Text></View>}
       <View style={styles.storeHeading}>{selectedStore.logo_url?<Image source={{uri:selectedStore.logo_url}} style={styles.storeLogo}/>:<View style={[styles.storeLogoFallback,{backgroundColor:selectedStore.primary_color||"#f4c400"}]}><Text style={styles.storeLogoFallbackText}>CF</Text></View>}<View style={{flex:1}}>{!!selectedStore.slogan&&<Text style={styles.storeSlogan}>{selectedStore.slogan}</Text>}<Text style={styles.storeTitle}>{selectedStore.name}</Text><Text style={styles.meta}>{selectedStore.description||"Cardápio CLICK-FOOD"}</Text></View></View>
@@ -579,7 +581,7 @@ export default function App(){
         onAdd={addCustomized}
       />}
 
-      <Text style={styles.section}>Meu carrinho</Text>
+      <View onLayout={event=>setBagY(event.nativeEvent.layout.y)}><Text style={styles.section}>Minha sacola</Text></View>
       {cart.length?cart.map(item=>{
         const extras=item.options.reduce((s,o)=>s+o.price*o.quantity,0);
         return <View style={styles.cartRow} key={item.cartKey}>
@@ -591,7 +593,7 @@ export default function App(){
           </View>
           <View style={styles.qty}><Pressable onPress={()=>changeQty(item.cartKey,-1)}><Text>−</Text></Pressable><Text>{item.quantity}</Text><Pressable onPress={()=>changeQty(item.cartKey,1)}><Text>+</Text></Pressable></View>
         </View>;
-      }):<Text style={styles.empty}>Adicione itens para continuar.</Text>}
+      }):<Text style={styles.empty}>Sua sacola está vazia. Adicione itens para continuar.</Text>}
       {!!cart.length&&<View style={[styles.minimumOrderCard,minimumMissing>0?styles.minimumOrderPending:styles.minimumOrderReached]}><Text style={styles.minimumOrderTitle}>{minimumMissing>0?`Faltam ${brl(minimumMissing)} para o pedido mínimo`:"✓ Pedido mínimo atingido"}</Text><Text style={styles.minimumOrderMeta}>Mínimo da loja: {brl(selectedStore.minimum_order)} • Itens: {brl(cartSubtotal)}</Text></View>}
 
       {(selectedStore.clickfood_delivery_enabled||selectedStore.own_delivery_enabled||selectedStore.pickup_enabled)&&<View style={styles.segment}>
@@ -621,6 +623,7 @@ export default function App(){
       <View style={styles.totalBox}><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>Itens</Text><Text style={styles.checkoutSummaryValue}>{brl(cartSubtotal)}</Text></View><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>{deliveryType==="PICKUP"?"Retirada":"Frete"}</Text><Text style={styles.checkoutSummaryValue}>{deliveryType==="PICKUP"?"Grátis":estimatedDeliveryFee==null?"Calcule acima":estimatedDeliveryFee===0?"Grátis":brl(estimatedDeliveryFee)}</Text></View>{deliveryType==="DELIVERY"&&deliveryPreviewUsable&&deliveryPreview&&freeDeliveryApplies&&deliveryPreview.fee>0&&<Text style={styles.checkoutSaving}>Você economiza {brl(deliveryPreview.fee)} no frete com a promoção ativa.</Text>}<View style={styles.checkoutDivider}/><Text style={styles.checkoutTotalLabel}>Total estimado antes do cupom</Text><Text style={styles.total}>{brl(checkoutEstimatedTotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão, número e CVV são tokenizados pela Efí dentro de uma tela segura e não ficam armazenados no CLICK-FOOD.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
       <Pressable style={[styles.checkout,(!cart.length||minimumMissing>0||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||minimumMissing>0||placing||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{selectedStore.orders_paused?"PEDIDOS PAUSADOS":!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":minimumMissing>0?`FALTAM ${brl(minimumMissing)}`:deliveryType==="DELIVERY"&&!selectedAddressId?"SELECIONE UM ENDEREÇO":placing?"ENVIANDO PEDIDO...":"FAZER PEDIDO"}</Text></Pressable>
     </ScrollView>
+    {!!cart.length&&<Pressable accessibilityRole="button" accessibilityLabel={`Abrir sacola com ${cartQuantity} ${cartQuantity===1?"item":"itens"}`} style={styles.bagFloating} onPress={()=>storeScrollRef.current?.scrollTo({y:Math.max(0,bagY-14),animated:true})}><View><Text style={styles.bagFloatingTitle}>🛍️ SACOLA</Text><Text style={styles.bagFloatingMeta}>{cartQuantity} {cartQuantity===1?"item":"itens"}</Text></View><Text style={styles.bagFloatingTotal}>{brl(cartSubtotal)}</Text></Pressable>}
     {pendingCardOrder&&cardTokenization&&<EfiCardPayment visible config={cardTokenization} order={pendingCardOrder} defaults={{name:String(session.user.user_metadata?.full_name??""),email:String(session.user.email??""),phone:String(session.user.user_metadata?.phone??"")}} onCancel={cancelPendingCardPayment} onComplete={completeCardPayment}/>}
     </SafeAreaView>;
   }
@@ -713,7 +716,7 @@ export default function App(){
 }
 
 const styles=StyleSheet.create({
-  safe:{flex:1,backgroundColor:"#f7f7f7"},center:{flex:1,alignItems:"center",justifyContent:"center",gap:10},scroll:{padding:18,paddingBottom:34},authSafe:{flex:1,backgroundColor:"#f7f7f7"},authWrap:{flexGrow:1,justifyContent:"center",padding:26},
+  safe:{flex:1,backgroundColor:"#f7f7f7"},center:{flex:1,alignItems:"center",justifyContent:"center",gap:10},scroll:{padding:18,paddingBottom:34},scrollWithBag:{paddingBottom:118},authSafe:{flex:1,backgroundColor:"#f7f7f7"},authWrap:{flexGrow:1,justifyContent:"center",padding:26},
   brand:{fontSize:25,fontWeight:"900"},yellow:{color:"#f4c400"},kicker:{fontSize:10,fontWeight:"900",color:"#8b7000",letterSpacing:1.4,marginTop:7},authTitle:{fontSize:30,fontWeight:"900",marginVertical:22},
   input:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e1e1e1",borderRadius:13,padding:13,marginBottom:9},message:{backgroundColor:"#fff5d2",color:"#695400",padding:11,borderRadius:11,marginBottom:8},notice:{backgroundColor:"#fff5d2",color:"#695400",padding:12,borderRadius:12,marginVertical:12},
   darkButton:{backgroundColor:"#111",padding:15,borderRadius:13,alignItems:"center"},darkButtonText:{color:"#fff",fontWeight:"900"},switchText:{textAlign:"center",fontWeight:"800",color:"#8b7000",padding:17},disabled:{opacity:.5},
@@ -732,5 +735,6 @@ const styles=StyleSheet.create({
   trackingCard:{backgroundColor:"#111",borderRadius:20,padding:14,marginBottom:16,overflow:"hidden"},trackingKicker:{color:"#f4c400",fontWeight:"900",fontSize:9,letterSpacing:1.2},trackingTitle:{color:"#fff",fontSize:20,fontWeight:"900",marginTop:5},trackingStatus:{color:"#ccc",fontSize:12,marginTop:4,marginBottom:12},driverCardBox:{backgroundColor:"#242424",borderRadius:14,padding:11,marginBottom:12,flexDirection:"row",alignItems:"center",gap:10},driverAvatar:{width:48,height:48,borderRadius:24,backgroundColor:"#444"},driverAvatarFallback:{width:48,height:48,borderRadius:24,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},driverAvatarInitials:{fontWeight:"900",color:"#111"},driverCardBody:{flex:1},driverCardName:{color:"#fff",fontSize:15,fontWeight:"900"},driverCardMeta:{color:"#ccc",fontSize:10,marginTop:4},trackingMap:{height:250,borderRadius:15,overflow:"hidden"},mapWaiting:{height:180,borderRadius:15,backgroundColor:"#292929",alignItems:"center",justifyContent:"center",padding:20},mapPin:{backgroundColor:"#fff",borderRadius:18,padding:7,borderWidth:2,borderColor:"#111"},driverPin:{backgroundColor:"#f4c400",borderRadius:22,padding:8,borderWidth:2,borderColor:"#111"},driverEmoji:{fontSize:25},liveHint:{color:"#aaa",fontSize:10,marginTop:9,lineHeight:14},arrivedBanner:{backgroundColor:"#f4c400",borderRadius:13,padding:13,marginBottom:12},arrivedTitle:{fontSize:18,fontWeight:"900"},arrivedText:{fontSize:11,marginTop:3},
   cancelButton:{borderWidth:1,borderColor:"#edc3c0",backgroundColor:"#fff",padding:10,borderRadius:10,alignItems:"center",marginTop:5},cancelText:{color:"#a32e28",fontWeight:"900",fontSize:10},rateButton:{backgroundColor:"#fff6cf",padding:10,borderRadius:10,alignItems:"center",marginTop:5},rateText:{color:"#745c00",fontWeight:"900",fontSize:10},reviewed:{color:"#24774b",fontWeight:"800",fontSize:11,padding:8},reviewBox:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e1d49d",borderRadius:14,padding:14,marginTop:5},stars:{flexDirection:"row",gap:7,marginBottom:12},star:{fontSize:34,color:"#ccc"},starActive:{color:"#f4c400"},
   profile:{backgroundColor:"#fff",padding:15,borderRadius:16,flexDirection:"row",alignItems:"center",gap:12},loyaltyHero:{backgroundColor:"#111",borderRadius:18,padding:18,marginTop:14,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},loyaltyKicker:{color:"#f4c400",fontSize:10,fontWeight:"900",letterSpacing:1.2},loyaltyTotal:{color:"#fff",fontSize:34,fontWeight:"900",marginTop:3},loyaltyHeroEmoji:{color:"#f4c400",fontSize:38},loyaltyCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e4e4e4",borderRadius:16,padding:13,marginBottom:10},loyaltyStoreRow:{flexDirection:"row",alignItems:"center",gap:10},loyaltyLogo:{width:44,height:44,borderRadius:12,backgroundColor:"#eee"},loyaltyLogoFallback:{width:44,height:44,borderRadius:12,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},loyaltyLogoText:{fontWeight:"900"},loyaltySubtitle:{fontSize:12,fontWeight:"900",marginTop:14,marginBottom:6},loyaltyRewardRow:{borderTopWidth:1,borderTopColor:"#eee",paddingVertical:10,flexDirection:"row",alignItems:"center",gap:8},loyaltyRedeem:{backgroundColor:"#111",borderRadius:9,paddingVertical:9,paddingHorizontal:10},loyaltyRedeemText:{color:"#f4c400",fontSize:9,fontWeight:"900"},loyaltyMissing:{fontSize:9,color:"#a86b00",fontWeight:"800",marginTop:3},loyaltyCoupon:{backgroundColor:"#fffbea",borderRadius:11,padding:10,marginTop:6,flexDirection:"row",alignItems:"center",gap:8},loyaltyCode:{fontSize:15,fontWeight:"900",letterSpacing:1,marginTop:4},loyaltyPointsSpent:{fontWeight:"900",color:"#a36d00"},signOut:{borderWidth:1,borderColor:"#e3b7b7",borderRadius:13,padding:14,marginTop:24,alignItems:"center"},signOutText:{color:"#9d2c2c",fontWeight:"900"},
+  bagFloating:{position:"absolute",left:16,right:16,bottom:14,backgroundColor:"#111",borderRadius:16,paddingVertical:12,paddingHorizontal:15,flexDirection:"row",alignItems:"center",justifyContent:"space-between",borderWidth:2,borderColor:"#f4c400",elevation:8,shadowColor:"#000",shadowOpacity:.18,shadowRadius:10,shadowOffset:{width:0,height:4}},bagFloatingTitle:{color:"#f4c400",fontSize:12,fontWeight:"900",letterSpacing:.7},bagFloatingMeta:{color:"#fff",fontSize:10,fontWeight:"700",marginTop:2},bagFloatingTotal:{color:"#fff",fontSize:18,fontWeight:"900"},
   bottom:{height:70,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e5e5e5",flexDirection:"row"},tab:{flex:1,alignItems:"center",justifyContent:"center"},tabIcon:{fontSize:19,color:"#777"},tabLabel:{fontSize:9,color:"#777",fontWeight:"700",marginTop:3},tabActive:{color:"#8d7000",fontWeight:"900"}
 });
