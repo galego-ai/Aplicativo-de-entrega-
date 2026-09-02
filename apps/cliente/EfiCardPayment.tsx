@@ -1,216 +1,29 @@
-import React, { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
-import { WebView, type WebViewMessageEvent } from "react-native-webview";
-import { supabase } from "./supabase";
+import React,{useEffect,useMemo,useRef,useState}from"react";
+import{ActivityIndicator,Pressable,SafeAreaView,ScrollView,StyleSheet,Text,View,Modal}from"react-native";
+import{WebView,type WebViewMessageEvent}from"react-native-webview";
+import{supabase}from"./supabase";
 
-export type CardTokenizationConfig = {
-  provider: "EFI";
-  accountId: string;
-  environment: "sandbox" | "production";
-  brands: string[];
-};
+export type CardTokenizationConfig={provider:"EFI";accountId:string;environment:"sandbox"|"production";brands:string[]};
+export type PendingCardOrder={orderId:string;total:number};
+type SavedCard={id:string;brand:string;card_mask:string;holder_name:string|null;is_default:boolean};
+type Props={visible:boolean;config:CardTokenizationConfig;order:PendingCardOrder;defaults:{name:string;email:string;phone:string};onCancel:()=>Promise<void>|void;onComplete:(result:{paid:boolean;approved:boolean;status:string})=>Promise<void>|void};
+const safeJson=(value:unknown)=>JSON.stringify(value).replace(/</g,"\\u003c");
+const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
-export type PendingCardOrder = {
-  orderId: string;
-  total: number;
-};
-
-type Props = {
-  visible: boolean;
-  config: CardTokenizationConfig;
-  order: PendingCardOrder;
-  defaults: { name: string; email: string; phone: string };
-  onCancel: () => Promise<void> | void;
-  onComplete: (result: { paid: boolean; approved: boolean; status: string }) => Promise<void> | void;
-};
-
-const safeJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function buildHtml(config: CardTokenizationConfig, total: number, defaults: Props["defaults"]) {
-  const accountId = safeJson(config.accountId);
-  const environment = safeJson(config.environment);
-  const supportedBrands = safeJson((config.brands?.length ? config.brands : ["visa", "mastercard", "amex", "elo"]).map((brand) => String(brand).toLowerCase()));
-  const totalCents = Math.max(0, Math.round(total * 100));
-  const initialName = safeJson(defaults.name || "");
-  const initialEmail = safeJson(defaults.email || "");
-  const initialPhone = safeJson(defaults.phone || "");
-  return `<!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<meta http-equiv="Cache-Control" content="no-store" />
-<meta http-equiv="Pragma" content="no-cache" />
-<title>Pagamento seguro</title>
-<script src="https://cdn.jsdelivr.net/npm/payment-token-efi@3.4.1/dist/payment-token-efi-umd.min.js"></script>
-<style>
-*{box-sizing:border-box}body{margin:0;background:#f7f7f7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111}.wrap{padding:18px 18px 42px}.brand{font-size:22px;font-weight:900;margin-bottom:4px}.brand span{color:#e1b400}.sub{font-size:12px;color:#666;line-height:1.45;margin-bottom:18px}.total{background:#111;color:#fff;border-radius:16px;padding:16px;margin-bottom:16px}.total small{display:block;color:#bbb;font-weight:700}.total strong{display:block;font-size:25px;margin-top:4px}.card{background:#fff;border:1px solid #e5e5e5;border-radius:16px;padding:14px;margin-bottom:12px}.label{font-size:11px;font-weight:800;color:#555;margin:9px 0 5px}.input,.select{width:100%;height:46px;border:1px solid #d8d8d8;border-radius:11px;padding:0 12px;font-size:15px;background:#fff}.row{display:flex;gap:9px}.row>div{flex:1}.button{width:100%;border:0;border-radius:13px;background:#f4c400;padding:15px;font-size:15px;font-weight:900;margin-top:14px}.button[disabled]{opacity:.45}.hint{font-size:10px;color:#777;line-height:1.45;margin-top:12px}.error{background:#fff0ed;color:#8d2f25;border-radius:11px;padding:11px;font-size:12px;margin:10px 0;display:none}.ok{background:#e9f8ee;color:#23683b;border-radius:11px;padding:11px;font-size:12px;margin:10px 0;display:none}</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="brand"><span>CLICK</span>-FOOD</div>
-  <div class="sub">Pagamento protegido pela tokenização Efí. O CLICK-FOOD não recebe nem armazena o número completo do cartão ou CVV.</div>
-  <div class="total"><small>Total do pedido</small><strong>R$ ${(total || 0).toFixed(2).replace(".", ",")}</strong></div>
-  <div id="error" class="error"></div><div id="ok" class="ok"></div>
-  <div class="card">
-    <div class="label">Número do cartão</div><input id="number" class="input" inputmode="numeric" autocomplete="cc-number" maxlength="19" placeholder="0000 0000 0000 0000" />
-    <div class="row"><div><div class="label">Validade (mês)</div><input id="month" class="input" inputmode="numeric" maxlength="2" placeholder="MM" /></div><div><div class="label">Validade (ano)</div><input id="year" class="input" inputmode="numeric" maxlength="4" placeholder="AAAA" /></div><div><div class="label">CVV</div><input id="cvv" class="input" inputmode="numeric" maxlength="4" type="password" placeholder="123" /></div></div>
-    <div class="label">Nome impresso no cartão</div><input id="name" class="input" autocomplete="cc-name" placeholder="Nome completo" />
-    <div class="label">CPF do titular</div><input id="cpf" class="input" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" />
-    <div class="label">E-mail</div><input id="email" class="input" inputmode="email" autocomplete="email" />
-    <div class="label">Telefone</div><input id="phone" class="input" inputmode="tel" autocomplete="tel" />
-    <div class="label">Parcelas</div><select id="installments" class="select"><option value="1">1x</option></select>
-    <button id="pay" class="button" disabled>PAGAR COM CARTÃO</button>
-    <div class="hint">Os dados sensíveis do cartão são tokenizados dentro desta tela pela biblioteca oficial Efí. Apenas o token temporário é enviado para concluir a cobrança.</div>
-  </div>
-</div>
-<script>
-const ACCOUNT=${accountId}; const ENV=${environment}; const TOTAL=${totalCents}; const SUPPORTED=${supportedBrands};
-const el=id=>document.getElementById(id); const digits=v=>String(v||'').replace(/\D/g,'');
-el('name').value=${initialName}; el('email').value=${initialEmail}; el('phone').value=${initialPhone};
-function post(type,payload={}){window.ReactNativeWebView?.postMessage(JSON.stringify({type,...payload}));}
-function showError(message){el('ok').style.display='none';el('error').textContent=String(message||'Não foi possível validar o cartão.');el('error').style.display='block';}
-function showOk(message){el('error').style.display='none';el('ok').textContent=message;el('ok').style.display='block';}
-function formatCard(){const d=digits(el('number').value).slice(0,19);el('number').value=d.replace(/(.{4})/g,'$1 ').trim();}
-function formatCpf(){const d=digits(el('cpf').value).slice(0,11);let v=d;if(d.length>3)v=d.slice(0,3)+'.'+d.slice(3);if(d.length>6)v=v.slice(0,7)+'.'+v.slice(7);if(d.length>9)v=v.slice(0,11)+'-'+v.slice(11);el('cpf').value=v;}
-el('number').addEventListener('input',formatCard);el('cpf').addEventListener('input',formatCpf);
-async function checkEfiScript(){
-  const button=el('pay');
-  if(!window.EfiPay?.CreditCard){showError('O módulo seguro da Efí não carregou. Verifique sua conexão e tente novamente.');post('script_error');return false;}
-  try{
-    if(typeof EfiPay.CreditCard.isScriptBlocked==='function'&&await EfiPay.CreditCard.isScriptBlocked()){
-      showError('O módulo antifraude da Efí foi bloqueado neste aparelho. Desative bloqueadores de conteúdo para realizar o pagamento.');post('script_blocked');return false;
-    }
-  }catch(e){showError('Não foi possível validar o módulo seguro da Efí. Tente novamente.');post('script_error');return false;}
-  button.disabled=false;post('ready');return true;
-}
-async function identifyBrand(){const number=digits(el('number').value);if(number.length<13)return null;try{const brand=String(await EfiPay.CreditCard.setCardNumber(number).verifyCardBrand()).toLowerCase();if(!SUPPORTED.includes(brand)){showError('Bandeira de cartão não habilitada para este checkout.');return null;}return brand;}catch(e){showError(e?.error_description||'Não foi possível identificar a bandeira.');return null;}}
-async function loadInstallments(){const brand=await identifyBrand();if(!brand)return;try{const data=await EfiPay.CreditCard.setAccount(ACCOUNT).setEnvironment(ENV).setBrand(brand).setTotal(TOTAL).getInstallments();const list=Array.isArray(data?.installments)?data.installments:[];const select=el('installments');select.innerHTML='';(list.length?list:[{installment:1,currency:(TOTAL/100).toFixed(2).replace('.',',')}]).forEach(item=>{const option=document.createElement('option');option.value=String(item.installment);option.textContent=String(item.installment)+'x de R$ '+String(item.currency||((Number(item.value||TOTAL)/100).toFixed(2).replace('.',',')));select.appendChild(option);});}catch(e){showError(e?.error_description||'Não foi possível consultar as parcelas.');}}
-el('number').addEventListener('blur',loadInstallments);
-el('pay').addEventListener('click',async()=>{const button=el('pay');if(button.disabled)return;button.disabled=true;el('error').style.display='none';const number=digits(el('number').value),cvv=digits(el('cvv').value),month=digits(el('month').value),year=digits(el('year').value),name=el('name').value.trim(),cpf=digits(el('cpf').value),email=el('email').value.trim(),phone=digits(el('phone').value),installments=Number(el('installments').value||1);if(number.length<13||cvv.length<3||month.length<1||year.length!==4||name.length<3||cpf.length!==11||!email.includes('@')||phone.length<10){showError('Confira número, validade, CVV, nome, CPF, e-mail e telefone.');button.disabled=false;return;}const brand=await identifyBrand();if(!brand){button.disabled=false;return;}try{showOk('Protegendo os dados do cartão…');const token=await EfiPay.CreditCard.setAccount(ACCOUNT).setEnvironment(ENV).setCreditCardData({brand,number,cvv,expirationMonth:month.padStart(2,'0'),expirationYear:year,holderName:name,holderDocument:cpf,reuse:false}).getPaymentToken();if(!token?.payment_token||!token?.card_mask)throw new Error('TOKEN_MISSING');post('token',{paymentToken:token.payment_token,cardMask:token.card_mask,brand,installments,customer:{name,cpf,email,phone}});el('number').value='';el('cvv').value='';}catch(e){showError(e?.error_description||'A Efí não conseguiu tokenizar este cartão. Confira os dados e tente novamente.');button.disabled=false;post('token_error',{code:String(e?.code||e?.error||'TOKENIZATION_FAILED')});}});
-window.addEventListener('load',()=>{void checkEfiScript();});
-</script>
-</body></html>`;
+function buildHtml(config:CardTokenizationConfig,total:number,defaults:Props["defaults"]){
+ const accountId=safeJson(config.accountId),environment=safeJson(config.environment),supportedBrands=safeJson((config.brands?.length?config.brands:["visa","mastercard","amex","elo"]).map(x=>String(x).toLowerCase())),totalCents=Math.max(0,Math.round(total*100)),initialName=safeJson(defaults.name||""),initialEmail=safeJson(defaults.email||""),initialPhone=safeJson(defaults.phone||"");
+ return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta http-equiv="Cache-Control" content="no-store"><script src="https://cdn.jsdelivr.net/npm/payment-token-efi@3.4.1/dist/payment-token-efi-umd.min.js"></script><style>*{box-sizing:border-box}body{margin:0;background:#f7f7f7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111}.wrap{padding:16px 16px 40px}.box{background:#fff;border:1px solid #e3e3e3;border-radius:16px;padding:14px}.total{background:#111;color:#fff;border-radius:14px;padding:14px;margin-bottom:12px}.total small{display:block;color:#aaa}.total strong{font-size:24px}.label{font-size:11px;font-weight:800;color:#555;margin:9px 0 5px}.input,.select{width:100%;height:46px;border:1px solid #d8d8d8;border-radius:11px;padding:0 12px;font-size:15px;background:#fff}.row{display:flex;gap:8px}.row>div{flex:1}.btn{width:100%;border:0;border-radius:12px;background:#f4c400;padding:15px;font-weight:900;margin-top:14px}.btn[disabled]{opacity:.45}.msg{display:none;padding:10px;border-radius:10px;margin-bottom:10px;font-size:12px}.err{background:#fff0ed;color:#8d2f25}.ok{background:#e9f8ee;color:#23683b}.hint{font-size:10px;color:#777;line-height:1.5;margin-top:12px}</style></head><body><div class="wrap"><div class="total"><small>Total</small><strong>R$ ${(total||0).toFixed(2).replace(".",",")}</strong></div><div id="error" class="msg err"></div><div id="ok" class="msg ok"></div><div class="box"><div class="label">Número do cartão</div><input id="number" class="input" inputmode="numeric" autocomplete="cc-number" maxlength="19"><div class="row"><div><div class="label">Mês</div><input id="month" class="input" inputmode="numeric" maxlength="2" placeholder="MM"></div><div><div class="label">Ano</div><input id="year" class="input" inputmode="numeric" maxlength="4" placeholder="AAAA"></div><div><div class="label">CVV</div><input id="cvv" class="input" inputmode="numeric" maxlength="4" type="password"></div></div><div class="label">Nome no cartão</div><input id="name" class="input"><div class="label">CPF do titular</div><input id="cpf" class="input" inputmode="numeric" maxlength="14"><div class="label">E-mail</div><input id="email" class="input" inputmode="email"><div class="label">Telefone</div><input id="phone" class="input" inputmode="tel"><div class="label">Parcelas</div><select id="installments" class="select"><option value="1">1x</option></select><button id="pay" class="btn" disabled>PAGAR E SALVAR CARTÃO</button><div class="hint">A Efí tokeniza o cartão com reutilização segura. Número completo e CVV não ficam armazenados no CLICK-FOOD.</div></div></div><script>const ACCOUNT=${accountId},ENV=${environment},TOTAL=${totalCents},SUPPORTED=${supportedBrands};const el=id=>document.getElementById(id),digits=v=>String(v||'').replace(/\D/g,'');el('name').value=${initialName};el('email').value=${initialEmail};el('phone').value=${initialPhone};function post(type,payload={}){window.ReactNativeWebView?.postMessage(JSON.stringify({type,...payload}))}function showError(m){el('ok').style.display='none';el('error').textContent=String(m||'Não foi possível validar o cartão.');el('error').style.display='block'}function showOk(m){el('error').style.display='none';el('ok').textContent=m;el('ok').style.display='block'}el('number').addEventListener('input',()=>{const d=digits(el('number').value).slice(0,19);el('number').value=d.replace(/(.{4})/g,'$1 ').trim()});el('cpf').addEventListener('input',()=>{const d=digits(el('cpf').value).slice(0,11);let v=d;if(d.length>3)v=d.slice(0,3)+'.'+d.slice(3);if(d.length>6)v=v.slice(0,7)+'.'+v.slice(7);if(d.length>9)v=v.slice(0,11)+'-'+v.slice(11);el('cpf').value=v});async function checkEfiScript(){if(!window.EfiPay?.CreditCard){showError('O módulo seguro da Efí não carregou.');post('script_error');return false}try{if(typeof EfiPay.CreditCard.isScriptBlocked==='function'&&await EfiPay.CreditCard.isScriptBlocked()){showError('O módulo antifraude da Efí foi bloqueado neste aparelho.');post('script_blocked');return false}}catch{showError('Não foi possível validar o módulo seguro da Efí.');return false}el('pay').disabled=false;post('ready');return true}async function identifyBrand(){const number=digits(el('number').value);if(number.length<13)return null;try{const brand=String(await EfiPay.CreditCard.setCardNumber(number).verifyCardBrand()).toLowerCase();if(!SUPPORTED.includes(brand)){showError('Bandeira não habilitada.');return null}return brand}catch(e){showError(e?.error_description||'Cartão inválido.');return null}}async function loadInstallments(){const brand=await identifyBrand();if(!brand)return;try{const data=await EfiPay.CreditCard.setAccount(ACCOUNT).setEnvironment(ENV).setBrand(brand).setTotal(TOTAL).getInstallments();const list=Array.isArray(data?.installments)?data.installments:[];const select=el('installments');select.innerHTML='';(list.length?list:[{installment:1,currency:(TOTAL/100).toFixed(2).replace('.',',')}]).forEach(item=>{const option=document.createElement('option');option.value=String(item.installment);option.textContent=String(item.installment)+'x de R$ '+String(item.currency||((Number(item.value||TOTAL)/100).toFixed(2).replace('.',',')));select.appendChild(option)})}catch(e){showError(e?.error_description||'Não foi possível consultar as parcelas.')}}el('number').addEventListener('blur',loadInstallments);el('pay').addEventListener('click',async()=>{const button=el('pay');button.disabled=true;const number=digits(el('number').value),cvv=digits(el('cvv').value),month=digits(el('month').value),year=digits(el('year').value),name=el('name').value.trim(),cpf=digits(el('cpf').value),email=el('email').value.trim(),phone=digits(el('phone').value),installments=Number(el('installments').value||1);if(number.length<13||cvv.length<3||month.length<1||year.length!==4||name.length<3||cpf.length!==11||!email.includes('@')||phone.length<10){showError('Confira número, validade, CVV, nome, CPF, e-mail e telefone.');button.disabled=false;return}const brand=await identifyBrand();if(!brand){button.disabled=false;return}try{showOk('Protegendo e salvando o cartão…');const token=await EfiPay.CreditCard.setAccount(ACCOUNT).setEnvironment(ENV).setCreditCardData({brand,number,cvv,expirationMonth:month.padStart(2,'0'),expirationYear:year,holderName:name,holderDocument:cpf,reuse:true}).getPaymentToken();if(!token?.payment_token||!token?.card_mask)throw new Error('TOKEN_MISSING');post('token',{paymentToken:token.payment_token,cardMask:token.card_mask,brand,installments,customer:{name,cpf,email,phone}});el('number').value='';el('cvv').value=''}catch(e){showError(e?.error_description||'A Efí não conseguiu tokenizar este cartão.');button.disabled=false;post('token_error',{code:String(e?.code||e?.error||'TOKENIZATION_FAILED')})}});window.addEventListener('load',()=>void checkEfiScript());</script></body></html>`;
 }
 
-function cardChargeErrorMessage(code: string) {
-  const messages: Record<string, string> = {
-    EFI_CARD_NOT_ENABLED: "Pagamento por cartão ainda não está habilitado pela Matriz.",
-    EFI_WEBHOOK_HMAC_REQUIRED: "A integração Efí está incompleta no servidor. Tente novamente mais tarde.",
-    EFI_CHARGES_CREDENTIALS_REQUIRED: "As credenciais de cobrança da Efí ainda não estão configuradas.",
-    EFI_CARD_AUTH_FAILED: "A Efí não autorizou a integração agora. Tente novamente em instantes.",
-    EFI_CARD_CHARGE_FAILED: "A Efí recusou a criação da cobrança. Confira os dados ou tente outro cartão.",
-    EFI_CARD_STORAGE_FAILED: "A cobrança foi criada, mas não pôde ser registrada. O sistema fará a reconciliação automaticamente.",
-    EFI_CARD_RECONCILIATION_FAILED: "A cobrança foi criada e está em reconciliação. Consulte o pedido em alguns instantes.",
-    CARD_CUSTOMER_DATA_REQUIRED: "Preencha corretamente nome, CPF, e-mail e telefone do titular.",
-    INVALID_CARD_PAYMENT: "Os dados tokenizados do cartão não foram aceitos. Tente novamente.",
-  };
-  return messages[code] ?? "Não foi possível concluir a cobrança do cartão agora. Tente novamente ou use outra forma de pagamento.";
+function errorMessage(code:string){const m:Record<string,string>={EFI_CARD_NOT_ENABLED:"Pagamento por cartão ainda não está habilitado.",EFI_CARD_CHARGE_FAILED:"A Efí recusou a cobrança. Confira os dados ou tente outro cartão.",SAVED_CARD_NOT_FOUND:"O cartão salvo não está mais disponível.",SAVED_CARD_TOKEN_MISSING:"O cartão salvo precisa ser cadastrado novamente.",CARD_CUSTOMER_DATA_REQUIRED:"Os dados do titular estão incompletos.",INVALID_CARD_PAYMENT:"Os dados do cartão não foram aceitos."};return m[code]??"Não foi possível concluir a cobrança agora."}
+
+export default function EfiCardPayment({visible,config,order,defaults,onCancel,onComplete}:Props){
+ const[processing,setProcessing]=useState(false),[message,setMessage]=useState(""),[cards,setCards]=useState<SavedCard[]>([]),[useNew,setUseNew]=useState(false);const processingRef=useRef(false);const page=useMemo(()=>buildHtml(config,order.total,defaults),[config,order.total,defaults]);
+ useEffect(()=>{if(!visible)return;setMessage("");void supabase.functions.invoke("customer-saved-card",{body:{action:"LIST"}}).then(r=>{const rows=(r.data?.cards??[]) as SavedCard[];setCards(rows);setUseNew(rows.length===0)})},[visible,order.orderId]);
+ async function finishCharge(charge:any){if(charge.error){setMessage("A Efí não concluiu a cobrança. Tente novamente ou use outra forma de pagamento.");return}if(charge.data?.error){setMessage(errorMessage(String(charge.data.error)));return}let statusCheck=await supabase.functions.invoke("efi-card-status",{body:{orderId:order.orderId}});let status=String(statusCheck.data?.status??charge.data?.providerStatus??"").toUpperCase(),paid=Boolean(statusCheck.data?.paid||charge.data?.paid||status==="PAID"),approved=Boolean(statusCheck.data?.approved||charge.data?.approved||status==="APPROVED");if(approved&&!paid){setMessage("Cartão aprovado. Confirmando com a Efí…");for(let attempt=0;attempt<5&&!paid;attempt++){await sleep(1500);statusCheck=await supabase.functions.invoke("efi-card-status",{body:{orderId:order.orderId}});if(statusCheck.error)continue;status=String(statusCheck.data?.status??status).toUpperCase();paid=Boolean(statusCheck.data?.paid||status==="PAID");approved=Boolean(statusCheck.data?.approved||paid||status==="APPROVED")}}if(paid||approved){setMessage(paid?"Pagamento confirmado.":"Cartão aprovado. A confirmação continuará automaticamente.");await onComplete({paid,approved,status:status||(paid?"PAID":"APPROVED")});return}setMessage(statusCheck.data?.charge?.refusal_reason?`Cartão não aprovado: ${statusCheck.data.charge.refusal_reason}`:errorMessage(String(statusCheck.data?.error??"")))}
+ async function paySaved(card:SavedCard){if(processingRef.current)return;processingRef.current=true;setProcessing(true);setMessage("Processando cartão salvo com a Efí…");try{const charge=await supabase.functions.invoke("efi-card-charge",{body:{orderId:order.orderId,savedCardId:card.id,installments:1,customer:defaults}});await finishCharge(charge)}finally{processingRef.current=false;setProcessing(false)}}
+ async function handleMessage(event:WebViewMessageEvent){let data:any;try{data=JSON.parse(event.nativeEvent.data)}catch{return}if(data?.type==="script_blocked"){setMessage("O módulo antifraude da Efí está bloqueado neste aparelho.");return}if(data?.type==="script_error"){setMessage("Não foi possível carregar o módulo seguro da Efí.");return}if(data?.type==="token_error"){setMessage("A tokenização não foi concluída. Confira os dados.");return}if(data?.type!=="token"||processingRef.current)return;processingRef.current=true;setProcessing(true);setMessage("Salvando o cartão protegido…");try{const customer=data.customer??{};const saved=await supabase.functions.invoke("customer-saved-card",{body:{action:"SAVE",paymentToken:String(data.paymentToken??""),cardMask:String(data.cardMask??""),brand:String(data.brand??""),holderName:String(customer.name??""),holderDocument:String(customer.cpf??""),email:String(customer.email??""),phone:String(customer.phone??""),makeDefault:cards.length===0}});if(saved.error||saved.data?.error||!saved.data?.card?.id){setMessage("Não foi possível salvar o cartão com segurança. Tente novamente.");return}setMessage("Cartão salvo. Concluindo a cobrança…");const charge=await supabase.functions.invoke("efi-card-charge",{body:{orderId:order.orderId,savedCardId:String(saved.data.card.id),installments:Number(data.installments??1),customer:{name:String(customer.name??""),email:String(customer.email??""),phone:String(customer.phone??"")}}});await finishCharge(charge)}catch{setMessage("Falha ao comunicar com a Efí. O pedido ficará protegido até a confirmação.")}finally{processingRef.current=false;setProcessing(false)}}
+ return <Modal visible={visible} animationType="slide" onRequestClose={()=>{if(!processingRef.current)void onCancel()}}><SafeAreaView style={styles.safe}><View style={styles.header}><View><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.subtitle}>PAGAMENTO SEGURO • EFÍ BANK</Text></View><Pressable disabled={processing} onPress={()=>void onCancel()} style={[styles.close,processing&&styles.disabled]}><Text style={styles.closeText}>FECHAR</Text></Pressable></View>{!!message&&<View style={styles.notice}>{processing&&<ActivityIndicator/>}<Text style={styles.noticeText}>{message}</Text></View>}{cards.length>0&&!useNew?<ScrollView contentContainerStyle={styles.cards}><Text style={styles.title}>Escolha um cartão salvo</Text><Text style={styles.help}>O número completo e o CVV não ficam no CLICK-FOOD.</Text>{cards.map(card=><Pressable disabled={processing} key={card.id} onPress={()=>void paySaved(card)} style={styles.card}><View><Text style={styles.cardTitle}>{card.brand.toUpperCase()} {card.is_default?"• PADRÃO":""}</Text><Text style={styles.mask}>{card.card_mask}</Text><Text style={styles.holder}>{card.holder_name||"Titular protegido"}</Text></View><Text style={styles.pay}>PAGAR</Text></Pressable>)}<Pressable onPress={()=>setUseNew(true)} style={styles.secondary}><Text style={styles.secondaryText}>USAR E SALVAR OUTRO CARTÃO</Text></Pressable></ScrollView>:<><View style={styles.newHeader}>{cards.length>0&&<Pressable onPress={()=>setUseNew(false)}><Text style={styles.back}>‹ Cartões salvos</Text></Pressable>}<Text style={styles.newHint}>Cartão novo será salvo com token reutilizável da Efí.</Text></View><WebView style={styles.web} source={{html:page}} originWhitelist={["about:blank"]} javaScriptEnabled javaScriptCanOpenWindowsAutomatically={false} domStorageEnabled cacheEnabled={false} thirdPartyCookiesEnabled sharedCookiesEnabled mixedContentMode="never" setSupportMultipleWindows={false} onShouldStartLoadWithRequest={request=>request.url==="about:blank"} onError={()=>setMessage("Não foi possível abrir o ambiente seguro da Efí.")} onHttpError={event=>setMessage(`O ambiente seguro respondeu com erro ${event.nativeEvent.statusCode}.`)} onMessage={handleMessage}/></>}</SafeAreaView></Modal>
 }
 
-export default function EfiCardPayment({ visible, config, order, defaults, onCancel, onComplete }: Props) {
-  const [processing, setProcessing] = useState(false);
-  const [message, setMessage] = useState("");
-  const processingRef = useRef(false);
-  const html = useMemo(() => buildHtml(config, order.total, defaults), [config, order.total, defaults]);
-
-  async function handleMessage(event: WebViewMessageEvent) {
-    let data: any;
-    try { data = JSON.parse(event.nativeEvent.data); } catch { return; }
-    if (data?.type === "script_blocked") { setMessage("O módulo antifraude da Efí está bloqueado neste aparelho. Desative o bloqueador de conteúdo e tente novamente."); return; }
-    if (data?.type === "script_error") { setMessage("Não foi possível carregar o módulo seguro da Efí. Verifique a conexão e tente novamente."); return; }
-    if (data?.type === "token_error") { setMessage("A tokenização do cartão não foi concluída. Confira os dados e tente novamente."); return; }
-    if (data?.type !== "token" || processingRef.current) return;
-
-    processingRef.current = true;
-    setProcessing(true); setMessage("Enviando o token seguro para a Efí…");
-    try {
-      const charge = await supabase.functions.invoke("efi-card-charge", { body: {
-        orderId: order.orderId,
-        paymentToken: String(data.paymentToken ?? ""),
-        cardMask: String(data.cardMask ?? ""),
-        brand: String(data.brand ?? ""),
-        installments: Number(data.installments ?? 1),
-        customer: data.customer ?? {},
-      }});
-
-      if (charge.error) {
-        setMessage("A Efí não concluiu a cobrança. Nenhum número completo de cartão ou CVV foi armazenado. Tente novamente ou escolha outra forma de pagamento.");
-        return;
-      }
-      if (charge.data?.error) {
-        setMessage(cardChargeErrorMessage(String(charge.data.error)));
-        return;
-      }
-
-      let statusCheck = await supabase.functions.invoke("efi-card-status", { body: { orderId: order.orderId } });
-      let status = String(statusCheck.data?.status ?? charge.data?.providerStatus ?? "").toUpperCase();
-      let paid = Boolean(statusCheck.data?.paid || charge.data?.paid || status === "PAID");
-      let approved = Boolean(statusCheck.data?.approved || charge.data?.approved || status === "APPROVED");
-
-      if (approved && !paid) {
-        setMessage("Cartão aprovado. Confirmando o pagamento com a Efí…");
-        for (let attempt = 0; attempt < 5 && !paid; attempt += 1) {
-          await sleep(1500);
-          statusCheck = await supabase.functions.invoke("efi-card-status", { body: { orderId: order.orderId } });
-          if (statusCheck.error) continue;
-          status = String(statusCheck.data?.status ?? status).toUpperCase();
-          paid = Boolean(statusCheck.data?.paid || status === "PAID");
-          approved = Boolean(statusCheck.data?.approved || paid || status === "APPROVED");
-        }
-      }
-
-      if (paid || approved) {
-        setMessage(paid ? "Pagamento confirmado." : "Cartão aprovado. A confirmação final continuará automaticamente no servidor.");
-        await onComplete({ paid, approved, status: status || (paid ? "PAID" : "APPROVED") });
-        return;
-      }
-
-      const refusal = statusCheck.data?.charge?.refusal_reason || charge.data?.refusal?.reason;
-      const code = String(charge.data?.error || statusCheck.data?.error || "");
-      setMessage(refusal ? `Cartão não aprovado: ${refusal}` : cardChargeErrorMessage(code));
-    } catch {
-      setMessage("Ocorreu uma falha ao comunicar com a Efí. O pedido ficará protegido e poderá ser cancelado sem cobrança se o pagamento não for confirmado.");
-    } finally {
-      processingRef.current = false;
-      setProcessing(false);
-    }
-  }
-
-  return <Modal visible={visible} animationType="slide" onRequestClose={() => { if (!processingRef.current) void onCancel(); }}>
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <View><Text style={styles.brand}><Text style={styles.yellow}>CLICK</Text>-FOOD</Text><Text style={styles.subtitle}>PAGAMENTO SEGURO • EFÍ BANK</Text></View>
-        <Pressable disabled={processing} onPress={() => void onCancel()} style={[styles.close, processing && styles.disabled]}><Text style={styles.closeText}>FECHAR</Text></Pressable>
-      </View>
-      {!!message && <View style={styles.notice}>{processing && <ActivityIndicator />}<Text style={styles.noticeText}>{message}</Text></View>}
-      <WebView
-        style={styles.web}
-        source={{ html }}
-        originWhitelist={["about:blank"]}
-        javaScriptEnabled
-        javaScriptCanOpenWindowsAutomatically={false}
-        domStorageEnabled
-        cacheEnabled={false}
-        thirdPartyCookiesEnabled
-        sharedCookiesEnabled
-        mixedContentMode="never"
-        setSupportMultipleWindows={false}
-        onShouldStartLoadWithRequest={(request) => request.url === "about:blank"}
-        onError={() => setMessage("Não foi possível abrir o ambiente seguro da Efí. Verifique sua conexão e tente novamente.")}
-        onHttpError={(event) => setMessage(`O ambiente seguro de pagamento respondeu com erro ${event.nativeEvent.statusCode}. Tente novamente.`)}
-        onMessage={handleMessage}
-      />
-    </SafeAreaView>
-  </Modal>;
-}
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#f7f7f7" },
-  header: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#e6e6e6", flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff" },
-  brand: { fontSize: 20, fontWeight: "900" }, yellow: { color: "#e1b400" }, subtitle: { fontSize: 9, color: "#777", fontWeight: "800", marginTop: 3, letterSpacing: .7 },
-  close: { backgroundColor: "#111", paddingHorizontal: 13, paddingVertical: 9, borderRadius: 10 }, closeText: { color: "#fff", fontSize: 10, fontWeight: "900" }, disabled: { opacity: .45 },
-  notice: { margin: 12, marginBottom: 0, backgroundColor: "#fff5d2", borderRadius: 11, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }, noticeText: { color: "#695400", flex: 1, fontSize: 11, fontWeight: "700" },
-  web: { flex: 1, backgroundColor: "#f7f7f7" },
-});
+const styles=StyleSheet.create({safe:{flex:1,backgroundColor:"#f7f7f7"},header:{paddingHorizontal:16,paddingVertical:12,borderBottomWidth:1,borderBottomColor:"#e6e6e6",flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:"#fff"},brand:{fontSize:20,fontWeight:"900"},yellow:{color:"#e1b400"},subtitle:{fontSize:9,color:"#777",fontWeight:"800",marginTop:3},close:{backgroundColor:"#111",paddingHorizontal:13,paddingVertical:9,borderRadius:10},closeText:{color:"#fff",fontSize:10,fontWeight:"900"},disabled:{opacity:.45},notice:{margin:12,marginBottom:0,backgroundColor:"#fff5d2",borderRadius:11,padding:10,flexDirection:"row",alignItems:"center",gap:8},noticeText:{color:"#695400",flex:1,fontSize:11,fontWeight:"700"},web:{flex:1,backgroundColor:"#f7f7f7"},cards:{padding:18,paddingBottom:40},title:{fontSize:24,fontWeight:"900"},help:{fontSize:11,color:"#666",marginTop:5,marginBottom:15},card:{backgroundColor:"#fff",borderWidth:1,borderColor:"#ddd",borderRadius:15,padding:15,marginBottom:9,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},cardTitle:{fontWeight:"900"},mask:{fontSize:13,marginTop:5},holder:{fontSize:10,color:"#777",marginTop:3},pay:{fontWeight:"900",color:"#806600"},secondary:{borderWidth:1,borderColor:"#ccc",borderRadius:12,padding:14,alignItems:"center",marginTop:8},secondaryText:{fontWeight:"900",fontSize:10},newHeader:{paddingHorizontal:16,paddingTop:10},back:{fontWeight:"900",color:"#806600",paddingVertical:6},newHint:{fontSize:10,color:"#777",paddingBottom:5}});
