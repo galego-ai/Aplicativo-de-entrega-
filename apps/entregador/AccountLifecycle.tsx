@@ -3,6 +3,8 @@ import{Alert,Modal,Pressable,SafeAreaView,StyleSheet,Text,TextInput,View}from"re
 import*as Linking from"expo-linking";
 import{supabase}from"./supabase";
 
+const RECOVERY_URL="https://rmlbmacoqnynqdqmxecz.supabase.co/functions/v1/password-recovery";
+
 function readParam(url:string,name:string){
  const source=[url.split("?")[1]?.split("#")[0]??"",url.split("#")[1]??""].join("&");
  return new URLSearchParams(source).get(name);
@@ -19,9 +21,9 @@ export default function AccountLifecycleHost({children,scheme}:{children:ReactNo
 }
 
 export function PasswordResetLink({scheme}:{scheme:string}){
- const[open,setOpen]=useState(false);const[email,setEmail]=useState("");const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");
- async function send(){const clean=email.trim().toLowerCase();if(!clean||!clean.includes("@")){setMessage("Informe seu e-mail.");return;}setBusy(true);setMessage("");const{error}=await supabase.auth.resetPasswordForEmail(clean,{redirectTo:`${scheme}://reset-password`});setBusy(false);if(error){setMessage("Não foi possível enviar o e-mail agora.");return;}setMessage("Se este e-mail estiver cadastrado, você receberá o link para criar uma nova senha.");}
- return <><Pressable onPress={()=>{setOpen(true);setMessage("");}}><Text style={styles.link}>Esqueci minha senha</Text></Pressable><Modal visible={open} transparent animationType="fade" onRequestClose={()=>setOpen(false)}><View style={styles.backdrop}><View style={styles.card}><Text style={styles.cardTitle}>Recuperar senha</Text><Text style={styles.info}>Informe o e-mail usado no CLICK-FOOD.</Text><TextInput style={styles.input} placeholder="E-mail" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail}/>{!!message&&<Text style={styles.notice}>{message}</Text>}<Pressable style={[styles.primary,busy&&styles.disabled]} disabled={busy} onPress={send}><Text style={styles.primaryText}>{busy?"ENVIANDO...":"ENVIAR LINK"}</Text></Pressable><Pressable onPress={()=>setOpen(false)}><Text style={styles.link}>Fechar</Text></Pressable></View></View></Modal></>;
+ const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");
+ async function openRecovery(){setBusy(true);setMessage("");try{const url=`${RECOVERY_URL}?source=${encodeURIComponent(scheme)}`;const supported=await Linking.canOpenURL(url);if(!supported){setMessage("Não foi possível abrir a recuperação de senha neste aparelho.");return;}await Linking.openURL(url);}catch{setMessage("Não foi possível abrir a recuperação de senha. Verifique sua conexão.");}finally{setBusy(false);}}
+ return <View><Pressable disabled={busy} onPress={openRecovery}><Text style={styles.link}>{busy?"ABRINDO RECUPERAÇÃO...":"Esqueci minha senha"}</Text></Pressable>{!!message&&<Text style={styles.notice}>{message}</Text>}</View>;
 }
 
 const deleteErrors:Record<string,string>={BUSINESS_ACCOUNT_TRANSFER_REQUIRED:"Esta conta está vinculada a uma loja. O acesso empresarial precisa ser transferido/removido antes da exclusão.",ACTIVE_ORDER_EXISTS:"Finalize ou cancele seu pedido em andamento antes de excluir a conta.",ACTIVE_DELIVERY_EXISTS:"Finalize a entrega em andamento antes de excluir a conta.",ACTIVE_PAYOUT_EXISTS:"Existe um repasse em processamento. Aguarde a conclusão antes de excluir a conta.",ADMIN_ACCOUNT_DELETE_REQUIRES_SUPPORT:"Contas administrativas não podem ser excluídas por este aplicativo."};
