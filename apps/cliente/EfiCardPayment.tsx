@@ -25,6 +25,7 @@ type Props = {
 };
 
 const safeJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function buildHtml(config: CardTokenizationConfig, total: number, defaults: Props["defaults"]) {
   const accountId = safeJson(config.accountId);
@@ -93,6 +94,21 @@ window.addEventListener('load',()=>{void checkEfiScript();});
 </body></html>`;
 }
 
+function cardChargeErrorMessage(code: string) {
+  const messages: Record<string, string> = {
+    EFI_CARD_NOT_ENABLED: "Pagamento por cartão ainda não está habilitado pela Matriz.",
+    EFI_WEBHOOK_HMAC_REQUIRED: "A integração Efí está incompleta no servidor. Tente novamente mais tarde.",
+    EFI_CHARGES_CREDENTIALS_REQUIRED: "As credenciais de cobrança da Efí ainda não estão configuradas.",
+    EFI_CARD_AUTH_FAILED: "A Efí não autorizou a integração agora. Tente novamente em instantes.",
+    EFI_CARD_CHARGE_FAILED: "A Efí recusou a criação da cobrança. Confira os dados ou tente outro cartão.",
+    EFI_CARD_STORAGE_FAILED: "A cobrança foi criada, mas não pôde ser registrada. O sistema fará a reconciliação automaticamente.",
+    EFI_CARD_RECONCILIATION_FAILED: "A cobrança foi criada e está em reconciliação. Consulte o pedido em alguns instantes.",
+    CARD_CUSTOMER_DATA_REQUIRED: "Preencha corretamente nome, CPF, e-mail e telefone do titular.",
+    INVALID_CARD_PAYMENT: "Os dados tokenizados do cartão não foram aceitos. Tente novamente.",
+  };
+  return messages[code] ?? "Não foi possível concluir a cobrança do cartão agora. Tente novamente ou use outra forma de pagamento.";
+}
+
 export default function EfiCardPayment({ visible, config, order, defaults, onCancel, onComplete }: Props) {
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState("");
@@ -118,18 +134,44 @@ export default function EfiCardPayment({ visible, config, order, defaults, onCan
         installments: Number(data.installments ?? 1),
         customer: data.customer ?? {},
       }});
-      const statusCheck = await supabase.functions.invoke("efi-card-status", { body: { orderId: order.orderId } });
-      const status = String(statusCheck.data?.status ?? charge.data?.providerStatus ?? "").toUpperCase();
-      const paid = Boolean(statusCheck.data?.paid || charge.data?.paid || status === "PAID");
-      const approved = Boolean(statusCheck.data?.approved || charge.data?.approved || status === "APPROVED");
+
+      if (charge.error) {
+        setMessage("A Efí não concluiu a cobrança. Nenhum número completo de cartão ou CVV foi armazenado. Tente novamente ou escolha outra forma de pagamento.");
+        return;
+      }
+      if (charge.data?.error) {
+        setMessage(cardChargeErrorMessage(String(charge.data.error)));
+        return;
+      }
+
+      let statusCheck = await supabase.functions.invoke("efi-card-status", { body: { orderId: order.orderId } });
+      let status = String(statusCheck.data?.status ?? charge.data?.providerStatus ?? "").toUpperCase();
+      let paid = Boolean(statusCheck.data?.paid || charge.data?.paid || status === "PAID");
+      let approved = Boolean(statusCheck.data?.approved || charge.data?.approved || status === "APPROVED");
+
+      if (approved && !paid) {
+        setMessage("Cartão aprovado. Confirmando o pagamento com a Efí…");
+        for (let attempt = 0; attempt < 5 && !paid; attempt += 1) {
+          await sleep(1500);
+          statusCheck = await supabase.functions.invoke("efi-card-status", { body: { orderId: order.orderId } });
+          if (statusCheck.error) continue;
+          status = String(statusCheck.data?.status ?? status).toUpperCase();
+          paid = Boolean(statusCheck.data?.paid || status === "PAID");
+          approved = Boolean(statusCheck.data?.approved || paid || status === "APPROVED");
+        }
+      }
+
       if (paid || approved) {
-        setMessage(paid ? "Pagamento confirmado." : "Cartão aprovado. Aguardando a confirmação final da Efí.");
+        setMessage(paid ? "Pagamento confirmado." : "Cartão aprovado. A confirmação final continuará automaticamente no servidor.");
         await onComplete({ paid, approved, status: status || (paid ? "PAID" : "APPROVED") });
         return;
       }
+
       const refusal = statusCheck.data?.charge?.refusal_reason || charge.data?.refusal?.reason;
-      const code = charge.data?.error || statusCheck.data?.error;
-      setMessage(refusal ? `Cartão não aprovado: ${refusal}` : code === "EFI_CARD_NOT_ENABLED" ? "Pagamento por cartão ainda não está habilitado." : "A cobrança não foi aprovada. Confira os dados ou tente outro cartão.");
+      const code = String(charge.data?.error || statusCheck.data?.error || "");
+      setMessage(refusal ? `Cartão não aprovado: ${refusal}` : cardChargeErrorMessage(code));
+    } catch {
+      setMessage("Ocorreu uma falha ao comunicar com a Efí. O pedido ficará protegido e poderá ser cancelado sem cobrança se o pagamento não for confirmado.");
     } finally {
       processingRef.current = false;
       setProcessing(false);
@@ -149,12 +191,15 @@ export default function EfiCardPayment({ visible, config, order, defaults, onCan
         originWhitelist={["about:blank"]}
         javaScriptEnabled
         javaScriptCanOpenWindowsAutomatically={false}
-        domStorageEnabled={false}
+        domStorageEnabled
         cacheEnabled={false}
-        incognito
+        thirdPartyCookiesEnabled
+        sharedCookiesEnabled
         mixedContentMode="never"
         setSupportMultipleWindows={false}
         onShouldStartLoadWithRequest={(request) => request.url === "about:blank"}
+        onError={() => setMessage("Não foi possível abrir o ambiente seguro da Efí. Verifique sua conexão e tente novamente.")}
+        onHttpError={(event) => setMessage(`O ambiente seguro de pagamento respondeu com erro ${event.nativeEvent.statusCode}. Tente novamente.`)}
         onMessage={handleMessage}
       />
     </SafeAreaView>
