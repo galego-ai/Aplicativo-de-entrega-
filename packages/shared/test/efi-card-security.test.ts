@@ -14,10 +14,10 @@ test("tokenização Efí usa versão oficial fixada", () => {
 test("WebView do cartão mantém navegação restrita e armazenamento compatível com a Efí", () => {
   assert.match(compact, /originWhitelist=\{\["about:blank"\]\}/);
   assert.match(compact, /javaScriptCanOpenWindowsAutomatically=\{false\}/);
-  assert.match(compact, /\bdomStorageEnabled\b/);
+  assert.match(source, /\bdomStorageEnabled\b/);
   assert.match(compact, /cacheEnabled=\{false\}/);
-  assert.match(compact, /\bthirdPartyCookiesEnabled\b/);
-  assert.match(compact, /\bsharedCookiesEnabled\b/);
+  assert.match(source, /\bthirdPartyCookiesEnabled\b/);
+  assert.match(source, /\bsharedCookiesEnabled\b/);
   assert.match(compact, /mixedContentMode="never"/);
   assert.match(compact, /setSupportMultipleWindows=\{false\}/);
   assert.match(compact, /request=>request\.url==="about:blank"/);
