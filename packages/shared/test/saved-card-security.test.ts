@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const vault=readFileSync("apps/cliente/SavedCardsHost.tsx","utf8");
 const checkout=readFileSync("apps/cliente/EfiCardPayment.tsx","utf8");
+const root=readFileSync("apps/cliente/index.js","utf8");
 const edge=readFileSync("supabase/functions/customer-saved-card/index.ts","utf8");
 const charge=readFileSync("supabase/functions/efi-card-charge/index.ts","utf8");
 const migration=readFileSync("supabase/migrations/202609020150_customer_saved_cards.sql","utf8");
@@ -13,6 +14,11 @@ test("cartões novos usam token Efí reutilizável sem enviar número/CVV ao bac
  assert.match(checkout,/reuse:true/);
  assert.doesNotMatch(edge,/\bnumber\b|\bcvv\b/i);
  assert.match(checkout,/savedCardId:String\(saved\.data\.card\.id\)/);
+});
+
+test("carteira segura permanece montada na raiz do App Cliente",()=>{
+ assert.match(root,/import SavedCardsHost from "\.\/SavedCardsHost"/);
+ assert.match(root,/<SavedCardsHost><CustomerProfessionalShell><App\/><\/CustomerProfessionalShell><\/SavedCardsHost>/);
 });
 
 test("token reutilizável fica somente no schema private",()=>{
