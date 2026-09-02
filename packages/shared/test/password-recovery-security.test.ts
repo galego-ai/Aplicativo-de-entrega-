@@ -27,7 +27,7 @@ test("portal de recuperação aplica cabeçalhos de segurança",()=>{
 
 test("recuperação exige link/token e troca senha somente no endpoint Auth",()=>{
  assert.match(source,/access_token/);
- assert.match(source,/type==='recovery'/);
+ assert.match(source,/tokenType==='recovery'/);
  assert.match(source,/\/auth\/v1\/user/);
  assert.match(source,/Authorization:'Bearer '\+accessToken/);
  assert.doesNotMatch(source,/admin\.updateUserById|auth\.admin/i);
