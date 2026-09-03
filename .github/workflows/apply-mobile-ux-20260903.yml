@@ -1,0 +1,37 @@
+name: CLICK-FOOD Aplicar UX Mobile 2026-09-03
+
+on:
+  push:
+    paths:
+      - "scripts/apply-mobile-ux-20260903.py"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Aplicar patch e gerar toque CLICK-FOOD
+        run: python3 scripts/apply-mobile-ux-20260903.py
+      - name: Instalar dependências
+        run: npm ci
+      - name: Validar App Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+      - name: Validar App Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+      - name: Commitar alterações validadas
+        run: |
+          git config user.name "CLICK-FOOD Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/cliente apps/entregador supabase/migrations/202609031300_mobile_notifications_and_driver_call_sound.sql
+          git diff --cached --quiet && exit 0
+          git commit -m "feat(mobile): carrinho, progresso e toque CLICK-FOOD"
+          git push origin HEAD:main
