@@ -1,0 +1,120 @@
+name: CLICK-FOOD Publicar APKs EAS Finalizados
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-latest-mobile-apks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  publish-latest:
+    name: Publicar APK ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: cliente
+            label: Cliente
+            filename: CLICK-FOOD-Cliente.apk
+            artifact: CLICK-FOOD-Cliente-APK
+          - app: entregador
+            label: Entregador
+            filename: CLICK-FOOD-Entregador.apk
+            artifact: CLICK-FOOD-Entregador-APK
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci --include=dev
+
+      - name: Validar autenticação EAS
+        run: |
+          test -n "${EXPO_TOKEN:-}" || { echo "EXPO_TOKEN não configurado."; exit 1; }
+          npx --yes eas-cli@latest whoami >/dev/null
+
+      - name: Localizar último APK EAS finalizado
+        id: eas
+        working-directory: apps/${{ matrix.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_JSON="$RUNNER_TEMP/eas-${{ matrix.app }}-latest.json"
+          npx --yes eas-cli@latest build:list \
+            --platform android \
+            --status finished \
+            --limit 1 \
+            --non-interactive \
+            --json > "$BUILD_JSON"
+
+          node - "$BUILD_JSON" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require('fs');
+          const [jsonPath, outputPath] = process.argv.slice(2);
+          const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+          const build = Array.isArray(parsed) ? parsed[0] : parsed;
+          if (!build) throw new Error('Nenhum build EAS Android finalizado encontrado.');
+          const url = build.artifacts?.applicationArchiveUrl || build.artifacts?.buildUrl;
+          if (!url) throw new Error('Build finalizado sem URL de APK.');
+          fs.appendFileSync(outputPath, `url=${url}\n`);
+          if (build.id) fs.appendFileSync(outputPath, `build_id=${build.id}\n`);
+          NODE
+
+      - name: Baixar e validar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          APK="artifacts/${{ matrix.filename }}"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            '${{ steps.eas.outputs.url }}' \
+            --output "$APK"
+          test -s "$APK"
+          unzip -tq "$APK" >/dev/null
+
+      - name: Validar Google Maps no manifesto compilado
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="artifacts/${{ matrix.filename }}"
+          MANIFEST_XML="$RUNNER_TEMP/${{ matrix.app }}-AndroidManifest.xml"
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then
+            SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+            test -n "$SDK_ROOT" || { echo 'Android SDK não localizado.'; exit 1; }
+            APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"
+          fi
+          test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado.'; exit 1; }
+          "$APKANALYZER" manifest print "$APK" > "$MANIFEST_XML"
+          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST_XML" || {
+            echo 'Metadado do Google Maps não encontrado.'
+            exit 1
+          }
+          if grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST_XML"; then
+            echo 'APK contém chave fallback do Google Maps.'
+            exit 1
+          fi
+          rm -f "$MANIFEST_XML"
+          echo 'Google Maps real confirmado sem expor a chave.'
+
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/${{ matrix.filename }}
+          if-no-files-found: error
+          retention-days: 30
