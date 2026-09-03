@@ -106,18 +106,7 @@ jobs:
           test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado no runner.'; exit 1; }
           "$APKANALYZER" manifest print "$PRIOR_APK" > "$TMP/manifest.xml"
 
-          KEY="$(python - "$TMP/manifest.xml" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
-for tag in re.findall(r'<meta-data\b[^>]*>', text, flags=re.S):
-    if 'com.google.android.geo.API_KEY' not in tag:
-        continue
-    match = re.search(r'android:value="([^"]+)"', tag)
-    if match:
-        print(match.group(1))
-        break
-PY
-)"
+          KEY="$(perl -0777 -ne 'if(/<meta-data\b(?=[^>]*com\.google\.android\.geo\.API_KEY)[^>]*android:value="([^"]+)"/s){print $1}' "$TMP/manifest.xml")"
           test -n "$KEY" || { echo 'Chave Google Maps não encontrada no APK anterior.'; exit 1; }
           test "$KEY" != 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' || { echo 'APK anterior contém apenas fallback do Maps.'; exit 1; }
           echo "::add-mask::$KEY"
