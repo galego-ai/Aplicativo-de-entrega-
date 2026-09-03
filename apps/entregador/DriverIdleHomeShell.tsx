@@ -6,11 +6,10 @@ import{disableBackgroundTracking,enableBackgroundTracking,resumeBackgroundTracki
 import{supabase}from"./supabase";
 
 type Driver={id:string;status:string;online:boolean};
-type DriverLocation={latitude:number;longitude:number;heading:number|null;recordedAt:string};
 type MapCenter={latitude:number;longitude:number};
 
 export default function DriverIdleHomeShell({children}:{children:ReactNode}){
- const[ready,setReady]=useState(false);const[driver,setDriver]=useState<Driver|null>(null);const[hasActive,setHasActive]=useState(false);const[hasOffer,setHasOffer]=useState(false);const[location,setLocation]=useState<DriverLocation|null>(null);const[mapCenter,setMapCenter]=useState<MapCenter|null>(null);const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");const mapRef=useRef<MapView|null>(null);
+ const[ready,setReady]=useState(false);const[driver,setDriver]=useState<Driver|null>(null);const[hasActive,setHasActive]=useState(false);const[hasOffer,setHasOffer]=useState(false);const[mapCenter,setMapCenter]=useState<MapCenter|null>(null);const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");const mapRef=useRef<MapView|null>(null);
 
  async function refresh(){
   const{data:{session}}=await supabase.auth.getSession();
@@ -22,12 +21,12 @@ export default function DriverIdleHomeShell({children}:{children:ReactNode}){
   const[activeResult,offerResult,locationResult]=await Promise.all([
    supabase.functions.invoke("driver-active-delivery",{body:{}}),
    next.online?supabase.functions.invoke("driver-offers",{body:{}}):Promise.resolve({data:{offers:[]},error:null} as any),
-   supabase.from("driver_locations").select("latitude,longitude,heading,recorded_at").eq("driver_id",next.id).maybeSingle(),
+   supabase.from("driver_locations").select("latitude,longitude").eq("driver_id",next.id).maybeSingle(),
   ]);
   setHasActive(Boolean(activeResult.data?.delivery));
   setHasOffer(Boolean((offerResult.data?.offers??[]).length));
   const loc=locationResult.data;
-  if(loc){const nextLocation={latitude:Number(loc.latitude),longitude:Number(loc.longitude),heading:loc.heading==null?null:Number(loc.heading),recordedAt:String(loc.recorded_at)};setLocation(nextLocation);setMapCenter(current=>current??{latitude:nextLocation.latitude,longitude:nextLocation.longitude});}
+  if(loc)setMapCenter(current=>current??{latitude:Number(loc.latitude),longitude:Number(loc.longitude)});
   setReady(true);
  }
 
@@ -43,8 +42,7 @@ export default function DriverIdleHomeShell({children}:{children:ReactNode}){
    if(permission.status!=="granted"){if(!cancelled)setMessage("Ative a localização para receber entregas próximas.");return;}
    subscription=await Location.watchPositionAsync({accuracy:Location.Accuracy.High,distanceInterval:20,timeInterval:10000},async position=>{
     const recordedAt=new Date(position.timestamp||Date.now()).toISOString();
-    const nextLocation={latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,recordedAt};
-    if(!cancelled){setLocation(nextLocation);setMapCenter(current=>current??{latitude:nextLocation.latitude,longitude:nextLocation.longitude});}
+    if(!cancelled)setMapCenter(current=>current??{latitude:position.coords.latitude,longitude:position.coords.longitude});
     await supabase.from("driver_locations").upsert({driver_id:driver.id,latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,speed:position.coords.speed,accuracy:position.coords.accuracy,recorded_at:recordedAt},{onConflict:"driver_id"});
    });
   })();
