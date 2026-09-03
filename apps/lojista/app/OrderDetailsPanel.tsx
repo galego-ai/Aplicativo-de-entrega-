@@ -11,21 +11,39 @@ type Receipt={
  address:{street:string;number:string|null;complement:string|null;district:string|null;postal_code:string|null;reference:string|null}|null;
  items:Item[];
  payments:Array<{method:string;provider:string|null;status:string;amount:number;transactionId:string|null;paidAt:string|null}>;
- delivery:{status:string;driver:{name:string;avatarUrl:string|null}|null}|null;
+ delivery:{id:string;status:string;driver:{name:string;avatarUrl:string|null}|null}|null;
 };
 
 const brl=(value:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value||0);
 const paymentLabel:Record<string,string>={CASH:"Dinheiro",PIX:"PIX",CREDIT_CARD:"Crédito",DEBIT_CARD:"Débito",WALLET:"Carteira",OTHER:"Outro"};
+const pickupCodeStatuses=new Set(["DRIVER_ASSIGNED","DRIVER_TO_STORE","DRIVER_AT_STORE"]);
 
 export default function OrderDetailsPanel({orderId}:{orderId:string}){
  const[open,setOpen]=useState(false);const[loading,setLoading]=useState(false);const[data,setData]=useState<Receipt|null>(null);const[error,setError]=useState("");
+ const[pickupCode,setPickupCode]=useState("");const[codeLoading,setCodeLoading]=useState(false);const[codeError,setCodeError]=useState("");
  async function toggle(){
   if(open){setOpen(false);return;}
   setOpen(true);if(data||loading)return;setLoading(true);setError("");
   const result=await supabase.functions.invoke("store-order-receipt",{body:{orderId}});
   setLoading(false);if(result.error||result.data?.error){setError("Não foi possível carregar os detalhes deste pedido.");return;}setData(result.data as Receipt);
  }
+ async function generatePickupCode(){
+  if(!data?.delivery?.id||codeLoading)return;
+  setCodeLoading(true);setCodeError("");setPickupCode("");
+  const{data:result,error:invokeError}=await supabase.functions.invoke("delivery-code",{body:{deliveryId:data.delivery.id,kind:"PICKUP"}});
+  setCodeLoading(false);
+  if(invokeError||result?.error){
+   const code=String(result?.error??"");
+   const labels:Record<string,string>={PICKUP_CODE_NOT_AVAILABLE:"O código fica disponível depois que um entregador é atribuído e antes da retirada.",PICKUP_CODE_ACCESS_DENIED:"Sua conta não tem permissão para visualizar este código.",DELIVERY_NOT_FOUND:"A entrega deste pedido não foi encontrada.",DELIVERY_CODE_SECRET_NOT_CONFIGURED:"O serviço de código está temporariamente indisponível."};
+   setCodeError(labels[code]??"Não foi possível gerar o código agora. Atualize o pedido e tente novamente.");
+   return;
+  }
+  const value=String(result?.code??"");
+  if(!/^\d{4}$/.test(value)){setCodeError("O serviço não retornou um código válido.");return;}
+  setPickupCode(value);
+ }
  const address=data?.address;
+ const canGeneratePickupCode=Boolean(data?.delivery&&pickupCodeStatuses.has(data.delivery.status));
  return <div style={{marginTop:9}}>
   <button type="button" onClick={toggle} style={{width:"100%",padding:"9px 10px",borderRadius:9,border:"1px solid #d9d9d9",background:"#fff",fontWeight:900,cursor:"pointer"}}>{open?"OCULTAR DETALHES":"VER DETALHES DO PEDIDO"}</button>
   {open&&<div style={{marginTop:8,padding:12,borderRadius:12,background:"#f8f8f8",border:"1px solid #e5e5e5"}}>
@@ -42,6 +60,14 @@ export default function OrderDetailsPanel({orderId}:{orderId:string}){
     <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #ddd",display:"grid",gap:4,fontSize:12}}><div style={{display:"flex",justifyContent:"space-between"}}><span>Subtotal</span><b>{brl(data.order.subtotal)}</b></div>{data.order.delivery_fee>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span>Entrega</span><b>{brl(data.order.delivery_fee)}</b></div>}{data.order.discount>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span>Desconto</span><b>− {brl(data.order.discount)}</b></div>}<div style={{display:"flex",justifyContent:"space-between",fontSize:15}}><b>Total</b><b>{brl(data.order.total)}</b></div></div>
     {data.payments.length>0&&<div style={{marginTop:10}}><small style={{color:"#777"}}>FORMA(S) DE PAGAMENTO</small>{data.payments.map((payment,index)=><div key={index} style={{fontSize:12,marginTop:3}}><b>{paymentLabel[payment.method]??payment.method}</b> • {brl(payment.amount)} • {payment.status}{payment.provider?` • ${payment.provider}`:""}</div>)}</div>}
     {data.delivery&&<div style={{marginTop:10,fontSize:12}}><small style={{color:"#777"}}>ENTREGA</small><div><b>{data.delivery.status}</b>{data.delivery.driver?.name?` • ${data.delivery.driver.name}`:" • aguardando entregador"}</div></div>}
+    {canGeneratePickupCode&&<div style={{marginTop:12,padding:14,borderRadius:14,background:"#111",color:"#fff",border:"2px solid #f4c400"}}>
+      <small style={{color:"#f4c400",fontWeight:900,letterSpacing:.7}}>CÓDIGO PARA RETIRADA DO ENTREGADOR</small>
+      <p style={{fontSize:12,color:"#ddd",margin:"6px 0 10px"}}>Mostre este código ao entregador quando ele chegar à loja. Ele confirma a retirada no aplicativo.</p>
+      {!pickupCode&&<button type="button" onClick={generatePickupCode} disabled={codeLoading} style={{width:"100%",padding:"12px 14px",borderRadius:10,border:0,background:"#f4c400",color:"#111",fontWeight:900,cursor:codeLoading?"wait":"pointer"}}>{codeLoading?"GERANDO...":"GERAR CÓDIGO PARA O ENTREGADOR"}</button>}
+      {pickupCode&&<div style={{textAlign:"center",padding:"8px 0 2px"}}><div style={{fontSize:42,fontWeight:1000,letterSpacing:10,color:"#f4c400"}}>{pickupCode}</div><small style={{color:"#bbb"}}>Código de 4 dígitos • use somente nesta retirada</small></div>}
+      {codeError&&<p style={{margin:"10px 0 0",color:"#ffd8d8",fontSize:12,fontWeight:800}}>{codeError}</p>}
+    </div>}
+    {data.delivery&&!canGeneratePickupCode&&data.delivery.status==="PICKUP_CONFIRMED"&&<div style={{marginTop:10,padding:10,borderRadius:10,background:"#e8f7ed",fontSize:12,fontWeight:800,color:"#176b35"}}>✓ Retirada já confirmada pelo entregador.</div>}
    </>}
   </div>}
  </div>;
