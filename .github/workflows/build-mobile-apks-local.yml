@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/build-mobile-apks-local.yml'
+      - 'apps/cliente/**'
+      - 'apps/entregador/**'
+      - 'package-lock.json'
 
 permissions:
   contents: read
