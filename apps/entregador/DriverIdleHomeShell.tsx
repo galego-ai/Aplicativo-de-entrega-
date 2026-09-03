@@ -78,7 +78,7 @@ export default function DriverIdleHomeShell({children}:{children:ReactNode}){
    </View>
    {!!message&&<Text style={styles.notice}>{message}</Text>}
    <Pressable disabled={busy} onPress={toggleOnline} style={[styles.toggle,driver.online?styles.goOffline:styles.goOnline,busy&&styles.disabled]}>
-     <Text style={styles.toggleText}>{busy?"AGUARDE...":driver.online?"FICAR OFFLINE":"FICAR ONLINE"}</Text>
+     <Text style={[styles.toggleText,!driver.online&&styles.toggleTextDark]}>{busy?"AGUARDE...":driver.online?"FICAR OFFLINE":"FICAR ONLINE"}</Text>
    </Pressable>
  </View>;
 }
@@ -95,5 +95,6 @@ const styles=StyleSheet.create({
  goOnline:{backgroundColor:"#f4c400"},
  goOffline:{backgroundColor:"#111"},
  toggleText:{fontSize:14,fontWeight:"900",color:"#fff"},
+ toggleTextDark:{color:"#111"},
  disabled:{opacity:.55},
 });
