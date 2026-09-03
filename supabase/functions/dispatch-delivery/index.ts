@@ -71,18 +71,24 @@ export default {
       return Response.json({ error: "DELIVERY_COORDINATES_REQUIRED" }, { status: 422 });
     }
 
-    const [{ data: pricing }, { data: dispatch }] = await Promise.all([
+    const [{ data: pricing }, { data: dispatch }, { data: storeDelivery }] = await Promise.all([
       ctx.supabaseAdmin.from("city_delivery_pricing").select("driver_base_earning,driver_per_km,driver_minimum_earning").eq("city_id", store.city_id).maybeSingle(),
       ctx.supabaseAdmin.from("delivery_dispatch_settings").select("offer_timeout_seconds,initial_radius_km,max_radius_km,batch_size").eq("city_id", store.city_id).maybeSingle(),
+      ctx.supabaseAdmin.from("store_delivery_settings").select("driver_call_radius_km").eq("store_id", order.store_id).maybeSingle(),
     ]);
+
+    const cityInitialRadius = Number(dispatch?.initial_radius_km ?? 5);
+    const cityMaxRadius = Number(dispatch?.max_radius_km ?? 20);
+    const requestedStoreRadius = Number(storeDelivery?.driver_call_radius_km ?? cityInitialRadius);
+    const effectiveStoreRadius = Math.max(0.1, Math.min(requestedStoreRadius, cityMaxRadius));
 
     const config = {
       base: Number(pricing?.driver_base_earning ?? 4),
       perKm: Number(pricing?.driver_per_km ?? 1),
       minimum: Number(pricing?.driver_minimum_earning ?? 6),
       timeout: Number(dispatch?.offer_timeout_seconds ?? 15),
-      initialRadius: Number(dispatch?.initial_radius_km ?? 5),
-      maxRadius: Number(dispatch?.max_radius_km ?? 20),
+      initialRadius: Math.min(cityInitialRadius, effectiveStoreRadius),
+      maxRadius: effectiveStoreRadius,
       batchSize: Number(dispatch?.batch_size ?? 3),
     };
 
@@ -162,7 +168,7 @@ export default {
     pool.sort((a, b) => b.score - a.score || a.distanceToStoreKm - b.distanceToStoreKm);
     const selected = pool.slice(0, config.batchSize);
 
-    if (!selected.length) return Response.json({ error: "NO_ELIGIBLE_DRIVERS" }, { status: 409 });
+    if (!selected.length) return Response.json({ error: "NO_ELIGIBLE_DRIVERS", searchRadiusKm: config.maxRadius }, { status: 409 });
 
     const expiresAt = new Date(Date.now() + config.timeout * 1000).toISOString();
     const offersPayload = selected.map((candidate) => ({
@@ -196,6 +202,6 @@ export default {
       })).filter((notification) => Boolean(notification.user_id)));
     }
 
-    return Response.json({ deliveryId: delivery!.id, offers, candidatesEvaluated: candidates.length });
+    return Response.json({ deliveryId: delivery!.id, offers, candidatesEvaluated: candidates.length, searchRadiusKm: config.maxRadius });
   }),
 };
