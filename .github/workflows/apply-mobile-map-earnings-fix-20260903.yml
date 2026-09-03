@@ -38,26 +38,24 @@ jobs:
       - name: Validar TypeScript Entregador
         run: npx tsc --noEmit -p apps/entregador/tsconfig.json
 
-      - name: Validar injeção do Google Maps sem expor chave
+      - name: Validar injeção privada do Google Maps
         shell: bash
         run: |
           set -euo pipefail
           for APP in cliente entregador; do
-            (
-              cd "apps/$APP"
-              GOOGLE_MAPS_API_KEY='CLICK_FOOD_CONFIG_TEST_ONLY' npx expo config --json > "$RUNNER_TEMP/$APP-expo.json"
-            )
-            node - "$RUNNER_TEMP/$APP-expo.json" <<'NODE'
-          const fs=require('fs');
-          const p=process.argv[2];
-          const c=JSON.parse(fs.readFileSync(p,'utf8'));
-          if(c?.android?.config?.googleMaps?.apiKey!=='CLICK_FOOD_CONFIG_TEST_ONLY'){
-            throw new Error('A configuração nativa do Google Maps não recebeu a variável de ambiente.');
+            GOOGLE_MAPS_API_KEY='CLICK_FOOD_CONFIG_TEST_ONLY' node - "$APP" <<'NODE'
+          const path=require('path');
+          const app=process.argv[2];
+          const appDir=path.resolve('apps',app);
+          const base=require(path.join(appDir,'app.json')).expo;
+          const buildConfig=require(path.join(appDir,'app.config.js'));
+          const result=buildConfig({config:base});
+          if(result?.android?.config?.googleMaps?.apiKey!=='CLICK_FOOD_CONFIG_TEST_ONLY'){
+            throw new Error(`A configuração nativa do Google Maps não recebeu a variável de ambiente em ${app}.`);
           }
           NODE
-            rm -f "$RUNNER_TEMP/$APP-expo.json"
           done
-          echo 'Configuração Google Maps validada nos dois apps sem expor a chave real.'
+          echo 'Injeção privada do Google Maps validada nos dois apps sem expor a chave real.'
 
       - name: Commit e push
         shell: bash
