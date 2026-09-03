@@ -119,14 +119,26 @@ jobs:
         run: |
           set -euo pipefail
           APK="artifacts/${{ matrix.filename }}"
-          MANIFEST_STRINGS="$RUNNER_TEMP/${{ matrix.app }}-manifest-strings.txt"
-          unzip -p "$APK" AndroidManifest.xml | strings > "$MANIFEST_STRINGS"
-          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST_STRINGS"
-          if grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST_STRINGS"; then
+          MANIFEST_XML="$RUNNER_TEMP/${{ matrix.app }}-AndroidManifest.xml"
+
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then
+            SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+            test -n "$SDK_ROOT" || { echo 'Android SDK não localizado.'; exit 1; }
+            APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"
+          fi
+          test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado no runner.'; exit 1; }
+
+          "$APKANALYZER" manifest print "$APK" > "$MANIFEST_XML"
+          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST_XML" || {
+            echo 'Metadado do Google Maps não encontrado no AndroidManifest compilado.'
+            exit 1
+          }
+          if grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST_XML"; then
             echo 'APK contém chave fallback do Google Maps.'
             exit 1
           fi
-          rm -f "$MANIFEST_STRINGS"
+          rm -f "$MANIFEST_XML"
           echo 'Google Maps real confirmado no APK sem expor a chave.'
 
       - name: Publicar APK
