@@ -1,0 +1,52 @@
+name: CLICK-FOOD Corrigir estoque e fluxo PIX Cliente 2026-09-03
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/fix-customer-stock-pix-flow-20260903.py'
+      - '.github/workflows/fix-customer-stock-pix-flow-20260903.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependências
+        run: npm ci
+      - name: Aplicar correção
+        run: python scripts/fix-customer-stock-pix-flow-20260903.py
+      - name: Validar Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+      - name: Conferir pontos obrigatórios
+        run: |
+          grep -q 'stock_quantity' apps/cliente/App.tsx
+          grep -q 'ESGOTADO' apps/cliente/App.tsx
+          grep -q 'inventory_items' apps/cliente/App.tsx
+          grep -q 'PixPaymentCard' apps/cliente/App.tsx
+      - name: Publicar correção
+        run: |
+          if git diff --quiet -- apps/cliente/App.tsx; then
+            echo 'Nenhuma alteração necessária.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/cliente/App.tsx
+          git commit -m 'fix(cliente): bloquear produto esgotado e preservar fluxo PIX'
+          git push origin HEAD:main
