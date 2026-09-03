@@ -112,10 +112,12 @@ export default function DriverLiveMap({
   </View>;
 }
 
+const fill = { position: "absolute" as const, left: 0, right: 0, top: 0, bottom: 0 };
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#111" },
-  map: { ...StyleSheet.absoluteFillObject },
-  waiting: { ...StyleSheet.absoluteFillObject, backgroundColor: "#242424", alignItems: "center", justifyContent: "center", padding: 24 },
+  map: { ...fill },
+  waiting: { ...fill, backgroundColor: "#242424", alignItems: "center", justifyContent: "center", padding: 24 },
   waitingEmoji: { fontSize: 42, marginBottom: 12 },
   waitingText: { color: "#ccc", textAlign: "center", fontSize: 12 },
   statusCard: { position: "absolute", top: 10, left: 10, right: 10, backgroundColor: "rgba(17,17,17,0.90)", borderWidth: 1, borderColor: "#343434", borderRadius: 14, paddingHorizontal: 13, paddingVertical: 11, flexDirection: "row", alignItems: "center", gap: 10 },
