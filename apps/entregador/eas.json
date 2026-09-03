@@ -10,14 +10,16 @@
       "android": {
         "buildType": "apk",
         "image": "latest"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "environment": "production",
       "autoIncrement": true,
       "android": {
         "image": "latest"
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {
