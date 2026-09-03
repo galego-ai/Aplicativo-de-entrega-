@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 
 type Coordinate = { latitude: number; longitude: number };
 
@@ -76,6 +76,7 @@ export default function DriverLiveMap({
   return <View style={styles.root}>
     {center ? <MapView
       ref={mapRef}
+      provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
       style={styles.map}
       initialRegion={{ ...center, latitudeDelta: 0.014, longitudeDelta: 0.014 }}
       onMapReady={fitMap}
