@@ -105,6 +105,7 @@ jobs:
             exit 0
           fi
           git commit -m 'feat(entregador): igualar icones ao cliente e ativar OTA'
+          git pull --rebase origin main
           git push
 
       - name: Disparar novo APK Entregador/Cliente
