@@ -37,6 +37,7 @@ type LoyaltyRedemption = { id:string; reward_id:string; points_spent:number; sta
 type LoyaltyWallet = { id:string; storeId:string; storeName:string; storeLogo:string|null; balance:number; pointsPerCurrency:number; rewards:LoyaltyReward[]; redemptions:LoyaltyRedemption[]; transactions:Array<{id:string;transaction_type:string;points:number;created_at:string}> };
 type ProductGroupLink = { product_id:string; option_group_id:string };
 type DeliveryPreview = { quoteId:string; storeId:string; addressId:string; distanceKm:number; fee:number; expiresAt:string };
+type HomeFeaturedProduct = { id:string; storeId:string; storeName:string; name:string; imageUrl:string|null; price:number; promotionalPrice:number|null };
 
 const brl=(value:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value||0);
 const terminalStatuses=new Set(["DELIVERED","CANCELLED","REJECTED","PAYMENT_FAILED","REFUNDED"]);
@@ -132,6 +133,7 @@ export default function App(){
   const[tracking,setTracking]=useState<Tracking|null>(null); const[driverCard,setDriverCard]=useState<DriverCard|null>(null); const[trackingMapOpen,setTrackingMapOpen]=useState(false); const[deliveryCode,setDeliveryCode]=useState<string|null>(null); const[deliveryCodeBusy,setDeliveryCodeBusy]=useState(false); const[reviewedOrderIds,setReviewedOrderIds]=useState<Set<string>>(new Set()); const[ratingOrderId,setRatingOrderId]=useState<string|null>(null); const[stars,setStars]=useState(5); const[reviewComment,setReviewComment]=useState(""); const[submittingReview,setSubmittingReview]=useState(false);
   const[receiptOrderId,setReceiptOrderId]=useState<string|null>(null);
   const[favoriteStoreIds,setFavoriteStoreIds]=useState<Set<string>>(new Set());
+  const[homeFeaturedProducts,setHomeFeaturedProducts]=useState<HomeFeaturedProduct[]>([]);
   const storeScrollRef=useRef<ScrollView>(null);
 
   const cartSubtotal=useMemo(()=>cart.reduce((sum,item)=>{
@@ -181,6 +183,11 @@ export default function App(){
     const rows=(data?.stores??[]) as Store[];
     setStores(rows);
     setSelectedStore(current=>current?(rows.find(s=>s.id===current.id)??current):current);
+    const storeIds=rows.map(store=>store.id);
+    if(!storeIds.length){setHomeFeaturedProducts([]);return;}
+    const{data:featuredRows}=await supabase.from("products").select("id,store_id,name,image_url,price,promotional_price,updated_at").in("store_id",storeIds).eq("active",true).eq("available_delivery",true).order("updated_at",{ascending:false}).limit(12);
+    const storeById=new Map(rows.map(store=>[store.id,store]));
+    setHomeFeaturedProducts(((featuredRows??[]) as any[]).map(row=>{const store=storeById.get(String(row.store_id));return{id:String(row.id),storeId:String(row.store_id),storeName:store?.name??"CLICK-FOOD",name:String(row.name??"Produto"),imageUrl:row.image_url?String(row.image_url):null,price:Number(row.price??0),promotionalPrice:row.promotional_price==null?null:Number(row.promotional_price)};}).slice(0,6));
   }
 
   async function loadPaymentMethods(){
@@ -280,7 +287,7 @@ export default function App(){
       if(address){destinationLat=address.latitude==null?null:Number(address.latitude);destinationLng=address.longitude==null?null:Number(address.longitude);}
     }
     setTracking({orderId:activeOrder.id,deliveryId:delivery.id,deliveryStatus:delivery.status,driverId:delivery.driver_id,driverLat,driverLng,storeLat:relation?.latitude==null?null:Number(relation.latitude),storeLng:relation?.longitude==null?null:Number(relation.longitude),destinationLat,destinationLng});
-    if(["PICKUP_CONFIRMED","DRIVER_TO_CUSTOMER","DRIVER_AT_CUSTOMER"].includes(String(delivery.status))){
+    if(String(delivery.status)==="DRIVER_AT_CUSTOMER"){
       setDeliveryCodeBusy(true);
       const codeResult=await supabase.functions.invoke("delivery-code",{body:{deliveryId:delivery.id,kind:"DELIVERY"}});
       setDeliveryCodeBusy(false);
@@ -659,8 +666,7 @@ export default function App(){
       </View>
       {!availablePaymentMethods.includes("PIX")&&<Text style={styles.meta}>PIX será exibido automaticamente quando a Efí Bank estiver ativada pela Matriz.</Text>}
       <View style={styles.totalBox}><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>Itens</Text><Text style={styles.checkoutSummaryValue}>{brl(cartSubtotal)}</Text></View><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>{deliveryType==="PICKUP"?"Retirada":"Frete"}</Text><Text style={styles.checkoutSummaryValue}>{deliveryType==="PICKUP"?"Grátis":estimatedDeliveryFee==null?"Calcule acima":estimatedDeliveryFee===0?"Grátis":brl(estimatedDeliveryFee)}</Text></View>{deliveryType==="DELIVERY"&&deliveryPreviewUsable&&deliveryPreview&&freeDeliveryApplies&&deliveryPreview.fee>0&&<Text style={styles.checkoutSaving}>Você economiza {brl(deliveryPreview.fee)} no frete com a promoção ativa.</Text>}<View style={styles.checkoutDivider}/><Text style={styles.checkoutTotalLabel}>Total estimado antes do cupom</Text><Text style={styles.total}>{brl(checkoutEstimatedTotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão, número e CVV são tokenizados pela Efí dentro de uma tela segura e não ficam armazenados no CLICK-FOOD.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
-      <Pressable style={[styles.checkout,(!cart.length||minimumMissing>0||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||minimumMissing>0||placing||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{selectedStore.orders_paused?"PEDIDOS PAUSADOS":!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":minimumMissing>0?`FALTAM ${brl(minimumMissing)}`:deliveryType==="DELIVERY"&&!selectedAddressId?"SELECIONE UM ENDEREÇO":placing?"FINALIZANDO...":"FINALIZAR PEDIDO"}</Text></Pressable>
-      <Pressable style={styles.continueShopping} onPress={()=>setCartOpen(false)}><Text style={styles.continueShoppingText}>CONTINUAR COMPRANDO</Text></Pressable></ScrollView></SafeAreaView></Modal>
+      <Pressable style={styles.continueShopping} onPress={()=>setCartOpen(false)}><Text style={styles.continueShoppingText}>CONTINUAR COMPRANDO</Text></Pressable><Pressable style={[styles.checkout,(!cart.length||minimumMissing>0||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||minimumMissing>0||placing||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{selectedStore.orders_paused?"PEDIDOS PAUSADOS":!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":minimumMissing>0?`FALTAM ${brl(minimumMissing)}`:deliveryType==="DELIVERY"&&!selectedAddressId?"SELECIONE UM ENDEREÇO":placing?"FINALIZANDO...":"FINALIZAR PEDIDO"}</Text></Pressable></ScrollView></SafeAreaView></Modal>
     </ScrollView>
     {!!cart.length&&<Pressable accessibilityRole="button" accessibilityLabel={`Abrir carrinho com ${cartQuantity} itens`} style={styles.floatingCartTop} onPress={()=>setCartOpen(true)}><View style={styles.floatingCartLeft}><Text style={styles.floatingCartIcon}>🛒</Text><View><Text style={styles.floatingCartTitle}>Carrinho <Text style={styles.floatingCartBadge}>{cartQuantity}</Text></Text><Text style={styles.floatingCartMeta}>Toque para revisar ou finalizar</Text></View></View><Text style={styles.floatingCartPrice}>{brl(cartSubtotal)}</Text></Pressable>}
     {pendingCardOrder&&cardTokenization&&<EfiCardPayment visible config={cardTokenization} order={pendingCardOrder} defaults={{name:String(session.user.user_metadata?.full_name??""),email:String(session.user.email??""),phone:String(session.user.user_metadata?.phone??"")}} onCancel={cancelPendingCardPayment} onComplete={completeCardPayment}/>}
@@ -689,13 +695,14 @@ export default function App(){
 
   const quickCategories=[{label:"Promoções",icon:"🏷️",query:"promo"},{label:"Lanches",icon:"🍔",query:"lanche"},{label:"Pizzas",icon:"🍕",query:"pizza"},{label:"Bebidas",icon:"🥤",query:"bebida"},{label:"Doces",icon:"🧁",query:"doce"}];
   const featuredStores=stores.slice(0,2);
+  const featuredProducts=homeFeaturedProducts.slice(0,2);
   const favoriteStores=stores.filter(store=>favoriteStoreIds.has(store.id));
 
   const home=<ScrollView contentContainerStyle={styles.scroll}>
     <Pressable style={styles.searchBox} onPress={()=>{setQuery("");setTab("search");}}><Text style={styles.searchText}>⌕  Buscar produtos, lojas...</Text><Text style={styles.searchChevron}>⌕</Text></Pressable>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickCategoriesRow}>{quickCategories.map(item=><Pressable key={item.label} style={styles.quickCategory} onPress={()=>{setQuery(item.query);setTab("search");}}><View style={styles.quickCategoryIcon}><Text style={styles.quickCategoryEmoji}>{item.icon}</Text></View><Text style={styles.quickCategoryLabel}>{item.label}</Text></Pressable>)}</ScrollView>
     <View style={styles.sectionHeader}><Text style={styles.section}>Destaques</Text><Pressable onPress={()=>{setQuery("");setTab("search");}}><Text style={styles.sectionLink}>Ver mais ›</Text></Pressable></View>
-    <View style={styles.featuredGrid}>{featuredStores.map(store=><Pressable key={store.id} style={styles.featuredCard} onPress={()=>openStore(store)}>{store.cover_url?<Image source={{uri:store.cover_url}} style={styles.featuredImage}/>:<View style={[styles.featuredImageFallback,{backgroundColor:store.secondary_color||"#111"}]}><Text style={{color:store.primary_color||"#f4c400",fontWeight:"900"}}>CLICK-FOOD</Text></View>}<View style={styles.featuredBody}><Text numberOfLines={1} style={styles.featuredName}>{store.name}</Text><Text numberOfLines={1} style={styles.featuredMeta}>{store.slogan||"Delivery CLICK-FOOD"}</Text><View style={styles.featuredBottom}><Text style={styles.featuredPrice}>mín. {brl(store.minimum_order)}</Text><View style={styles.featuredPlus}><Text style={styles.featuredPlusText}>+</Text></View></View></View></Pressable>)}</View>
+    <View style={styles.featuredGrid}>{featuredProducts.length?featuredProducts.map(product=>{const store=stores.find(item=>item.id===product.storeId);const displayPrice=product.promotionalPrice!=null&&product.promotionalPrice>0?product.promotionalPrice:product.price;return <Pressable key={product.id} style={styles.featuredCard} onPress={()=>store&&openStore(store)}>{product.imageUrl?<Image source={{uri:product.imageUrl}} style={styles.featuredImage}/>:<View style={styles.featuredImageFallback}><Text style={styles.featuredImageEmoji}>🍽️</Text></View>}<View style={styles.featuredBody}><Text numberOfLines={1} style={styles.featuredName}>{product.name}</Text><Text numberOfLines={1} style={styles.featuredMeta}>{product.storeName}</Text><Text style={styles.featuredPrep}>⏱ {store?.average_preparation_time??30} min</Text><View style={styles.featuredBottom}><Text style={styles.featuredPrice}>{brl(displayPrice)}</Text><View style={styles.featuredPlus}><Text style={styles.featuredPlusText}>+</Text></View></View></View></Pressable>}):featuredStores.map(store=><Pressable key={store.id} style={styles.featuredCard} onPress={()=>openStore(store)}>{store.cover_url?<Image source={{uri:store.cover_url}} style={styles.featuredImage}/>:<View style={[styles.featuredImageFallback,{backgroundColor:store.secondary_color||"#111"}]}><Text style={{color:store.primary_color||"#f4c400",fontWeight:"900"}}>CLICK-FOOD</Text></View>}<View style={styles.featuredBody}><Text numberOfLines={1} style={styles.featuredName}>{store.name}</Text><Text numberOfLines={1} style={styles.featuredMeta}>{store.slogan||"Delivery CLICK-FOOD"}</Text><View style={styles.featuredBottom}><Text style={styles.featuredPrice}>mín. {brl(store.minimum_order)}</Text><View style={styles.featuredPlus}><Text style={styles.featuredPlusText}>+</Text></View></View></View></Pressable>)}</View>
     <View style={styles.sectionHeader}><Text style={styles.section}>Lojas próximas</Text><Pressable onPress={()=>{setQuery("");setTab("search");}}><Text style={styles.sectionLink}>Ver mais ›</Text></Pressable></View>
     {stores.length?stores.map(renderStoreCard):<Text style={styles.empty}>Ainda não há lojas ativas.</Text>}
   </ScrollView>;
@@ -711,7 +718,7 @@ export default function App(){
   const mapCenter=tracking?tracking.driverLat!=null&&tracking.driverLng!=null?{latitude:tracking.driverLat,longitude:tracking.driverLng}:tracking.storeLat!=null&&tracking.storeLng!=null?{latitude:tracking.storeLat,longitude:tracking.storeLng}:tracking.destinationLat!=null&&tracking.destinationLng!=null?{latitude:tracking.destinationLat,longitude:tracking.destinationLng}:null:null;
 
   const ordersView=<ScrollView contentContainerStyle={styles.scroll}>
-    <View style={styles.rowBetween}><Text style={styles.pageTitle}>Meus pedidos</Text><Pressable onPress={loadOrders}><Text style={styles.link}>Atualizar</Text></Pressable></View>{!!message&&<Text style={styles.notice}>{message}</Text>}
+    <View style={styles.rowBetween}><Text style={styles.pageTitle}>{tracking&&trackedOrder?"Meu Pedido":"Meus pedidos"}</Text><Pressable onPress={loadOrders}><Text style={styles.link}>Atualizar</Text></Pressable></View>{!!message&&<Text style={styles.notice}>{message}</Text>}
     {pixCharge&&<PixPaymentCard charge={pixCharge} busy={pixBusy} onRefresh={()=>refreshPix(pixCharge.orderId)}/>}
     {tracking&&trackedOrder&&<View style={styles.trackingCard}>
       {tracking.deliveryStatus==="DRIVER_AT_CUSTOMER"&&<View style={styles.arrivedBanner}><Text style={styles.arrivedTitle}>Seu motorista chegou!</Text><Text style={styles.arrivedText}>Dirija-se ao local combinado para receber o pedido.</Text></View>}
@@ -783,13 +790,13 @@ const styles=StyleSheet.create({
   bottom:{height:68,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e5e5e5",flexDirection:"row"},tab:{flex:1,alignItems:"center",justifyContent:"center"},tabIcon:{fontSize:19,color:"#777"},tabLabel:{fontSize:9,color:"#777",fontWeight:"700",marginTop:3},tabActive:{color:"#8d7000",fontWeight:"900"}
 ,
   storeTopTitle:{fontSize:14,fontWeight:"900",color:"#171717",maxWidth:"64%",textAlign:"center"},
-  floatingCartTop:{position:"absolute",top:8,left:12,right:12,height:58,backgroundColor:"#111",borderRadius:14,borderWidth:1.5,borderColor:"#f4c400",paddingHorizontal:13,flexDirection:"row",alignItems:"center",justifyContent:"space-between",zIndex:30,elevation:12,shadowColor:"#000",shadowOpacity:.18,shadowRadius:9,shadowOffset:{width:0,height:4}},
+  floatingCartTop:{position:"absolute",top:6,left:10,right:10,height:52,backgroundColor:"#f4c400",borderRadius:12,paddingHorizontal:14,flexDirection:"row",alignItems:"center",justifyContent:"space-between",zIndex:30,elevation:12,shadowColor:"#000",shadowOpacity:.16,shadowRadius:8,shadowOffset:{width:0,height:4}},
   floatingCartLeft:{flexDirection:"row",alignItems:"center",gap:10,flex:1},
   floatingCartIcon:{fontSize:22},
-  floatingCartTitle:{color:"#f4c400",fontSize:13,fontWeight:"900"},
-  floatingCartBadge:{backgroundColor:"#f4c400",color:"#111",fontSize:10,fontWeight:"900"},
-  floatingCartMeta:{color:"#c8c8c8",fontSize:9,marginTop:2},
-  floatingCartPrice:{color:"#fff",fontSize:16,fontWeight:"900",marginLeft:8},
+  floatingCartTitle:{color:"#111",fontSize:14,fontWeight:"900"},
+  floatingCartBadge:{backgroundColor:"#fff",color:"#111",fontSize:10,fontWeight:"900"},
+  floatingCartMeta:{color:"#5b4a00",fontSize:9,marginTop:2,fontWeight:"700"},
+  floatingCartPrice:{color:"#111",fontSize:16,fontWeight:"900",marginLeft:8},
   searchText:{color:"#555",fontSize:12},
   searchChevron:{color:"#111",fontSize:17,fontWeight:"900"},
   quickCategoriesRow:{gap:12,paddingBottom:4,paddingHorizontal:1},
@@ -806,6 +813,8 @@ const styles=StyleSheet.create({
   featuredBody:{padding:9},
   featuredName:{fontSize:12,fontWeight:"900",color:"#171717"},
   featuredMeta:{fontSize:9,color:"#777",marginTop:3},
+  featuredPrep:{fontSize:9,color:"#8a6d00",fontWeight:"800",marginTop:4},
+  featuredImageEmoji:{fontSize:42},
   featuredBottom:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",marginTop:9},
   featuredPrice:{fontSize:10,fontWeight:"900",color:"#111",flex:1},
   featuredPlus:{width:28,height:28,borderRadius:9,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},
