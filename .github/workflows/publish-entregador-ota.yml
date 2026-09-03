@@ -1,0 +1,50 @@
+name: CLICK-FOOD Entregador OTA
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Canal OTA
+        required: true
+        type: choice
+        default: preview
+        options:
+          - preview
+          - production
+      message:
+        description: Descricao da atualizacao
+        required: false
+        default: Atualizacao CLICK-FOOD Entregador
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --include=dev
+
+      - name: Validar EAS
+        working-directory: apps/entregador
+        run: |
+          test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN nao configurado.'; exit 1; }
+          npx --yes eas-cli@latest whoami >/dev/null
+          npx expo install --check
+
+      - name: Publicar OTA
+        working-directory: apps/entregador
+        run: npx --yes eas-cli@latest update --channel '${{ inputs.channel }}' --message '${{ inputs.message }}' --non-interactive
