@@ -1,0 +1,52 @@
+name: CLICK-FOOD Aplicar layout exato 2026-09-03
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/apply-exact-clickfood-layout-20260903.py'
+      - '.github/workflows/apply-exact-clickfood-layout-20260903.yml'
+      - '.github/layout-exato-trigger-*'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Aplicar layout
+        run: python scripts/apply-exact-clickfood-layout-20260903.py
+
+      - name: Instalar dependencias
+        run: npm ci --include=dev
+
+      - name: Validar App Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+
+      - name: Validar App Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+
+      - name: Commit e push
+        run: |
+          if git diff --quiet; then
+            echo 'Nenhuma alteração nova.'
+            exit 0
+          fi
+          git config user.name 'galego-ai'
+          git config user.email 'elismarribeiro298@gmail.com'
+          git add apps/cliente/App.tsx apps/cliente/CustomerProfessionalShell.tsx apps/entregador/App.tsx apps/entregador/DriverProfessionalShell.tsx apps/entregador/index.js
+          git commit -m 'feat(mobile): aplicar layout aprovado Cliente e Entregador'
+          git push origin HEAD:main
