@@ -1,0 +1,53 @@
+name: CLICK-FOOD Mapa sob demanda Entregador 2026-09-03
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-driver-map-on-demand-20260903.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Aplicar ajuste
+        run: python3 scripts/apply-driver-map-on-demand-20260903.py
+      - name: Instalar dependências
+        run: npm ci --include=dev
+      - name: Validar TypeScript Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+      - name: Garantir que o mapa não fique permanente
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('apps/entregador/App.tsx').read_text(encoding='utf-8')
+          home=text.split('  const home=',1)[1].split('\n\n  const historyView=',1)[0]
+          if '<DriverLiveMap' in home:
+              raise SystemExit('DriverLiveMap ainda está permanente na home.')
+          if 'VER MAPA / ROTA' not in home or 'setMapOpen(true)' not in home:
+              raise SystemExit('Botão de mapa sob demanda não encontrado.')
+          print('Mapa sob demanda validado na home do entregador.')
+          PY
+      - name: Commit e push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'click-food-ci'
+          git config user.email 'click-food-ci@users.noreply.github.com'
+          git add apps/entregador/App.tsx
+          git commit -m 'fix(driver): abrir mapa somente sob demanda'
+          git push origin HEAD:main
