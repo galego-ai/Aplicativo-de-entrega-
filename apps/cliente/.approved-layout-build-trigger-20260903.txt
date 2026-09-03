@@ -1,0 +1,2 @@
+CLICK-FOOD layout aprovado pelo usuário em 2026-09-03.
+Build deve incluir os commits 492d7ffaa6f6b043f0c92d44360622de2050ea20 e b1f99e50a60d581c6d1eefdb0870d7a13fdb8007 ou posteriores.
