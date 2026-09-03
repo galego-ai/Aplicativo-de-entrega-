@@ -1,0 +1,56 @@
+name: CLICK-FOOD Verificar chave Maps APK anterior 2026-09-03
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-old-apk-maps-key-20260903.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar APK Cliente anterior
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/9896951600/zip" -o old-apk.zip
+          unzip -q old-apk.zip -d old-apk
+          APK="$(find old-apk -type f -name '*.apk' | head -n 1)"
+          test -n "$APK" && test -s "$APK"
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+
+      - name: Verificar chave Google Maps sem exibir valor
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT" || { echo 'Android SDK não localizado.'; exit 1; }
+          APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"
+          test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado.'; exit 1; }
+          "$APKANALYZER" manifest print "$APK_PATH" > manifest.xml
+          python - <<'PY'
+          import re
+          text=open('manifest.xml',encoding='utf-8',errors='ignore').read()
+          patterns=[
+            r'<meta-data[^>]*android:name="com\.google\.android\.geo\.API_KEY"[^>]*android:value="([^"]*)"',
+            r'<meta-data[^>]*android:value="([^"]*)"[^>]*android:name="com\.google\.android\.geo\.API_KEY"',
+          ]
+          value=''
+          for pattern in patterns:
+            m=re.search(pattern,text,re.S)
+            if m:
+              value=m.group(1).strip()
+              break
+          valid=bool(re.fullmatch(r'AIza[0-9A-Za-z_-]{30,}', value))
+          print('GOOGLE_MAPS_KEY_IN_OLD_APK=' + ('VALID' if valid else 'NOT_VALID_OR_NOT_FOUND'))
+          if not valid:
+            raise SystemExit(1)
+          PY
