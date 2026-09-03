@@ -1,0 +1,74 @@
+name: CLICK-FOOD Corrigir mapas e ganhos mobile 2026-09-03
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-mobile-map-earnings-fix-20260903.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Aplicar correções
+        run: python3 scripts/apply-mobile-map-earnings-fix-20260903.py
+
+      - name: Instalar dependências
+        run: npm ci --include=dev
+
+      - name: Validar TypeScript Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+
+      - name: Validar TypeScript Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+
+      - name: Validar injeção do Google Maps sem expor chave
+        shell: bash
+        run: |
+          set -euo pipefail
+          for APP in cliente entregador; do
+            (
+              cd "apps/$APP"
+              GOOGLE_MAPS_API_KEY='CLICK_FOOD_CONFIG_TEST_ONLY' npx expo config --json > "$RUNNER_TEMP/$APP-expo.json"
+            )
+            node - "$RUNNER_TEMP/$APP-expo.json" <<'NODE'
+          const fs=require('fs');
+          const p=process.argv[2];
+          const c=JSON.parse(fs.readFileSync(p,'utf8'));
+          if(c?.android?.config?.googleMaps?.apiKey!=='CLICK_FOOD_CONFIG_TEST_ONLY'){
+            throw new Error('A configuração nativa do Google Maps não recebeu a variável de ambiente.');
+          }
+          NODE
+            rm -f "$RUNNER_TEMP/$APP-expo.json"
+          done
+          echo 'Configuração Google Maps validada nos dois apps sem expor a chave real.'
+
+      - name: Commit e push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'click-food-ci'
+          git config user.email 'click-food-ci@users.noreply.github.com'
+          git add apps/cliente/app.config.js apps/cliente/App.tsx apps/entregador/app.config.js apps/entregador/App.tsx apps/entregador/DriverLiveMap.tsx
+          if git diff --cached --quiet; then
+            echo 'Nenhuma alteração pendente.'
+            exit 0
+          fi
+          git commit -m 'fix(mobile): restaurar Google Maps e ocultar ganhos'
+          git push origin HEAD:main
