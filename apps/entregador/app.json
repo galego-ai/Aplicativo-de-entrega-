@@ -23,7 +23,10 @@
         "expo-notifications",
         {
           "color": "#F4C400",
-          "defaultChannel": "clickfood-default"
+          "defaultChannel": "clickfood-default",
+          "sounds": [
+            "./assets/clickfood_chamada.wav"
+          ]
         }
       ]
     ],
