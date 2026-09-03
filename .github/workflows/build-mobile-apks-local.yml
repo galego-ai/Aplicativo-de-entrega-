@@ -1,5 +1,5 @@
 name: CLICK-FOOD Apps Android Local Build
-# Build do layout mobile corrigido - base c09d131
+# Build local de contingência quando a cota EAS cloud estiver indisponível.
 
 on:
   workflow_dispatch:
@@ -39,6 +39,10 @@ jobs:
             artifact: CLICK-FOOD-Entregador-APK-Local
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY }}
 
     steps:
       - name: Checkout
@@ -68,6 +72,16 @@ jobs:
           npx --yes eas-cli@latest whoami >/dev/null
           npx --yes eas-cli@latest project:info --non-interactive
 
+      - name: Validar configuração protegida Google Maps
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_MAPS_API_KEY:-}" ] && [ -z "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ] && [ -z "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" ] && [ -z "${EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
+            echo 'Nenhuma variável protegida conhecida do Google Maps está disponível no GitHub Actions.'
+            exit 1
+          fi
+          echo 'Configuração protegida do Google Maps disponível para o build local.'
+
       - name: Compilar APK localmente
         working-directory: apps/${{ matrix.app }}
         shell: bash
@@ -93,7 +107,7 @@ jobs:
           test -s "$GITHUB_WORKSPACE/artifacts/${{ matrix.filename }}"
           unzip -tq "$GITHUB_WORKSPACE/artifacts/${{ matrix.filename }}" >/dev/null
 
-      - name: Verificar metadado Google Maps
+      - name: Garantir Google Maps real no APK local
         shell: bash
         run: |
           set -euo pipefail
@@ -107,12 +121,16 @@ jobs:
           fi
           test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado no runner.'; exit 1; }
           "$APKANALYZER" manifest print "$APK" > "$MANIFEST_XML"
-          if grep -q 'com.google.android.geo.API_KEY' "$MANIFEST_XML"; then
-            echo 'Metadado Google Maps presente no APK.'
-          else
-            echo 'AVISO: metadado Google Maps não encontrado no APK local.'
+          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST_XML" || {
+            echo 'Metadado do Google Maps não encontrado no APK local.'
+            exit 1
+          }
+          if grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST_XML"; then
+            echo 'APK local contém a configuração fallback do Google Maps.'
+            exit 1
           fi
           rm -f "$MANIFEST_XML"
+          echo 'Google Maps real confirmado no APK local sem expor a chave.'
 
       - name: Publicar APK
         uses: actions/upload-artifact@v4
