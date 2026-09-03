@@ -1,0 +1,2 @@
+Build solicitado após correção do PIX associado ao pedido correto e ampliação da navegação inferior em Cliente e Entregador.
+Commit funcional: 0a670db9fae2618649e63ccc46ca466feecc6979
