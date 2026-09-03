@@ -1,5 +1,6 @@
 name: CLICK-FOOD Corrigir codigo safearea mapa frete
 
+# revalidacao apos ajuste de compatibilidade do mapa
 on:
   workflow_dispatch:
   push:
