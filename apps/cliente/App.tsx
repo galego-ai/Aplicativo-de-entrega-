@@ -203,10 +203,15 @@ export default function App(){
   }
 
   async function loadPendingPix(currentOrders:Order[]){
-    const pending=currentOrders.find(order=>order.status==="PENDING_PAYMENT"&&order.payment_status!=="PAID");
-    if(!pending){setPixCharge(null);return;}
-    const{data}=await supabase.from("efi_pix_charges").select("txid,brcode,status,expires_at").eq("order_id",pending.id).order("created_at",{ascending:false}).limit(1).maybeSingle();
-    if(data?.brcode)setPixCharge({orderId:pending.id,txid:data.txid,brcode:data.brcode,status:data.status,expires_at:data.expires_at});
+    const pendingOrders=currentOrders.filter(order=>order.status==="PENDING_PAYMENT"&&order.payment_status!=="PAID");
+    if(!pendingOrders.length){setPixCharge(null);return;}
+    const pendingIds=pendingOrders.map(order=>order.id);
+    const{data:paymentRows}=await supabase.from("payments").select("order_id,method,created_at").in("order_id",pendingIds).order("created_at",{ascending:false});
+    const pixOrderId=(paymentRows??[]).find((row:any)=>String(row.method)==="PIX")?.order_id;
+    if(!pixOrderId){setPixCharge(null);return;}
+    const{data}=await supabase.from("efi_pix_charges").select("txid,brcode,status,expires_at").eq("order_id",pixOrderId).order("created_at",{ascending:false}).limit(1).maybeSingle();
+    if(data?.brcode)setPixCharge({orderId:String(pixOrderId),txid:data.txid,brcode:data.brcode,status:data.status,expires_at:data.expires_at});
+    else setPixCharge(null);
   }
 
   async function loadPendingCard(currentOrders:Order[]){
@@ -235,6 +240,8 @@ export default function App(){
 
   async function refreshPix(orderId:string){
     setPixBusy(true);
+    const{data:payment}=await supabase.from("payments").select("method").eq("order_id",orderId).order("created_at",{ascending:false}).limit(1).maybeSingle();
+    if(payment?.method!=="PIX"){setPixCharge(null);setMessage("Este pedido não é PIX.");setPixBusy(false);return false;}
     const statusResult=await supabase.functions.invoke("efi-pix-status",{body:{orderId}});
     if(!statusResult.error&&statusResult.data?.paid){
       setPixCharge(null);setMessage("Pagamento PIX confirmado! Seu pedido foi enviado para a loja.");await loadOrders();setPixBusy(false);return true;
@@ -742,7 +749,6 @@ export default function App(){
 
   const ordersView=<ScrollView contentContainerStyle={styles.scroll}>
     <View style={styles.rowBetween}><Text style={styles.pageTitle}>{tracking&&trackedOrder?"Meu Pedido":"Meus pedidos"}</Text><Pressable onPress={loadOrders}><Text style={styles.link}>Atualizar</Text></Pressable></View>{!!message&&<Text style={styles.notice}>{message}</Text>}
-    {pixCharge&&<PixPaymentCard charge={pixCharge} busy={pixBusy} onRefresh={()=>refreshPix(pixCharge.orderId)}/>}
     {tracking&&trackedOrder&&<View style={styles.trackingCard}>
       {tracking.deliveryStatus==="DRIVER_AT_CUSTOMER"&&<View style={styles.arrivedBanner}><Text style={styles.arrivedTitle}>Seu motorista chegou!</Text><Text style={styles.arrivedText}>Dirija-se ao local combinado para receber o pedido.</Text></View>}
       <Text style={styles.trackingKicker}>ACOMPANHAMENTO EM TEMPO REAL</Text><Text style={styles.trackingTitle}>Pedido #{trackedOrder.order_number}</Text><Text style={styles.trackingStatus}>{statusLabel[trackedOrder.status]??trackedOrder.status}</Text><TrackingTimeline status={trackedOrder.status}/>
@@ -755,6 +761,7 @@ export default function App(){
     {orders.length?orders.map(order=>{
       const rel=Array.isArray(order.stores)?order.stores[0]:order.stores;const reviewed=reviewedOrderIds.has(order.id);
       return <View style={styles.orderBlock} key={order.id}>
+        {pixCharge?.orderId===order.id&&<View style={styles.pixOrderWrap}><Text style={styles.pixOrderContext}>PIX DO PEDIDO #{order.order_number}</Text><PixPaymentCard charge={pixCharge} busy={pixBusy} onRefresh={()=>refreshPix(order.id)}/></View>}
         <View style={styles.orderCard}><View style={{flex:1}}><Text style={styles.productName}>{rel?.name??"CLICK-FOOD"} • #{order.order_number}</Text><Text style={styles.meta}>{statusLabel[order.status]??order.status} • {paymentStatusLabel[order.payment_status]??order.payment_status}</Text></View><Text style={styles.price}>{brl(order.total)}</Text></View><OrderProgress status={order.status}/>
         {refundByOrder[order.id]&&<View style={[styles.refundBanner,refundByOrder[order.id].status==="COMPLETED"?styles.refundDone:refundByOrder[order.id].status==="FAILED"?styles.refundFailed:styles.refundPending]}><Text style={styles.refundText}>{refundStatusLabel[refundByOrder[order.id].status]??refundByOrder[order.id].status} • {brl(refundByOrder[order.id].amount)}</Text>{["PENDING","PROCESSING","FAILED"].includes(refundByOrder[order.id].status)&&<Pressable style={styles.refundButton} disabled={refundBusyOrderId===order.id} onPress={()=>reconcileRefund(order)}><Text style={styles.refundButtonText}>{refundBusyOrderId===order.id?"CONSULTANDO...":"ATUALIZAR ESTORNO"}</Text></Pressable>}</View>}
         {!refundByOrder[order.id]&&["CANCELLED","REJECTED"].includes(order.status)&&["PAID","PARTIALLY_REFUNDED"].includes(order.payment_status)&&<Pressable style={styles.refundButtonStandalone} disabled={refundBusyOrderId===order.id} onPress={()=>reconcileRefund(order)}><Text style={styles.refundButtonText}>{refundBusyOrderId===order.id?"CONSULTANDO...":"CONSULTAR ESTORNO PIX"}</Text></Pressable>}
@@ -810,7 +817,7 @@ const styles=StyleSheet.create({
   cancelButton:{borderWidth:1,borderColor:"#edc3c0",backgroundColor:"#fff",padding:10,borderRadius:10,alignItems:"center",marginTop:5},cancelText:{color:"#a32e28",fontWeight:"900",fontSize:10},rateButton:{backgroundColor:"#fff6cf",padding:10,borderRadius:10,alignItems:"center",marginTop:5},rateText:{color:"#745c00",fontWeight:"900",fontSize:10},reviewed:{color:"#24774b",fontWeight:"800",fontSize:11,padding:8},reviewBox:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e1d49d",borderRadius:14,padding:14,marginTop:5},stars:{flexDirection:"row",gap:7,marginBottom:12},star:{fontSize:34,color:"#ccc"},starActive:{color:"#f4c400"},
   profile:{backgroundColor:"#fff",padding:15,borderRadius:16,flexDirection:"row",alignItems:"center",gap:12},loyaltyHero:{backgroundColor:"#111",borderRadius:18,padding:18,marginTop:14,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},loyaltyKicker:{color:"#f4c400",fontSize:10,fontWeight:"900",letterSpacing:1.2},loyaltyTotal:{color:"#fff",fontSize:34,fontWeight:"900",marginTop:3},loyaltyHeroEmoji:{color:"#f4c400",fontSize:38},loyaltyCard:{backgroundColor:"#fff",borderWidth:1,borderColor:"#e4e4e4",borderRadius:16,padding:13,marginBottom:10},loyaltyStoreRow:{flexDirection:"row",alignItems:"center",gap:10},loyaltyLogo:{width:44,height:44,borderRadius:12,backgroundColor:"#eee"},loyaltyLogoFallback:{width:44,height:44,borderRadius:12,backgroundColor:"#f4c400",alignItems:"center",justifyContent:"center"},loyaltyLogoText:{fontWeight:"900"},loyaltySubtitle:{fontSize:12,fontWeight:"900",marginTop:14,marginBottom:6},loyaltyRewardRow:{borderTopWidth:1,borderTopColor:"#eee",paddingVertical:10,flexDirection:"row",alignItems:"center",gap:8},loyaltyRedeem:{backgroundColor:"#111",borderRadius:9,paddingVertical:9,paddingHorizontal:10},loyaltyRedeemText:{color:"#f4c400",fontSize:9,fontWeight:"900"},loyaltyMissing:{fontSize:9,color:"#a86b00",fontWeight:"800",marginTop:3},loyaltyCoupon:{backgroundColor:"#fffbea",borderRadius:11,padding:10,marginTop:6,flexDirection:"row",alignItems:"center",gap:8},loyaltyCode:{fontSize:15,fontWeight:"900",letterSpacing:1,marginTop:4},loyaltyPointsSpent:{fontWeight:"900",color:"#a36d00"},signOut:{borderWidth:1,borderColor:"#e3b7b7",borderRadius:13,padding:14,marginTop:24,alignItems:"center"},signOutText:{color:"#9d2c2c",fontWeight:"900"},
   bagFloating:{position:"absolute",left:16,right:16,bottom:14,backgroundColor:"#111",borderRadius:16,paddingVertical:12,paddingHorizontal:15,flexDirection:"row",alignItems:"center",justifyContent:"space-between",borderWidth:2,borderColor:"#f4c400",elevation:8,shadowColor:"#000",shadowOpacity:.18,shadowRadius:10,shadowOffset:{width:0,height:4}},bagFloatingTitle:{color:"#f4c400",fontSize:12,fontWeight:"900",letterSpacing:.7},bagFloatingMeta:{color:"#fff",fontSize:10,fontWeight:"700",marginTop:2},bagFloatingTotal:{color:"#fff",fontSize:18,fontWeight:"900"},
-  bottom:{minHeight:90,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e5e5e5",flexDirection:"row",paddingTop:6,paddingBottom:22},tab:{flex:1,alignItems:"center",justifyContent:"center"},tabIcon:{fontSize:19,color:"#777"},tabLabel:{fontSize:9,color:"#777",fontWeight:"700",marginTop:3},tabActive:{color:"#8d7000",fontWeight:"900"}
+  bottom:{minHeight:116,backgroundColor:"#fff",borderTopWidth:1,borderTopColor:"#e5e5e5",flexDirection:"row",paddingTop:10,paddingBottom:34,elevation:16},tab:{flex:1,minHeight:68,alignItems:"center",justifyContent:"center",paddingHorizontal:2},tabIcon:{fontSize:28,lineHeight:32,color:"#777"},tabLabel:{fontSize:11,color:"#777",fontWeight:"800",marginTop:4},tabActive:{color:"#8d7000",fontWeight:"900"}
 ,
   storeTopTitle:{fontSize:14,fontWeight:"900",color:"#171717",maxWidth:"64%",textAlign:"center"},
   floatingCartTop:{position:"absolute",top:6,left:10,right:10,height:52,backgroundColor:"#f4c400",borderRadius:12,paddingHorizontal:14,flexDirection:"row",alignItems:"center",justifyContent:"space-between",zIndex:30,elevation:12,shadowColor:"#000",shadowOpacity:.16,shadowRadius:8,shadowOffset:{width:0,height:4}},
@@ -853,6 +860,7 @@ const styles=StyleSheet.create({
   productGrid:{flexDirection:"row",flexWrap:"wrap",gap:10,alignItems:"stretch"},
   productTile:{width:"48%",backgroundColor:"#fff",borderWidth:1,borderColor:"#e7e7e7",borderRadius:14,padding:9,marginBottom:2},
   productTileSoldOut:{opacity:.62},productImageSoldOut:{opacity:.55},soldOutText:{marginTop:7,fontSize:10,fontWeight:"900",color:"#9b1c1c",letterSpacing:.7},addButtonSoldOut:{backgroundColor:"#bdbdbd"},
+  pixOrderWrap:{marginBottom:10},pixOrderContext:{fontSize:11,fontWeight:"900",color:"#7b6200",letterSpacing:.7,marginBottom:7,marginLeft:2},
   timeline:{marginTop:3,marginBottom:6},
   timelineRow:{flexDirection:"row",minHeight:43},
   timelineRail:{width:28,alignItems:"center"},
