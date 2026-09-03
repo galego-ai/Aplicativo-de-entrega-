@@ -1,0 +1,63 @@
+name: CLICK-FOOD Corrigir PIX dinheiro e barra inferior
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-cash-pix-bottom-nav-20260903.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  corrigir:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Aplicar correções
+        run: python3 scripts/fix-cash-pix-bottom-nav-20260903.py
+
+      - name: Instalar dependências
+        run: npm ci --include=dev
+
+      - name: TypeScript Cliente
+        run: npx tsc --noEmit --jsx react-jsx --moduleResolution bundler --module preserve --target es2022 --skipLibCheck --allowSyntheticDefaultImports apps/cliente/App.tsx
+
+      - name: TypeScript Entregador
+        run: npx tsc --noEmit --jsx react-jsx --moduleResolution bundler --module preserve --target es2022 --skipLibCheck --allowSyntheticDefaultImports apps/entregador/App.tsx
+
+      - name: Validar PIX somente no pedido PIX
+        run: |
+          grep -q 'PIX DO PEDIDO #' apps/cliente/App.tsx
+          grep -q 'payment?.method!=="PIX"' apps/cliente/App.tsx
+          ! grep -q '{pixCharge&&<PixPaymentCard' apps/cliente/App.tsx
+
+      - name: Validar barra inferior maior
+        run: |
+          grep -q 'bottom:{minHeight:116' apps/cliente/App.tsx
+          grep -q 'tabIcon:{fontSize:28' apps/cliente/App.tsx
+          grep -q 'bottom:{minHeight:116' apps/entregador/App.tsx
+          grep -q 'tabIcon:{fontSize:28' apps/entregador/App.tsx
+
+      - name: Commit e push
+        run: |
+          if git diff --quiet; then
+            echo 'Sem alterações.'
+            exit 0
+          fi
+          git config user.name 'click-food-bot'
+          git config user.email 'click-food-bot@users.noreply.github.com'
+          git add apps/cliente/App.tsx apps/entregador/App.tsx
+          git commit -m 'fix(mobile): separar PIX de dinheiro e ampliar barra inferior'
+          git push origin HEAD:main
