@@ -1,0 +1,119 @@
+name: CLICK-FOOD Apps Android Local Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-mobile-apks-local.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: click-food-local-android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-local:
+    name: APK Local ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: cliente
+            label: Cliente
+            package: br.com.clickfood.cliente
+            filename: CLICK-FOOD-Cliente.apk
+            artifact: CLICK-FOOD-Cliente-APK-Local
+          - app: entregador
+            label: Entregador
+            package: br.com.clickfood.entregador
+            filename: CLICK-FOOD-Entregador.apk
+            artifact: CLICK-FOOD-Entregador-APK-Local
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar dependências
+        run: npm ci --include=dev
+
+      - name: Validar projeto Expo
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || { echo "EXPO_TOKEN não configurado."; exit 1; }
+          npx expo install --check
+          npx --yes eas-cli@latest whoami >/dev/null
+          npx --yes eas-cli@latest project:info --non-interactive
+
+      - name: Compilar APK localmente
+        working-directory: apps/${{ matrix.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/eas-local-${{ matrix.app }}"
+          mkdir -p "$OUT"
+          export EAS_LOCAL_BUILD_ARTIFACTS_DIR="$OUT"
+          export EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          npx --yes eas-cli@latest build \
+            --platform android \
+            --profile preview \
+            --local \
+            --non-interactive
+
+          APK="$(find "$OUT" -type f -name '*.apk' | head -n 1 || true)"
+          if [ -z "$APK" ]; then
+            APK="$(find . -type f -name '*.apk' | head -n 1 || true)"
+          fi
+          test -n "$APK" || { echo 'APK não encontrado após o build local.'; find "$OUT" -maxdepth 3 -type f -print || true; exit 1; }
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          cp "$APK" "$GITHUB_WORKSPACE/artifacts/${{ matrix.filename }}"
+          test -s "$GITHUB_WORKSPACE/artifacts/${{ matrix.filename }}"
+          unzip -tq "$GITHUB_WORKSPACE/artifacts/${{ matrix.filename }}" >/dev/null
+
+      - name: Verificar metadado Google Maps
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="artifacts/${{ matrix.filename }}"
+          MANIFEST_XML="$RUNNER_TEMP/${{ matrix.app }}-AndroidManifest.xml"
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then
+            SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+            test -n "$SDK_ROOT" || { echo 'Android SDK não localizado.'; exit 1; }
+            APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"
+          fi
+          test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado no runner.'; exit 1; }
+          "$APKANALYZER" manifest print "$APK" > "$MANIFEST_XML"
+          if grep -q 'com.google.android.geo.API_KEY' "$MANIFEST_XML"; then
+            echo 'Metadado Google Maps presente no APK.'
+          else
+            echo 'AVISO: metadado Google Maps não encontrado no APK local.'
+          fi
+          rm -f "$MANIFEST_XML"
+
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/${{ matrix.filename }}
+          if-no-files-found: error
+          retention-days: 30
