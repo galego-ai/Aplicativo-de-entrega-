@@ -27,6 +27,19 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Corrigir gerador de estilos
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/apply-exact-clickfood-layout-20260903.py')
+          s=p.read_text()
+          old="payload='\\n  '+','"
+          new="payload=',\\n  '+','"
+          if old not in s:
+              raise SystemExit('Trecho de add_styles não encontrado')
+          p.write_text(s.replace(old,new,1))
+          PY
+
       - name: Aplicar layout
         run: python scripts/apply-exact-clickfood-layout-20260903.py
 
@@ -41,8 +54,8 @@ jobs:
 
       - name: Commit e push
         run: |
-          if git diff --quiet; then
-            echo 'Nenhuma alteração nova.'
+          if git diff --quiet -- apps/cliente apps/entregador; then
+            echo 'Nenhuma alteração nova nos apps.'
             exit 0
           fi
           git config user.name 'galego-ai'
