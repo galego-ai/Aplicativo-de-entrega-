@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/apply-mobile-layout-v2-20260903.yml'
       - 'scripts/apply-mobile-layout-v2-20260903.py'
+      - 'scripts/finish-mobile-layout-v2-20260903.py'
 
 permissions:
   contents: write
@@ -31,7 +32,11 @@ jobs:
         run: npm ci --include=dev
 
       - name: Aplicar correções estruturais
-        run: python scripts/apply-mobile-layout-v2-20260903.py
+        shell: bash
+        run: |
+          set -u
+          python scripts/apply-mobile-layout-v2-20260903.py || true
+          python scripts/finish-mobile-layout-v2-20260903.py
 
       - name: Validar App Cliente
         run: npx tsc --noEmit -p apps/cliente/tsconfig.json
@@ -49,6 +54,7 @@ jobs:
           grep -q 'JÁ TENHO O CÓDIGO' apps/entregador/App.tsx
           grep -q 'app:"DRIVER"' apps/entregador/DriverProfessionalShell.tsx
           grep -q 'light-content' apps/entregador/DriverProfessionalShell.tsx
+          grep -q 'VER MAPA / ROTA' apps/entregador/App.tsx
 
       - name: Gravar alterações no main
         shell: bash
