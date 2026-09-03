@@ -1,0 +1,170 @@
+name: CLICK-FOOD Entregador Android Fast OTA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-entregador-fast-ota.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: click-food-entregador-fast-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-entregador:
+    name: APK Entregador Fast OTA
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_NO_TELEMETRY: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar dependências
+        run: npm ci --include=dev
+
+      - name: Validar Entregador e OTA
+        working-directory: apps/entregador
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN não configurado.'; exit 1; }
+          npx expo install --check
+          npx tsc --noEmit
+          npx expo config --type public > "$RUNNER_TEMP/expo-entregador.json"
+          grep -q 'u.expo.dev' "$RUNNER_TEMP/expo-entregador.json"
+          grep -q 'expo-updates' package.json
+          npx --yes eas-cli@latest whoami >/dev/null
+          npx --yes eas-cli@latest project:info --non-interactive
+
+      - name: Recuperar Google Maps de APK EAS válido se necessário
+        working-directory: apps/entregador
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
+            echo 'Configuração protegida do Google Maps já disponível.'
+            exit 0
+          fi
+
+          TMP="$RUNNER_TEMP/maps-eas-entregador-fast"
+          mkdir -p "$TMP"
+          npx --yes eas-cli@latest build:list --platform android --status finished --limit 10 --non-interactive --json > "$TMP/builds.json"
+          mapfile -t URLS < <(jq -r '.[] | (.artifacts.applicationArchiveUrl // .artifacts.buildUrl // empty)' "$TMP/builds.json")
+          test "${#URLS[@]}" -gt 0 || { echo 'Nenhum APK EAS finalizado encontrado.'; exit 1; }
+
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then
+            SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+            APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"
+          fi
+          test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado.'; exit 1; }
+
+          KEY=''
+          INDEX=0
+          for URL in "${URLS[@]}"; do
+            INDEX=$((INDEX+1))
+            PRIOR_APK="$TMP/prior-$INDEX.apk"
+            curl --fail --silent --show-error --location --retry 2 "$URL" -o "$PRIOR_APK" || continue
+            unzip -tq "$PRIOR_APK" >/dev/null 2>&1 || continue
+            "$APKANALYZER" manifest print "$PRIOR_APK" > "$TMP/manifest-$INDEX.xml"
+            CANDIDATE="$(perl -0777 -ne 'if(/<meta-data\b(?=[^>]*com\.google\.android\.geo\.API_KEY)[^>]*android:value="([^"]+)"/s){print $1}' "$TMP/manifest-$INDEX.xml")"
+            if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' ]; then
+              KEY="$CANDIDATE"
+              break
+            fi
+          done
+
+          test -n "$KEY" || { echo 'Nenhum APK EAS válido contém uma chave real do Google Maps.'; exit 1; }
+          echo "::add-mask::$KEY"
+          {
+            echo "GOOGLE_MAPS_API_KEY=$KEY"
+            echo "GOOGLE_MAPS_ANDROID_API_KEY=$KEY"
+            echo "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=$KEY"
+            echo "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY=$KEY"
+          } >> "$GITHUB_ENV"
+          rm -rf "$TMP"
+          echo 'Google Maps recuperado com segurança.'
+
+      - name: Validar Google Maps antes do build
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_MAPS_API_KEY:-}" ] && [ -z "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ] && [ -z "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" ] && [ -z "${EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
+            echo 'Google Maps não configurado.'
+            exit 1
+          fi
+
+      - name: Compilar somente Entregador
+        working-directory: apps/entregador
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/eas-local-entregador-fast"
+          mkdir -p "$OUT"
+          export EAS_LOCAL_BUILD_ARTIFACTS_DIR="$OUT"
+          export EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          npx --yes eas-cli@latest build --platform android --profile preview --local --non-interactive
+
+          APK="$(find "$OUT" -type f -name '*.apk' | head -n 1 || true)"
+          if [ -z "$APK" ]; then
+            APK="$(find . -type f -name '*.apk' | head -n 1 || true)"
+          fi
+          test -n "$APK" || { echo 'APK não encontrado.'; find "$OUT" -maxdepth 4 -type f -print || true; exit 1; }
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          cp "$APK" "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-OTA.apk"
+          test -s "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-OTA.apk"
+          unzip -tq "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-OTA.apk" >/dev/null
+
+      - name: Validar Maps real no APK final
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="artifacts/CLICK-FOOD-Entregador-OTA.apk"
+          MANIFEST_XML="$RUNNER_TEMP/entregador-fast-AndroidManifest.xml"
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then
+            SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+            APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"
+          fi
+          test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado.'; exit 1; }
+          "$APKANALYZER" manifest print "$APK" > "$MANIFEST_XML"
+          grep -q 'com.google.android.geo.API_KEY' "$MANIFEST_XML" || { echo 'Metadado Maps ausente.'; exit 1; }
+          if grep -q 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' "$MANIFEST_XML"; then
+            echo 'APK contém fallback do Maps.'
+            exit 1
+          fi
+          rm -f "$MANIFEST_XML"
+          echo 'Google Maps real confirmado no APK.'
+
+      - name: Publicar APK Entregador OTA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CLICK-FOOD-Entregador-APK-FAST-OTA
+          path: artifacts/CLICK-FOOD-Entregador-OTA.apk
+          if-no-files-found: error
+          retention-days: 30
