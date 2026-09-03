@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: click-food-local-android-${{ github.ref }}
@@ -32,11 +33,13 @@ jobs:
             package: br.com.clickfood.cliente
             filename: CLICK-FOOD-Cliente.apk
             artifact: CLICK-FOOD-Cliente-APK-Local
+            fallback_artifact_id: 9901330763
           - app: entregador
             label: Entregador
             package: br.com.clickfood.entregador
             filename: CLICK-FOOD-Entregador.apk
             artifact: CLICK-FOOD-Entregador-APK-Local
+            fallback_artifact_id: 9901142581
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
@@ -72,12 +75,67 @@ jobs:
           npx --yes eas-cli@latest whoami >/dev/null
           npx --yes eas-cli@latest project:info --non-interactive
 
+      - name: Recuperar Google Maps do APK anterior se necessário
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -n "${GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
+            echo 'Configuração protegida do Google Maps já disponível.'
+            exit 0
+          fi
+
+          TMP="$RUNNER_TEMP/maps-fallback-${{ matrix.app }}"
+          mkdir -p "$TMP"
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${{ matrix.fallback_artifact_id }}/zip" \
+            -o "$TMP/prior.zip"
+          unzip -q "$TMP/prior.zip" -d "$TMP/unpacked"
+          PRIOR_APK="$(find "$TMP/unpacked" -type f -name '*.apk' | head -n 1 || true)"
+          test -n "$PRIOR_APK" || { echo 'APK anterior não encontrado no artefato de fallback.'; exit 1; }
+
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then
+            SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+            test -n "$SDK_ROOT" || { echo 'Android SDK não localizado.'; exit 1; }
+            APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"
+          fi
+          test -n "$APKANALYZER" || { echo 'apkanalyzer não encontrado no runner.'; exit 1; }
+          "$APKANALYZER" manifest print "$PRIOR_APK" > "$TMP/manifest.xml"
+
+          KEY="$(python - "$TMP/manifest.xml" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
+for tag in re.findall(r'<meta-data\b[^>]*>', text, flags=re.S):
+    if 'com.google.android.geo.API_KEY' not in tag:
+        continue
+    match = re.search(r'android:value="([^"]+)"', tag)
+    if match:
+        print(match.group(1))
+        break
+PY
+)"
+          test -n "$KEY" || { echo 'Chave Google Maps não encontrada no APK anterior.'; exit 1; }
+          test "$KEY" != 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' || { echo 'APK anterior contém apenas fallback do Maps.'; exit 1; }
+          echo "::add-mask::$KEY"
+          {
+            echo "GOOGLE_MAPS_API_KEY=$KEY"
+            echo "GOOGLE_MAPS_ANDROID_API_KEY=$KEY"
+            echo "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=$KEY"
+            echo "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY=$KEY"
+          } >> "$GITHUB_ENV"
+          rm -rf "$TMP"
+          echo 'Google Maps recuperado de artefato anterior sem expor a chave.'
+
       - name: Validar configuração protegida Google Maps
         shell: bash
         run: |
           set -euo pipefail
           if [ -z "${GOOGLE_MAPS_API_KEY:-}" ] && [ -z "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ] && [ -z "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" ] && [ -z "${EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
-            echo 'Nenhuma variável protegida conhecida do Google Maps está disponível no GitHub Actions.'
+            echo 'Nenhuma configuração válida do Google Maps está disponível.'
             exit 1
           fi
           echo 'Configuração protegida do Google Maps disponível para o build local.'
