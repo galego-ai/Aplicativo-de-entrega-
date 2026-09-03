@@ -1,0 +1,113 @@
+name: CLICK-FOOD Aplicar Icones e OTA Entregador
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-entregador-icons-ota.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --include=dev
+
+      - name: Aplicar layout dos icones e configurar OTA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          app_tsx = Path('apps/entregador/App.tsx')
+          text = app_tsx.read_text(encoding='utf-8')
+          old_tabs = 'const tabs:Array<[Screen,string,string]>=[["home","▣","Entregas"],["history","◷","Histórico"],["wallet","▤","Carteira"],["profile","○","Perfil"]];'
+          new_tabs = 'const tabs:Array<[Screen,string,string]>=[["home","⌂","Entregas"],["history","▤","Histórico"],["wallet","▣","Carteira"],["profile","○","Perfil"]];'
+          if old_tabs not in text and new_tabs not in text:
+              raise SystemExit('Definicao dos icones inferiores nao encontrada.')
+          text = text.replace(old_tabs, new_tabs)
+          old_style = 'tabIcon:{fontSize:28,lineHeight:32,color:"#8b8b8b"}'
+          new_style = 'tabIcon:{fontSize:28,lineHeight:32,minWidth:32,textAlign:"center",color:"#8b8b8b"}'
+          if old_style in text:
+              text = text.replace(old_style, new_style)
+          elif new_style not in text:
+              raise SystemExit('Estilo tabIcon nao encontrado.')
+          app_tsx.write_text(text, encoding='utf-8')
+
+          app_json_path = Path('apps/entregador/app.json')
+          cfg = json.loads(app_json_path.read_text(encoding='utf-8'))
+          expo = cfg['expo']
+          project_id = expo.get('extra',{}).get('eas',{}).get('projectId')
+          if not project_id:
+              raise SystemExit('projectId EAS nao encontrado.')
+          expo['runtimeVersion'] = {'policy':'appVersion'}
+          expo['updates'] = {
+              'url': f'https://u.expo.dev/{project_id}',
+              'checkAutomatically': 'ON_LOAD',
+              'fallbackToCacheTimeout': 0
+          }
+          app_json_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          eas_path = Path('apps/entregador/eas.json')
+          eas = json.loads(eas_path.read_text(encoding='utf-8'))
+          eas['build']['preview']['channel'] = 'preview'
+          eas['build']['production']['channel'] = 'production'
+          eas_path.write_text(json.dumps(eas, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Instalar expo-updates compativel com o SDK
+        working-directory: apps/entregador
+        run: npx expo install expo-updates
+
+      - name: Validar TypeScript e configuracao Expo
+        working-directory: apps/entregador
+        run: |
+          npx tsc --noEmit
+          npx expo config --type public >/tmp/expo-config.json
+          grep -q 'u.expo.dev' /tmp/expo-config.json
+
+      - name: Conferir alteracoes obrigatorias
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '[["home","⌂","Entregas"],["history","▤","Histórico"],["wallet","▣","Carteira"],["profile","○","Perfil"]]' apps/entregador/App.tsx
+          grep -q 'expo-updates' apps/entregador/package.json
+          grep -q 'u.expo.dev' apps/entregador/app.json
+          grep -q '"channel": "preview"' apps/entregador/eas.json
+          grep -q '"channel": "production"' apps/entregador/eas.json
+
+      - name: Commitar e publicar
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/entregador/App.tsx apps/entregador/app.json apps/entregador/eas.json apps/entregador/package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo 'Nenhuma alteracao pendente.'
+            exit 0
+          fi
+          git commit -m 'feat(entregador): igualar icones ao cliente e ativar OTA'
+          git push
+
+      - name: Disparar novo APK Entregador/Cliente
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-mobile-apks-local.yml --ref main
