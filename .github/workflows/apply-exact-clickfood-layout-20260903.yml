@@ -33,10 +33,10 @@ jobs:
           from pathlib import Path
           p=Path('scripts/apply-exact-clickfood-layout-20260903.py')
           s=p.read_text()
-          old="payload='\\n  '+','"
-          new="payload=',\\n  '+','"
+          old=r"    payload='\n  '+',\n  '.join(f'{k}:{{{v}}}' for k,v in styles.items())+',\n'"
+          new=r"    payload=',\n  '+',\n  '.join(f'{k}:{{{v}}}' for k,v in styles.items())+',\n'"
           if old not in s:
-              raise SystemExit('Trecho de add_styles não encontrado')
+              raise SystemExit('Linha add_styles não encontrada')
           p.write_text(s.replace(old,new,1))
           PY
 
