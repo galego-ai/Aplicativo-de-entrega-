@@ -1,0 +1,47 @@
+name: CLICK-FOOD Ajuste codigo e mapas mobile 2026-09-03
+
+on:
+  push:
+    paths:
+      - "scripts/apply-mobile-delivery-code-map-ui-20260903.py"
+      - ".github/workflows/apply-mobile-delivery-code-map-ui-20260903.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Aplicar ajustes
+        run: python3 scripts/apply-mobile-delivery-code-map-ui-20260903.py
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Validar App Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+
+      - name: Validar App Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+
+      - name: Commit e push
+        run: |
+          git config user.name "galego-ai"
+          git config user.email "elismarribeiro298@gmail.com"
+          git add apps/cliente/App.tsx apps/entregador/App.tsx apps/entregador/DriverLiveMap.tsx
+          if git diff --cached --quiet; then
+            echo "Nenhuma alteracao para publicar."
+            exit 0
+          fi
+          git commit -m "feat(mobile): codigo de entrega e mapas sob demanda"
+          git push
