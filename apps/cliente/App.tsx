@@ -22,7 +22,7 @@ import CustomerOrderReceipt from "./CustomerOrderReceipt";
 type Tab = "home" | "search" | "orders" | "favorites" | "support" | "profile";
 type Store = { id:string; name:string; slogan:string|null; description:string|null; logo_url:string|null; cover_url:string|null; primary_color:string; secondary_color:string; minimum_order:number; average_preparation_time:number; timezone:string; orders_paused:boolean; open_now:boolean; pickup_enabled:boolean; clickfood_delivery_enabled:boolean; own_delivery_enabled:boolean; max_radius_km:number|null };
 type MenuCategory = { id:string; name:string; description:string|null; image_url:string|null; sort_order:number };
-type ProductWithMedia = Product & { image_url:string|null; category_id:string|null };
+type ProductWithMedia = Product & { image_url:string|null; category_id:string|null; control_inventory:boolean; stock_quantity:number|null };
 type Address = { id:string; label:string|null; street:string; number:string|null; district:string|null; reference:string|null };
 type StoreRelation = { name:string; latitude:number|null; longitude:number|null };
 type Order = { id:string; order_number:number; store_id:string; address_id:string|null; delivery_type:string; total:number; status:string; payment_status:string; created_at:string; stores:StoreRelation|StoreRelation[]|null };
@@ -331,11 +331,18 @@ export default function App(){
     const deliveryEnabled=store.clickfood_delivery_enabled||store.own_delivery_enabled;
     setDeliveryType(deliveryEnabled?"DELIVERY":store.pickup_enabled?"PICKUP":"DELIVERY");
     const[productResult,categoryResult]=await Promise.all([
-      supabase.from("products").select("id,name,description,image_url,price,promotional_price,category_id").eq("store_id",store.id).eq("active",true).eq("available_delivery",true).order("name"),
+      supabase.from("products").select("id,name,description,image_url,price,promotional_price,category_id,control_inventory").eq("store_id",store.id).eq("active",true).eq("available_delivery",true).order("name"),
       supabase.from("categories").select("id,name,description,image_url,sort_order").eq("store_id",store.id).eq("active",true).order("sort_order").order("name"),
     ]);
     if(productResult.error||categoryResult.error){setMessage("Não foi possível abrir o cardápio.");return;}
-    const ps=(productResult.data??[]).map((p:any)=>({...p,price:Number(p.price),promotional_price:p.promotional_price==null?null:Number(p.promotional_price),category_id:p.category_id==null?null:String(p.category_id)})) as ProductWithMedia[];
+    const rawPs=(productResult.data??[]).map((p:any)=>({...p,price:Number(p.price),promotional_price:p.promotional_price==null?null:Number(p.promotional_price),category_id:p.category_id==null?null:String(p.category_id),control_inventory:Boolean(p.control_inventory),stock_quantity:null})) as ProductWithMedia[];
+    const controlledIds=rawPs.filter(p=>p.control_inventory).map(p=>p.id);
+    const stockByProduct=new Map<string,number>();
+    if(controlledIds.length){
+      const inventoryResult=await supabase.from("inventory_items").select("product_id,quantity").eq("store_id",store.id).in("product_id",controlledIds);
+      for(const row of inventoryResult.data??[])stockByProduct.set(String(row.product_id),Number(row.quantity));
+    }
+    const ps=rawPs.map(p=>({...p,stock_quantity:p.control_inventory?Number(stockByProduct.get(p.id)??0):null}));
     setProducts(ps);setCategories((categoryResult.data??[]) as MenuCategory[]);
     const productIds=ps.map(p=>p.id);
     if(!productIds.length){setVariants([]);setOptionGroups([]);setProductOptions([]);setProductGroupLinks([]);setPromotions([]);return;}
@@ -375,6 +382,7 @@ export default function App(){
   }
 
   function beginProduct(product:ProductWithMedia){
+    if(product.control_inventory&&Number(product.stock_quantity??0)<=0){setMessage(`${product.name} está esgotado no momento.`);return;}
     const needsCustomization=variantsFor(product.id).length>0||groupsFor(product.id).length>0;
     if(needsCustomization){setSelectedProduct(product);setMessage("");return;}
     addCustomized({productId:product.id,productName:product.name,unitPrice:promotionPrice(Number(product.promotional_price??product.price),product.id,promotions),quantity:1,options:[]});
@@ -430,6 +438,10 @@ export default function App(){
     if(deliveryType==="PICKUP"&&!selectedStore.pickup_enabled){setMessage("A retirada na loja está desativada neste momento.");return;}
     if(cartSubtotal<selectedStore.minimum_order){setMessage(`Pedido mínimo: ${brl(selectedStore.minimum_order)}.`);return;}
     if(deliveryType==="DELIVERY"&&!selectedAddressId){setMessage("Cadastre e selecione um endereço para entrega.");return;}
+    const requestedByProduct=new Map<string,number>();
+    for(const item of cart)requestedByProduct.set(item.productId,(requestedByProduct.get(item.productId)??0)+item.quantity);
+    const insufficientLocal=products.find(product=>product.control_inventory&&Number(product.stock_quantity??0)<Number(requestedByProduct.get(product.id)??0));
+    if(insufficientLocal){setMessage(`${insufficientLocal.name} está sem estoque suficiente. Remova o item ou reduza a quantidade.`);return;}
     setPlacing(true);setMessage("");
     let deliveryQuoteId:string|undefined;let deliveryFee=0;
     if(deliveryType==="DELIVERY"){
@@ -476,7 +488,7 @@ export default function App(){
         STORE_UNAVAILABLE:"Esta loja está temporariamente indisponível.",
         DELIVERY_DISABLED:"A loja não está aceitando entregas neste momento.",
         PICKUP_DISABLED:"A retirada na loja está desativada neste momento.",
-        INSUFFICIENT_STOCK:"Um dos produtos não possui quantidade suficiente em estoque.",
+        INSUFFICIENT_STOCK:"Um dos produtos está esgotado ou não possui estoque suficiente. Atualize o cardápio e ajuste o carrinho.",
         INVENTORY_NOT_CONFIGURED:"Um produto com controle de estoque precisa ser ajustado pela loja antes da venda.",
         PRODUCT_UNAVAILABLE:"Um dos produtos ficou indisponível. Atualize o cardápio.",
         DELIVERY_QUOTE_ALREADY_USED:"A cotação de frete expirou ou já foi utilizada. Calcule o frete novamente.",
@@ -615,15 +627,15 @@ export default function App(){
         const base=Number(product.promotional_price??product.price);
         const shown=displayProductPrice(product);
         const discounted=shown<base&&!hasVariants;
-        return <View style={styles.productTile} key={product.id}>
-          {product.image_url?<Image source={{uri:product.image_url}} style={styles.productImage}/>:<View style={styles.productImageFallback}><Text style={styles.productImageFallbackText}>🍽️</Text></View>}
+        const soldOut=product.control_inventory&&Number(product.stock_quantity??0)<=0;
+        return <View style={[styles.productTile,soldOut&&styles.productTileSoldOut]} key={product.id}>
+          {product.image_url?<Image source={{uri:product.image_url}} style={[styles.productImage,soldOut&&styles.productImageSoldOut]}/>:<View style={[styles.productImageFallback,soldOut&&styles.productImageSoldOut]}><Text style={styles.productImageFallbackText}>🍽️</Text></View>}
           <View style={{flex:1}}>
             <Text style={styles.productName}>{product.name}</Text><Text style={styles.meta}>{product.description||""}</Text>
             <Text style={styles.price}>{hasVariants?"A partir de ":""}{brl(shown)}</Text>
-            {(hasVariants||hasOptions)&&<Text style={styles.customHint}>{hasVariants?"Escolha tamanho":"Personalizável"}{hasVariants&&hasOptions?" • complementos":""}</Text>}
-            {discounted&&<Text style={styles.discountHint}>Preço promocional aplicado</Text>}
+            {soldOut?<Text style={styles.soldOutText}>ESGOTADO</Text>:<>{(hasVariants||hasOptions)&&<Text style={styles.customHint}>{hasVariants?"Escolha tamanho":"Personalizável"}{hasVariants&&hasOptions?" • complementos":""}</Text>}{discounted&&<Text style={styles.discountHint}>Preço promocional aplicado</Text>}</>}
           </View>
-          <Pressable style={styles.addButton} onPress={()=>beginProduct(product)}><Text style={styles.addText}>+</Text></Pressable>
+          <Pressable disabled={soldOut} style={[styles.addButton,soldOut&&styles.addButtonSoldOut]} onPress={()=>beginProduct(product)}><Text style={styles.addText}>{soldOut?"×":"+"}</Text></Pressable>
         </View>;
       }):<Text style={styles.empty}>Nenhum produto disponível.</Text>}</View>
 
@@ -637,7 +649,7 @@ export default function App(){
         onAdd={addCustomized}
       />}
 
-      <Modal visible={cartOpen} animationType="slide" onRequestClose={()=>setCartOpen(false)}><SafeAreaView style={styles.cartModalSafe}><View style={styles.cartModalHeader}><View style={{flex:1}}><Text style={styles.cartModalTitle}>Seu carrinho</Text><Text style={styles.cartModalSubtitle}>{selectedStore.name} • {cartQuantity} {cartQuantity===1?"item":"itens"}</Text></View><Pressable accessibilityLabel="Fechar carrinho" style={styles.cartModalClose} onPress={()=>setCartOpen(false)}><Text style={styles.cartModalCloseText}>×</Text></Pressable></View><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.cartModalScroll}><Text style={styles.section}>Itens do pedido</Text>
+      <Modal visible={cartOpen} animationType="slide" onRequestClose={()=>setCartOpen(false)}><SafeAreaView style={styles.cartModalSafe}><View style={styles.cartModalHeader}><View style={{flex:1}}><Text style={styles.cartModalTitle}>Seu carrinho</Text><Text style={styles.cartModalSubtitle}>{selectedStore.name} • {cartQuantity} {cartQuantity===1?"item":"itens"}</Text></View><Pressable accessibilityLabel="Fechar carrinho" style={styles.cartModalClose} onPress={()=>setCartOpen(false)}><Text style={styles.cartModalCloseText}>×</Text></Pressable></View><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.cartModalScroll}>{!!message&&<Text style={styles.notice}>{message}</Text>}<Text style={styles.section}>Itens do pedido</Text>
       {cart.length?cart.map(item=>{
         const extras=item.options.reduce((s,o)=>s+o.price*o.quantity,0);
         return <View style={styles.cartRow} key={item.cartKey}>
@@ -840,6 +852,7 @@ const styles=StyleSheet.create({
   favoritesEmptyText:{fontSize:11,color:"#777",textAlign:"center",lineHeight:17,marginTop:6},
   productGrid:{flexDirection:"row",flexWrap:"wrap",gap:10,alignItems:"stretch"},
   productTile:{width:"48%",backgroundColor:"#fff",borderWidth:1,borderColor:"#e7e7e7",borderRadius:14,padding:9,marginBottom:2},
+  productTileSoldOut:{opacity:.62},productImageSoldOut:{opacity:.55},soldOutText:{marginTop:7,fontSize:10,fontWeight:"900",color:"#9b1c1c",letterSpacing:.7},addButtonSoldOut:{backgroundColor:"#bdbdbd"},
   timeline:{marginTop:3,marginBottom:6},
   timelineRow:{flexDirection:"row",minHeight:43},
   timelineRail:{width:28,alignItems:"center"},
