@@ -1,15 +1,16 @@
-import React,{ReactNode,useEffect,useState}from"react";
+import React,{ReactNode,useEffect,useRef,useState}from"react";
 import{Pressable,StyleSheet,Text,View}from"react-native";
+import MapView from"react-native-maps";
 import*as Location from"expo-location";
-import DriverLiveMap from"./DriverLiveMap";
 import{disableBackgroundTracking,enableBackgroundTracking,resumeBackgroundTrackingIfAuthorized}from"./BackgroundLocation";
 import{supabase}from"./supabase";
 
 type Driver={id:string;status:string;online:boolean};
 type DriverLocation={latitude:number;longitude:number;heading:number|null;recordedAt:string};
+type MapCenter={latitude:number;longitude:number};
 
 export default function DriverIdleHomeShell({children}:{children:ReactNode}){
- const[ready,setReady]=useState(false);const[driver,setDriver]=useState<Driver|null>(null);const[hasActive,setHasActive]=useState(false);const[hasOffer,setHasOffer]=useState(false);const[location,setLocation]=useState<DriverLocation|null>(null);const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");
+ const[ready,setReady]=useState(false);const[driver,setDriver]=useState<Driver|null>(null);const[hasActive,setHasActive]=useState(false);const[hasOffer,setHasOffer]=useState(false);const[location,setLocation]=useState<DriverLocation|null>(null);const[mapCenter,setMapCenter]=useState<MapCenter|null>(null);const[busy,setBusy]=useState(false);const[message,setMessage]=useState("");const mapRef=useRef<MapView|null>(null);
 
  async function refresh(){
   const{data:{session}}=await supabase.auth.getSession();
@@ -26,7 +27,7 @@ export default function DriverIdleHomeShell({children}:{children:ReactNode}){
   setHasActive(Boolean(activeResult.data?.delivery));
   setHasOffer(Boolean((offerResult.data?.offers??[]).length));
   const loc=locationResult.data;
-  if(loc)setLocation({latitude:Number(loc.latitude),longitude:Number(loc.longitude),heading:loc.heading==null?null:Number(loc.heading),recordedAt:String(loc.recorded_at)});
+  if(loc){const nextLocation={latitude:Number(loc.latitude),longitude:Number(loc.longitude),heading:loc.heading==null?null:Number(loc.heading),recordedAt:String(loc.recorded_at)};setLocation(nextLocation);setMapCenter(current=>current??{latitude:nextLocation.latitude,longitude:nextLocation.longitude});}
   setReady(true);
  }
 
@@ -43,7 +44,7 @@ export default function DriverIdleHomeShell({children}:{children:ReactNode}){
    subscription=await Location.watchPositionAsync({accuracy:Location.Accuracy.High,distanceInterval:20,timeInterval:10000},async position=>{
     const recordedAt=new Date(position.timestamp||Date.now()).toISOString();
     const nextLocation={latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,recordedAt};
-    if(!cancelled)setLocation(nextLocation);
+    if(!cancelled){setLocation(nextLocation);setMapCenter(current=>current??{latitude:nextLocation.latitude,longitude:nextLocation.longitude});}
     await supabase.from("driver_locations").upsert({driver_id:driver.id,latitude:position.coords.latitude,longitude:position.coords.longitude,heading:position.coords.heading,speed:position.coords.speed,accuracy:position.coords.accuracy,recorded_at:recordedAt},{onConflict:"driver_id"});
    });
   })();
@@ -71,10 +72,12 @@ export default function DriverIdleHomeShell({children}:{children:ReactNode}){
  if(!driver||driver.status!=="ACTIVE"||hasActive||hasOffer)return <>{children}</>;
 
  return <View style={styles.page}>
-   <DriverLiveMap online={driver.online} location={location} active={null}/>
+   <View style={styles.mapCard}>
+    {mapCenter?<MapView ref={mapRef} style={styles.map} initialRegion={{...mapCenter,latitudeDelta:.035,longitudeDelta:.035}} showsCompass toolbarEnabled={false}/>:<View style={styles.mapWaiting}><Text style={styles.mapWaitingTitle}>MAPA CLICK-FOOD</Text><Text style={styles.mapWaitingText}>{driver.online?"Preparando sua área de entregas...":"Fique online para carregar sua área."}</Text></View>}
+   </View>
    <View style={[styles.statusCard,driver.online?styles.statusOnline:styles.statusOffline]}>
      <Text style={styles.statusTitle}>{driver.online?"Aguardando entregas":"Você está offline"}</Text>
-     <Text style={styles.statusText}>{driver.online?"Fique disponível. Quando surgir uma entrega compatível, o chamado aparecerá automaticamente.":"Fique online para começar a receber entregas."}</Text>
+     <Text style={styles.statusText}>{driver.online?"Quando surgir uma entrega compatível, o chamado aparecerá automaticamente.":"Fique online para começar a receber entregas."}</Text>
    </View>
    {!!message&&<Text style={styles.notice}>{message}</Text>}
    <Pressable disabled={busy} onPress={toggleOnline} style={[styles.toggle,driver.online?styles.goOffline:styles.goOnline,busy&&styles.disabled]}>
@@ -84,14 +87,19 @@ export default function DriverIdleHomeShell({children}:{children:ReactNode}){
 }
 
 const styles=StyleSheet.create({
- page:{flex:1,paddingHorizontal:16,paddingTop:4,paddingBottom:18,backgroundColor:"#f6f6f6"},
- statusCard:{marginTop:14,borderRadius:16,paddingVertical:14,paddingHorizontal:16,borderWidth:1},
+ page:{flex:1,paddingHorizontal:14,paddingTop:6,paddingBottom:18,backgroundColor:"#f6f6f6"},
+ mapCard:{height:390,borderRadius:22,overflow:"hidden",backgroundColor:"#e7e7e7",borderWidth:1,borderColor:"#ddd"},
+ map:{width:"100%",height:"100%"},
+ mapWaiting:{flex:1,alignItems:"center",justifyContent:"center",padding:24},
+ mapWaitingTitle:{fontSize:18,fontWeight:"900",color:"#111"},
+ mapWaitingText:{fontSize:12,color:"#777",marginTop:6,textAlign:"center"},
+ statusCard:{marginTop:12,borderRadius:16,paddingVertical:14,paddingHorizontal:16,borderWidth:1},
  statusOnline:{backgroundColor:"#edf9f1",borderColor:"#b8e4c6"},
  statusOffline:{backgroundColor:"#f1f1f1",borderColor:"#d9d9d9"},
  statusTitle:{fontSize:17,fontWeight:"900",color:"#111",textAlign:"center"},
  statusText:{fontSize:11,lineHeight:16,color:"#666",textAlign:"center",marginTop:4},
  notice:{fontSize:11,lineHeight:16,color:"#7a5600",backgroundColor:"#fff7d6",padding:10,borderRadius:10,marginTop:10,textAlign:"center"},
- toggle:{marginTop:14,borderRadius:16,paddingVertical:17,alignItems:"center",justifyContent:"center"},
+ toggle:{marginTop:12,borderRadius:16,paddingVertical:17,alignItems:"center",justifyContent:"center"},
  goOnline:{backgroundColor:"#f4c400"},
  goOffline:{backgroundColor:"#111"},
  toggleText:{fontSize:14,fontWeight:"900",color:"#fff"},
