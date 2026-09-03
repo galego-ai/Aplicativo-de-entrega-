@@ -41,18 +41,17 @@ export default function DriverLiveMap({
   const pickup = coordinate(active?.pickup.latitude, active?.pickup.longitude);
   const destination = coordinate(active?.destination?.latitude, active?.destination?.longitude);
   const current = location ? { latitude: location.latitude, longitude: location.longitude } : null;
-  const center = current ?? pickup ?? destination;
-
   const customerPhase = Boolean(
     active && ["PICKUP_CONFIRMED", "DRIVER_TO_CUSTOMER", "DRIVER_AT_CUSTOMER", "CUSTOMER_UNAVAILABLE", "RETURN_REQUIRED"].includes(active.status),
   );
   const navigationTarget = customerPhase ? destination : pickup;
   const navigationLabel = customerPhase ? "ABRIR ROTA ATÉ O CLIENTE" : "ABRIR ROTA ATÉ A LOJA";
   const targetLabel = customerPhase ? "CLIENTE" : "LOJA";
+  const center = navigationTarget ?? pickup ?? destination ?? current;
 
   function fitMap() {
     if (!mapRef.current || !center) return;
-    const points = [current, navigationTarget].filter((item): item is Coordinate => Boolean(item));
+    const points = [navigationTarget, pickup, destination].filter((item): item is Coordinate => Boolean(item));
     if (points.length >= 2) {
       mapRef.current.fitToCoordinates(points, {
         animated: true,
@@ -66,7 +65,7 @@ export default function DriverLiveMap({
   useEffect(() => {
     const timer = setTimeout(fitMap, 120);
     return () => clearTimeout(timer);
-  }, [location?.latitude, location?.longitude, active?.status, active?.orderNumber]);
+  }, [active?.status, active?.orderNumber]);
 
   async function openNavigation() {
     if (!navigationTarget) return;
@@ -100,9 +99,6 @@ export default function DriverLiveMap({
       {destination && <Marker coordinate={destination} title="Cliente" description="Destino da entrega">
         <View style={styles.customerPin}><Text style={styles.pinEmoji}>🏠</Text></View>
       </Marker>}
-      {current && <Marker coordinate={current} title="Você" description={online ? "Localização sendo atualizada" : "Última localização registrada"} anchor={{ x: 0.5, y: 0.5 }}>
-        <View style={styles.driverPin}><Text style={styles.driverEmoji}>🛵</Text></View>
-      </Marker>}
     </MapView> : <View style={styles.waiting}>
       <Text style={styles.waitingEmoji}>📍</Text>
       <Text style={styles.waitingText}>{online ? "Aguardando a primeira leitura do GPS." : "Fique online para registrar sua localização."}</Text>
@@ -110,9 +106,9 @@ export default function DriverLiveMap({
 
     <Text style={styles.hint}>
       {active && navigationTarget
-        ? `O mapa acompanha sua posição e mantém o próximo destino (${targetLabel.toLowerCase()}) visível automaticamente.`
+        ? `O mapa mostra o próximo destino (${targetLabel.toLowerCase()}). Sua localização continua sendo enviada ao CLICK-FOOD em segundo plano para o cliente acompanhar a entrega.`
         : online
-          ? "Sua posição é atualizada pelo GPS e enviada ao CLICK-FOOD enquanto você estiver online."
+          ? "Sua localização continua sendo enviada em segundo plano enquanto você estiver online."
           : "O rastreamento fica pausado quando você está offline."}
     </Text>
 
@@ -123,14 +119,14 @@ export default function DriverLiveMap({
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: "#111", borderRadius: 22, marginTop: 18, overflow: "hidden" },
+  card: { flex: 1, backgroundColor: "#111", overflow: "hidden" },
   header: { paddingHorizontal: 16, paddingTop: 15, paddingBottom: 12, flexDirection: "row", alignItems: "center", gap: 10 },
   kicker: { color: "#f4c400", fontSize: 9, fontWeight: "900", letterSpacing: 1.2 },
   title: { color: "#fff", fontSize: 17, fontWeight: "900", marginTop: 4 },
   nextTarget: { color: "#aaa", fontSize: 9, fontWeight: "800", marginTop: 5, letterSpacing: 0.5 },
   statusDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: "#777" },
   statusDotOnline: { backgroundColor: "#29a764" },
-  map: { height: 270, width: "100%" },
+  map: { flex: 1, minHeight: 420, width: "100%" },
   waiting: { height: 220, backgroundColor: "#242424", alignItems: "center", justifyContent: "center", padding: 24 },
   waitingEmoji: { fontSize: 42, marginBottom: 12 },
   waitingText: { color: "#ccc", textAlign: "center", fontSize: 12 },
