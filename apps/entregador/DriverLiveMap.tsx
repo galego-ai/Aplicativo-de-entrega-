@@ -30,7 +30,7 @@ function coordinate(latitude: number | null | undefined, longitude: number | nul
 
 export default function DriverLiveMap({
   online,
-  location,
+  location: _location,
   active,
 }: {
   online: boolean;
@@ -40,18 +40,17 @@ export default function DriverLiveMap({
   const mapRef = useRef<MapView | null>(null);
   const pickup = coordinate(active?.pickup.latitude, active?.pickup.longitude);
   const destination = coordinate(active?.destination?.latitude, active?.destination?.longitude);
-  const current = location ? { latitude: location.latitude, longitude: location.longitude } : null;
   const customerPhase = Boolean(
     active && ["PICKUP_CONFIRMED", "DRIVER_TO_CUSTOMER", "DRIVER_AT_CUSTOMER", "CUSTOMER_UNAVAILABLE", "RETURN_REQUIRED"].includes(active.status),
   );
   const navigationTarget = customerPhase ? destination : pickup;
   const navigationLabel = customerPhase ? "ROTA ATÉ O CLIENTE" : "ROTA ATÉ A LOJA";
   const targetLabel = customerPhase ? "CLIENTE" : "LOJA";
-  const center = current ?? navigationTarget ?? pickup ?? destination;
+  const center = navigationTarget ?? pickup ?? destination;
 
   function fitMap() {
     if (!mapRef.current || !center) return;
-    const points = [current, navigationTarget].filter((item): item is Coordinate => Boolean(item));
+    const points = [pickup, destination].filter((item): item is Coordinate => Boolean(item));
     if (points.length >= 2) {
       mapRef.current.fitToCoordinates(points, {
         animated: true,
@@ -65,7 +64,7 @@ export default function DriverLiveMap({
   useEffect(() => {
     const timer = setTimeout(fitMap, 100);
     return () => clearTimeout(timer);
-  }, [active?.status, active?.orderNumber, location?.latitude, location?.longitude]);
+  }, [active?.status, active?.orderNumber, pickup?.latitude, pickup?.longitude, destination?.latitude, destination?.longitude]);
 
   async function openNavigation() {
     if (!navigationTarget) return;
@@ -85,9 +84,6 @@ export default function DriverLiveMap({
       toolbarEnabled={false}
       rotateEnabled
     >
-      {current && <Marker coordinate={current} title="Você" description={online ? "Sua localização atual" : "Última localização conhecida"}>
-        <View style={styles.driverPin}><Text style={styles.driverEmoji}>🛵</Text></View>
-      </Marker>}
       {pickup && <Marker coordinate={pickup} title={active?.pickup.storeName ?? "Loja"} description="Retirada do pedido">
         <View style={styles.storePin}><Text style={styles.pinEmoji}>🏪</Text></View>
       </Marker>}
@@ -96,13 +92,13 @@ export default function DriverLiveMap({
       </Marker>}
     </MapView> : <View style={styles.waiting}>
       <Text style={styles.waitingEmoji}>📍</Text>
-      <Text style={styles.waitingText}>{online ? "Obtendo sua localização pelo GPS..." : "Fique online para mostrar sua localização no mapa."}</Text>
+      <Text style={styles.waitingText}>Aguardando as coordenadas da loja ou do cliente para abrir a rota.</Text>
     </View>}
 
     <View style={styles.statusCard} pointerEvents="none">
       <View style={{ flex: 1 }}>
-        <Text style={styles.kicker}>{active ? `PEDIDO #${active.orderNumber}` : online ? "VOCÊ ESTÁ ONLINE" : "VOCÊ ESTÁ OFFLINE"}</Text>
-        <Text style={styles.title}>{active ? `Próximo destino: ${targetLabel}` : current ? "Sua localização em tempo real" : "Aguardando GPS"}</Text>
+        <Text style={styles.kicker}>{active ? `PEDIDO #${active.orderNumber}` : "MAPA DA ENTREGA"}</Text>
+        <Text style={styles.title}>{active ? `Próximo destino: ${targetLabel}` : "Aguardando uma entrega ativa"}</Text>
       </View>
       <View style={[styles.statusDot, online && styles.statusDotOnline]} />
     </View>
@@ -128,9 +124,7 @@ const styles = StyleSheet.create({
   statusDotOnline: { backgroundColor: "#29a764" },
   storePin: { backgroundColor: "#fff", borderRadius: 18, padding: 7, borderWidth: 2, borderColor: "#111" },
   customerPin: { backgroundColor: "#fff", borderRadius: 18, padding: 7, borderWidth: 2, borderColor: "#111" },
-  driverPin: { backgroundColor: "#f4c400", borderRadius: 24, padding: 8, borderWidth: 2, borderColor: "#111" },
   pinEmoji: { fontSize: 20 },
-  driverEmoji: { fontSize: 24 },
   routeButton: { position: "absolute", top: 78, right: 10, backgroundColor: "#f4c400", borderRadius: 11, paddingVertical: 10, paddingHorizontal: 12, elevation: 5 },
   routeText: { color: "#111", fontSize: 10, fontWeight: "900" },
 });
