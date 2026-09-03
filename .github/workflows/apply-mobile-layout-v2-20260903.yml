@@ -1,0 +1,65 @@
+name: CLICK-FOOD Aplicar Layout Mobile V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-mobile-layout-v2-20260903.yml'
+      - 'scripts/apply-mobile-layout-v2-20260903.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci --include=dev
+
+      - name: Aplicar correções estruturais
+        run: python scripts/apply-mobile-layout-v2-20260903.py
+
+      - name: Validar App Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+
+      - name: Validar App Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+
+      - name: Conferir pontos obrigatórios do layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'featuredProducts.length' apps/cliente/App.tsx
+          grep -q 'String(delivery.status)==="DRIVER_AT_CUSTOMER"' apps/cliente/App.tsx
+          grep -q 'floatingCartTop:{position:"absolute"' apps/cliente/App.tsx
+          grep -q 'JÁ TENHO O CÓDIGO' apps/entregador/App.tsx
+          grep -q 'app:"DRIVER"' apps/entregador/DriverProfessionalShell.tsx
+          grep -q 'light-content' apps/entregador/DriverProfessionalShell.tsx
+
+      - name: Gravar alterações no main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'galego-ai'
+          git config user.email 'elismarribeiro298@gmail.com'
+          git add apps/cliente/App.tsx apps/entregador/App.tsx apps/entregador/DriverProfessionalShell.tsx
+          if git diff --cached --quiet; then
+            echo 'Nenhuma alteração pendente.'
+            exit 0
+          fi
+          git commit -m 'fix(mobile): aplicar estrutura visual aprovada nos apps'
+          git push origin HEAD:main
