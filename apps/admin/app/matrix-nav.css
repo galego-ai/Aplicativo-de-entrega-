@@ -1,43 +1,166 @@
-.sidebar nav > button.matrixSecondaryTab{display:none!important}
-.matrixPortalMount{display:grid;gap:7px;position:relative;margin-top:2px}
+.matrixPortalMount{display:grid;gap:8px;position:relative;margin-top:8px}
 .matrixMoreRoot{position:relative}
-.sidebar .matrixMoreButton{width:100%;display:flex;align-items:center;justify-content:space-between;gap:9px;border:0;background:transparent;color:#aaa;text-align:left;padding:12px 14px;border-radius:12px;font-size:13px;font-weight:750;cursor:pointer;transition:.18s ease}
+
+/* Todos os módulos principais da Matriz ficam visíveis. */
+.sidebar nav>button.matrixSecondaryTab{display:flex!important}
+.sidebar nav>button{
+  display:flex!important;
+  align-items:center;
+  justify-content:flex-start;
+  width:100%;
+  min-height:44px;
+  padding:11px 13px!important;
+  border:1px solid #303640!important;
+  background:#1b2028!important;
+  color:#f2f4f7!important;
+  border-radius:12px!important;
+  font-size:13px!important;
+  font-weight:800!important;
+  line-height:1.2;
+  text-align:left!important;
+  white-space:normal;
+  cursor:pointer;
+  box-shadow:none!important;
+}
+.sidebar nav>button:before{content:none!important}
+.sidebar nav>button:hover{
+  background:#292f39!important;
+  border-color:#505866!important;
+  color:#ffd400!important;
+  transform:none!important;
+}
+.sidebar nav>button.active{
+  background:#ffd400!important;
+  border-color:#ffd400!important;
+  color:#111!important;
+  box-shadow:0 5px 15px rgba(255,212,0,.16)!important;
+}
+
+.sidebar .matrixMoreButton{
+  width:100%;
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:9px;
+  border:1px solid #6f5e00!important;
+  background:#201d0c!important;
+  color:#ffe866!important;
+  text-align:left;
+  padding:11px 13px!important;
+  border-radius:12px;
+  font-size:13px!important;
+  font-weight:850;
+  cursor:pointer;
+  transition:.18s ease;
+}
 .sidebar .matrixMoreButton>span:first-child{display:flex;align-items:center;gap:8px}
 .sidebar .matrixMoreButton b{font-size:18px;line-height:1}
-.sidebar .matrixMoreButton:hover,.sidebar .matrixMoreButton.active{background:linear-gradient(90deg,#806a00,#a98a00)!important;color:#fff!important;box-shadow:inset 3px 0 0 #ffd400}
-.matrixMorePanel{position:absolute;left:calc(100% + 12px);top:0;width:292px;max-height:min(78vh,690px);overflow:auto;background:#151920;border:1px solid #343943;border-radius:18px;padding:12px;box-shadow:0 22px 55px rgba(0,0,0,.35);z-index:500}
-.matrixMoreHeader{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:4px 4px 10px;border-bottom:1px solid #2b3038;margin-bottom:10px}
-.matrixMoreHeader small{display:block;color:#d2aa00;font-size:9px;font-weight:950;letter-spacing:.12em}
-.matrixMoreHeader strong{display:block;color:#fff;margin-top:2px;font-size:15px}
-.sidebar .matrixMoreClose{width:30px;height:30px;display:grid;place-items:center;padding:0!important;border:1px solid #3c414a!important;background:#20252d!important;color:#fff!important;border-radius:9px!important;font-size:20px!important;line-height:1}
-.matrixMoreGroup{padding:7px 0}
-.matrixMoreGroup+ .matrixMoreGroup{border-top:1px solid #292e36}
-.matrixMoreGroup>small{display:block;padding:2px 9px 6px;color:#8e96a3;font-size:8px;font-weight:950;letter-spacing:.13em}
-.matrixMoreLinks{display:grid;gap:5px}
-.matrixMoreLinks a,.sidebar .matrixMoreLinks button{display:flex;align-items:center;min-height:38px;width:100%;padding:9px 10px;border-radius:10px;color:#d7dae0;text-decoration:none;font-size:11px!important;font-weight:800;text-align:left;background:transparent;border:1px solid transparent;cursor:pointer}
-.matrixMoreLinks a:hover,.matrixMoreLinks a.active,.sidebar .matrixMoreLinks button:hover{background:#252a32!important;color:#ffd400!important;border-color:#3a404a!important;box-shadow:none!important}
+.sidebar .matrixMoreButton:hover,.sidebar .matrixMoreButton.active{
+  background:#ffd400!important;
+  border-color:#ffd400!important;
+  color:#111!important;
+  box-shadow:0 5px 15px rgba(255,212,0,.16)!important;
+  transform:none!important;
+}
+
+.matrixMorePanel{
+  position:absolute;
+  left:calc(100% + 12px);
+  top:0;
+  width:320px;
+  max-height:min(80vh,720px);
+  overflow:auto;
+  background:#151920;
+  border:1px solid #3e4652;
+  border-radius:18px;
+  padding:14px;
+  box-shadow:0 22px 55px rgba(0,0,0,.42);
+  z-index:500;
+}
+.matrixMoreHeader{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:4px 4px 12px;border-bottom:1px solid #303640;margin-bottom:10px}
+.matrixMoreHeader small{display:block;color:#ffd400;font-size:9px;font-weight:950;letter-spacing:.12em}
+.matrixMoreHeader strong{display:block;color:#fff;margin-top:3px;font-size:16px}
+.sidebar .matrixMoreClose{width:32px;height:32px;display:grid;place-items:center;padding:0!important;border:1px solid #4a525e!important;background:#242a33!important;color:#fff!important;border-radius:9px!important;font-size:20px!important;line-height:1}
+.matrixMoreGroup{padding:8px 0}
+.matrixMoreGroup+.matrixMoreGroup{border-top:1px solid #2d333c}
+.matrixMoreGroup>small{display:block;padding:2px 9px 7px;color:#aab1bc;font-size:9px;font-weight:950;letter-spacing:.13em}
+.matrixMoreLinks{display:grid;gap:6px}
+.matrixMoreLinks a,.sidebar .matrixMoreLinks button{
+  display:flex!important;
+  align-items:center;
+  min-height:40px;
+  width:100%;
+  padding:9px 11px!important;
+  border-radius:10px!important;
+  color:#eef0f3!important;
+  text-decoration:none;
+  font-size:12px!important;
+  font-weight:800!important;
+  text-align:left!important;
+  background:#20252d!important;
+  border:1px solid #333a44!important;
+  cursor:pointer;
+}
+.matrixMoreLinks a:hover,.matrixMoreLinks a.active,.sidebar .matrixMoreLinks button:hover{
+  background:#ffd400!important;
+  color:#111!important;
+  border-color:#ffd400!important;
+  box-shadow:none!important;
+  transform:none!important;
+}
 .matrixAccessGroup{padding-bottom:2px}
 
 @media(max-width:1100px) and (min-width:651px){
-  .shell{grid-template-columns:190px 1fr}
-  .sidebar{padding:22px 12px}
-  .sidebar .brand{font-size:22px}
-  .sidebar .brand:after{content:none}
-  .sidebar .role{display:block;margin-bottom:20px}
-  .sidebar nav>button{font-size:11px!important;text-align:left}
+  .shell{grid-template-columns:230px 1fr!important}
+  .sidebar{padding:20px 12px!important}
+  .sidebar .brand{font-size:21px!important}
+  .sidebar .brand:after{content:none!important}
+  .sidebar .role{display:block!important;margin-bottom:18px!important;font-size:9px!important}
+  .sidebar nav{gap:6px!important}
+  .sidebar nav>button,.sidebar .matrixMoreButton{font-size:12px!important;min-height:42px;padding:10px 11px!important}
   .sidebar nav>button:before{content:none!important}
-  .sidebar .matrixMoreButton{font-size:11px!important}
+  .matrixMorePanel{width:300px}
 }
 
 @media(max-width:650px){
   .shell{display:block!important}
-  .sidebar{display:block!important;position:sticky;top:0;height:auto;z-index:450;padding:10px;background:#111;overflow-x:auto}
-  .sidebar .brand,.sidebar .role{display:none!important}
-  .sidebar nav{display:flex!important;gap:6px;min-width:max-content}
-  .sidebar nav>button{font-size:11px!important;white-space:nowrap;padding:9px 11px!important;text-align:left}
-  .sidebar nav>button:before{content:none!important}
-  .matrixPortalMount{display:flex;gap:6px;position:static;margin:0}
+  .sidebar{
+    display:block!important;
+    position:relative!important;
+    height:auto!important;
+    padding:12px!important;
+    background:#11151b!important;
+    overflow:visible!important;
+  }
+  .sidebar .brand{display:block!important;font-size:20px!important;margin-bottom:2px}
+  .sidebar .brand:after{content:none!important}
+  .sidebar .role{display:block!important;margin:0 0 12px!important;font-size:8px!important}
+  .sidebar nav{
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px!important;
+    min-width:0!important;
+  }
+  .sidebar nav>button{
+    width:100%!important;
+    min-width:0!important;
+    min-height:42px!important;
+    padding:9px 10px!important;
+    font-size:11px!important;
+    white-space:normal!important;
+  }
+  .matrixPortalMount{display:block!important;position:static;margin:0;grid-column:1/-1}
   .matrixMoreRoot{position:static}
-  .sidebar .matrixMoreButton{width:auto;white-space:nowrap;padding:9px 11px;font-size:11px!important}
-  .matrixMorePanel{position:fixed;left:10px;right:10px;top:58px;width:auto;max-height:76vh}
+  .sidebar .matrixMoreButton{width:100%!important;min-height:42px;padding:9px 10px!important;font-size:11px!important}
+  .matrixMorePanel{
+    position:fixed;
+    left:10px;
+    right:10px;
+    top:10px;
+    bottom:10px;
+    width:auto;
+    max-height:none;
+    z-index:1000;
+  }
 }
