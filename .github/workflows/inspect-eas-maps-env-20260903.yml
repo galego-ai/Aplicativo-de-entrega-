@@ -1,0 +1,50 @@
+name: CLICK-FOOD Verificar ambiente Maps EAS 2026-09-03
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-eas-maps-env-20260903.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        app: [cliente, entregador]
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verificar nomes das variáveis Maps sem mostrar valores
+        working-directory: apps/${{ matrix.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || exit 1
+          OUT="$RUNNER_TEMP/eas-env-${{ matrix.app }}.json"
+          npx --yes eas-cli@latest env:list --environment preview --json --non-interactive > "$OUT"
+          node - "$OUT" <<'NODE'
+          const fs=require('fs');
+          const raw=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const vars=Array.isArray(raw)?raw:(raw?.variables||raw?.environmentVariables||[]);
+          const maps=vars.filter(v=>/map|google/i.test(String(v.name||v.key||'')));
+          if(!maps.length){
+            console.log('MAPS_ENV_NAMES: nenhum nome relacionado a Maps/Google no ambiente preview.');
+            process.exit(0);
+          }
+          for(const v of maps){
+            const name=String(v.name||v.key||'');
+            const visibility=String(v.visibility||v.visibilityType||'desconhecida');
+            console.log(`MAPS_ENV_NAME=${name} VISIBILITY=${visibility}`);
+          }
+          NODE
+          rm -f "$OUT"
