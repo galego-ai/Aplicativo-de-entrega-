@@ -13,6 +13,7 @@ import LegalConsentGate from "./LegalConsentGate";
 import DashboardSectionRouter from "./DashboardSectionRouter";
 import StoreRealtimeOrderAlarm from "./StoreRealtimeOrderAlarm";
 import GlobalTools from "./GlobalTools";
+import StoreMapBackButton from "./StoreMapBackButton";
 
 // Portal HTTPS central preservado no contrato de segurança do Painel Lojista.
 // https://rmlbmacoqnynqdqmxecz.supabase.co/functions/v1/password-recovery
@@ -23,5 +24,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="pt-BR"><body><LegalConsentGate><><DashboardSectionRouter/><StoreRealtimeOrderAlarm/><GlobalTools/>{children}</></LegalConsentGate></body></html>;
+  return <html lang="pt-BR"><body><LegalConsentGate><><DashboardSectionRouter/><StoreRealtimeOrderAlarm/><GlobalTools/><StoreMapBackButton/>{children}</></LegalConsentGate></body></html>;
 }
