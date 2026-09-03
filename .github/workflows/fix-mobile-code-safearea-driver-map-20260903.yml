@@ -1,0 +1,65 @@
+name: CLICK-FOOD Corrigir codigo safearea mapa frete
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-mobile-code-safearea-driver-map-20260903.yml'
+      - 'scripts/fix-mobile-code-safearea-driver-map-20260903.py'
+
+permissions:
+  contents: write
+
+jobs:
+  fix-mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --include=dev
+
+      - name: Aplicar correcoes
+        run: python scripts/fix-mobile-code-safearea-driver-map-20260903.py
+
+      - name: Validar Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+
+      - name: Validar Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+
+      - name: Conferir requisitos
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'GERAR CÓDIGO AGORA' apps/cliente/App.tsx
+          grep -q 'frete será calculado automaticamente' apps/cliente/App.tsx
+          grep -q 'paddingBottom:22' apps/cliente/App.tsx
+          grep -q 'mapHome' apps/entregador/App.tsx
+          grep -q 'paddingBottom:22' apps/entregador/App.tsx
+          grep -q 'title="Você"' apps/entregador/DriverLiveMap.tsx
+
+      - name: Gravar no main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'galego-ai'
+          git config user.email 'elismarribeiro298@gmail.com'
+          git add apps/cliente/App.tsx apps/entregador/App.tsx
+          if git diff --cached --quiet; then
+            echo 'Nenhuma alteração pendente.'
+            exit 0
+          fi
+          git commit -m 'fix(mobile): codigo entrega safearea mapa inteiro e frete automatico'
+          git push origin HEAD:main
