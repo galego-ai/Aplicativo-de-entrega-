@@ -18,7 +18,7 @@ jobs:
   build-entregador:
     name: APK Entregador Fast OTA
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
@@ -26,6 +26,7 @@ jobs:
       EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
       EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY }}
       EXPO_NO_TELEMETRY: '1'
+      NODE_ENV: production
 
     steps:
       - name: Checkout
@@ -45,6 +46,20 @@ jobs:
 
       - name: Cache Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Ajustar memória Gradle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.gradle"
+          cat > "$HOME/.gradle/gradle.properties" <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8
+          org.gradle.workers.max=2
+          org.gradle.parallel=false
+          org.gradle.daemon=false
+          kotlin.compiler.execution.strategy=in-process
+          EOF
+          echo 'Gradle configurado com 3 GiB de heap e 1.5 GiB de Metaspace.'
 
       - name: Instalar dependências
         run: npm ci --include=dev
