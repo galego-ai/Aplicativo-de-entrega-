@@ -1,0 +1,70 @@
+name: CLICK-FOOD Aplicar Avaliacoes Pagamentos e Impressao
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-reviews-payments-print-20260903.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --include=dev
+
+      - name: Aplicar integracao
+        run: python3 scripts/apply-reviews-payments-print-20260903.py
+
+      - name: Validar Cliente
+        run: npx tsc --noEmit -p apps/cliente/tsconfig.json
+
+      - name: Validar Matriz
+        run: npm run build:admin
+
+      - name: Validar Lojista
+        run: npm run build:lojista
+
+      - name: Conferir recursos obrigatorios
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'CustomerDetailedReview' apps/cliente/App.tsx
+          grep -q 'CARD_ON_DELIVERY' apps/cliente/App.tsx
+          grep -q 'DEBIT_CARD_ON_DELIVERY' apps/cliente/App.tsx
+          grep -q 'OrderThermalPrintButton' apps/lojista/app/OrderDetailsPanel.tsx
+          grep -q '/avaliacoes' apps/lojista/app/page.tsx
+          grep -q 'Avaliações' apps/admin/app/AdminNavigationTools.tsx
+          grep -q 'StorePaymentMethodsManager' apps/admin/app/pagamentos/page.tsx
+
+      - name: Commitar e publicar
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/cliente/App.tsx apps/lojista/app/OrderDetailsPanel.tsx apps/lojista/app/page.tsx apps/admin/app/AdminNavigationTools.tsx apps/admin/app/pagamentos/page.tsx
+          if git diff --cached --quiet; then
+            echo 'Nenhuma alteração pendente.'
+            exit 0
+          fi
+          git commit -m 'feat: avaliações detalhadas pagamentos por loja e impressão térmica'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
