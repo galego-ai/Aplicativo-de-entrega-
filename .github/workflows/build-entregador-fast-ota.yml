@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: click-food-entregador-fast-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-entregador:
@@ -187,4 +187,4 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-# rebuild: chamadas + capacete + icones maiores + bolinha nativa
+# rebuild prioritizado: chamadas + capacete + icones maiores + bolinha nativa + online/offline
