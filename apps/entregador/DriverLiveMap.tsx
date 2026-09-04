@@ -30,7 +30,7 @@ function coordinate(latitude: number | null | undefined, longitude: number | nul
 
 export default function DriverLiveMap({
   online,
-  location: _location,
+  location,
   active,
 }: {
   online: boolean;
@@ -40,17 +40,18 @@ export default function DriverLiveMap({
   const mapRef = useRef<MapView | null>(null);
   const pickup = coordinate(active?.pickup.latitude, active?.pickup.longitude);
   const destination = coordinate(active?.destination?.latitude, active?.destination?.longitude);
+  const driverPosition = coordinate(location?.latitude, location?.longitude);
   const customerPhase = Boolean(
     active && ["PICKUP_CONFIRMED", "DRIVER_TO_CUSTOMER", "DRIVER_AT_CUSTOMER", "CUSTOMER_UNAVAILABLE", "RETURN_REQUIRED"].includes(active.status),
   );
   const navigationTarget = customerPhase ? destination : pickup;
   const navigationLabel = customerPhase ? "ROTA ATÉ O CLIENTE" : "ROTA ATÉ A LOJA";
   const targetLabel = customerPhase ? "CLIENTE" : "LOJA";
-  const center = navigationTarget ?? pickup ?? destination;
+  const center = navigationTarget ?? pickup ?? destination ?? driverPosition;
 
   function fitMap() {
     if (!mapRef.current || !center) return;
-    const points = [pickup, destination].filter((item): item is Coordinate => Boolean(item));
+    const points = [driverPosition, pickup, destination].filter((item): item is Coordinate => Boolean(item));
     if (points.length >= 2) {
       mapRef.current.fitToCoordinates(points, {
         animated: true,
@@ -92,13 +93,13 @@ export default function DriverLiveMap({
       </Marker>}
     </MapView> : <View style={styles.waiting}>
       <Text style={styles.waitingEmoji}>📍</Text>
-      <Text style={styles.waitingText}>Aguardando as coordenadas da loja ou do cliente para abrir a rota.</Text>
+      <Text style={styles.waitingText}>Ative a localização do aparelho para visualizar sua área de entregas.</Text>
     </View>}
 
     <View style={styles.statusCard} pointerEvents="none">
       <View style={{ flex: 1 }}>
-        <Text style={styles.kicker}>{active ? `PEDIDO #${active.orderNumber}` : "MAPA DA ENTREGA"}</Text>
-        <Text style={styles.title}>{active ? `Próximo destino: ${targetLabel}` : "Aguardando uma entrega ativa"}</Text>
+        <Text style={styles.kicker}>{active ? `PEDIDO #${active.orderNumber}` : "MAPA CLICK-FOOD"}</Text>
+        <Text style={styles.title}>{active ? `Próximo destino: ${targetLabel}` : driverPosition ? "Sua área de entregas" : "Obtendo sua localização"}</Text>
       </View>
       <View style={[styles.statusDot, online && styles.statusDotOnline]} />
     </View>
