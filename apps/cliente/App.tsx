@@ -18,6 +18,7 @@ import CustomerSupport from "./CustomerSupport";
 import EfiCardPayment, { type CardTokenizationConfig, type PendingCardOrder } from "./EfiCardPayment";
 import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
 import CustomerOrderReceipt from "./CustomerOrderReceipt";
+import CustomerDetailedReview from "./CustomerDetailedReview";
 
 type Tab = "home" | "search" | "orders" | "favorites" | "support" | "profile";
 type Store = { id:string; name:string; slogan:string|null; description:string|null; logo_url:string|null; cover_url:string|null; primary_color:string; secondary_color:string; minimum_order:number; average_preparation_time:number; timezone:string; orders_paused:boolean; open_now:boolean; pickup_enabled:boolean; clickfood_delivery_enabled:boolean; own_delivery_enabled:boolean; max_radius_km:number|null };
@@ -29,7 +30,7 @@ type Order = { id:string; order_number:number; store_id:string; address_id:strin
 type RefundInfo = { payment_id:string; status:string; amount:number; reason:string|null; created_at:string; completed_at:string|null };
 type CartItem = CustomizedItem & { cartKey:string };
 type DeliveryType = "DELIVERY"|"PICKUP";
-type PaymentMethod = "CASH"|"PIX"|"CREDIT_CARD";
+type PaymentMethod = "CASH"|"PIX"|"CREDIT_CARD"|"CARD_ON_DELIVERY"|"DEBIT_CARD_ON_DELIVERY";
 type Tracking = { orderId:string; deliveryId:string; deliveryStatus:string; driverId:string|null; driverLat:number|null; driverLng:number|null; storeLat:number|null; storeLng:number|null; destinationLat:number|null; destinationLng:number|null };
 type DriverCard = { id:string; name:string; avatarUrl:string|null; rating:number; vehicle:{type:string;brand:string|null;model:string|null;plate:string|null}|null };
 type LoyaltyReward = { id:string; name:string; points_cost:number; reward_type:string; reward_value:number|null; product_id:string|null; active:boolean };
@@ -192,14 +193,14 @@ export default function App(){
     setHomeFeaturedProducts(((featuredRows??[]) as any[]).map(row=>{const store=storeById.get(String(row.store_id));return{id:String(row.id),storeId:String(row.store_id),storeName:store?.name??"CLICK-FOOD",name:String(row.name??"Produto"),imageUrl:row.image_url?String(row.image_url):null,price:Number(row.price??0),promotionalPrice:row.promotional_price==null?null:Number(row.promotional_price)};}).slice(0,6));
   }
 
-  async function loadPaymentMethods(){
-    const{data,error}=await supabase.functions.invoke("payment-methods",{body:{}});
-    if(error||data?.error){setAvailablePaymentMethods(["CASH"]);setPaymentMethod("CASH");setCardTokenization(null);return;}
-    const methods=(data?.methods??[]).filter((m:string)=>m==="CASH"||m==="PIX"||m==="CREDIT_CARD") as PaymentMethod[];
-    const next:PaymentMethod[]=methods.includes("CASH")?methods:(["CASH",...methods] as PaymentMethod[]);
+  async function loadPaymentMethods(storeId?:string){
+    const{data,error}=await supabase.functions.invoke("payment-methods",{body:storeId?{storeId}:{}});
+    if(error||data?.error){setAvailablePaymentMethods(storeId?["CASH"]:["CASH"]);setPaymentMethod("CASH");setCardTokenization(null);return;}
+    const methods=(data?.methods??[]).filter((m:string)=>["CASH","PIX","CREDIT_CARD","CARD_ON_DELIVERY","DEBIT_CARD_ON_DELIVERY"].includes(m)) as PaymentMethod[];
+    const next:PaymentMethod[]=methods;
     const tokenization=data?.cardTokenization;
     setCardTokenization(tokenization?.provider==="EFI"&&tokenization?.accountId?tokenization as CardTokenizationConfig:null);
-    setAvailablePaymentMethods(next);setPaymentMethod(current=>next.includes(current)?current:"CASH");
+    setAvailablePaymentMethods(next);setPaymentMethod(current=>next.includes(current)?current:(next[0]??"CASH"));
   }
 
   async function loadPendingPix(currentOrders:Order[]){
@@ -335,6 +336,7 @@ export default function App(){
 
   async function openStore(store:Store){
     setMessage("");setSelectedStore(store);setCart([]);setCartOpen(false);setSelectedProduct(null);setSelectedCategoryId("ALL");setDeliveryPreview(null);
+    await loadPaymentMethods(store.id);
     const deliveryEnabled=store.clickfood_delivery_enabled||store.own_delivery_enabled;
     setDeliveryType(deliveryEnabled?"DELIVERY":store.pickup_enabled?"PICKUP":"DELIVERY");
     const[productResult,categoryResult]=await Promise.all([
@@ -690,12 +692,14 @@ export default function App(){
       <TextInput style={styles.input} placeholder="Digite o código do cupom" autoCapitalize="characters" value={coupon} onChangeText={setCoupon}/>
       <Text style={styles.section}>Forma de pagamento</Text>
       <View style={styles.segment}>
-        <Pressable style={[styles.segmentButton,paymentMethod==="CASH"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CASH")}><Text style={paymentMethod==="CASH"?styles.segmentActiveText:undefined}>Dinheiro</Text></Pressable>
+        {availablePaymentMethods.includes("CASH")&&<Pressable style={[styles.segmentButton,paymentMethod==="CASH"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CASH")}><Text style={paymentMethod==="CASH"?styles.segmentActiveText:undefined}>Dinheiro</Text></Pressable>}
         {availablePaymentMethods.includes("PIX")&&<Pressable style={[styles.segmentButton,paymentMethod==="PIX"&&styles.segmentActive]} onPress={()=>setPaymentMethod("PIX")}><Text style={paymentMethod==="PIX"?styles.segmentActiveText:undefined}>PIX • Efí</Text></Pressable>}
-        {availablePaymentMethods.includes("CREDIT_CARD")&&cardTokenization&&<Pressable style={[styles.segmentButton,paymentMethod==="CREDIT_CARD"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CREDIT_CARD")}><Text style={paymentMethod==="CREDIT_CARD"?styles.segmentActiveText:undefined}>Cartão • Efí</Text></Pressable>}
+        {availablePaymentMethods.includes("CREDIT_CARD")&&cardTokenization&&<Pressable style={[styles.segmentButton,paymentMethod==="CREDIT_CARD"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CREDIT_CARD")}><Text style={paymentMethod==="CREDIT_CARD"?styles.segmentActiveText:undefined}>Cartão online • Efí</Text></Pressable>}
+        {availablePaymentMethods.includes("CARD_ON_DELIVERY")&&<Pressable style={[styles.segmentButton,paymentMethod==="CARD_ON_DELIVERY"&&styles.segmentActive]} onPress={()=>setPaymentMethod("CARD_ON_DELIVERY")}><Text style={paymentMethod==="CARD_ON_DELIVERY"?styles.segmentActiveText:undefined}>Crédito na entrega</Text></Pressable>}
+        {availablePaymentMethods.includes("DEBIT_CARD_ON_DELIVERY")&&<Pressable style={[styles.segmentButton,paymentMethod==="DEBIT_CARD_ON_DELIVERY"&&styles.segmentActive]} onPress={()=>setPaymentMethod("DEBIT_CARD_ON_DELIVERY")}><Text style={paymentMethod==="DEBIT_CARD_ON_DELIVERY"?styles.segmentActiveText:undefined}>Débito na entrega</Text></Pressable>}
       </View>
-      {!availablePaymentMethods.includes("PIX")&&<Text style={styles.meta}>PIX será exibido automaticamente quando a Efí Bank estiver ativada pela Matriz.</Text>}
-      <View style={styles.totalBox}><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>Itens</Text><Text style={styles.checkoutSummaryValue}>{brl(cartSubtotal)}</Text></View><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>{deliveryType==="PICKUP"?"Retirada":"Frete"}</Text><Text style={styles.checkoutSummaryValue}>{deliveryType==="PICKUP"?"Grátis":estimatedDeliveryFee==null?"Calcule acima":estimatedDeliveryFee===0?"Grátis":brl(estimatedDeliveryFee)}</Text></View>{deliveryType==="DELIVERY"&&deliveryPreviewUsable&&deliveryPreview&&freeDeliveryApplies&&deliveryPreview.fee>0&&<Text style={styles.checkoutSaving}>Você economiza {brl(deliveryPreview.fee)} no frete com a promoção ativa.</Text>}<View style={styles.checkoutDivider}/><Text style={styles.checkoutTotalLabel}>Total estimado antes do cupom</Text><Text style={styles.total}>{brl(checkoutEstimatedTotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão, número e CVV são tokenizados pela Efí dentro de uma tela segura e não ficam armazenados no CLICK-FOOD.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
+      {!availablePaymentMethods.length&&<Text style={styles.meta}>A Matriz ainda não liberou uma forma de pagamento para esta loja.</Text>}
+      <View style={styles.totalBox}><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>Itens</Text><Text style={styles.checkoutSummaryValue}>{brl(cartSubtotal)}</Text></View><View style={styles.checkoutSummaryRow}><Text style={styles.checkoutSummaryLabel}>{deliveryType==="PICKUP"?"Retirada":"Frete"}</Text><Text style={styles.checkoutSummaryValue}>{deliveryType==="PICKUP"?"Grátis":estimatedDeliveryFee==null?"Calcule acima":estimatedDeliveryFee===0?"Grátis":brl(estimatedDeliveryFee)}</Text></View>{deliveryType==="DELIVERY"&&deliveryPreviewUsable&&deliveryPreview&&freeDeliveryApplies&&deliveryPreview.fee>0&&<Text style={styles.checkoutSaving}>Você economiza {brl(deliveryPreview.fee)} no frete com a promoção ativa.</Text>}<View style={styles.checkoutDivider}/><Text style={styles.checkoutTotalLabel}>Total estimado antes do cupom</Text><Text style={styles.total}>{brl(checkoutEstimatedTotal)}</Text><Text style={styles.paymentHint}>O servidor recalcula preços, promoções, adicionais, frete, estoque e cupom antes de criar o pedido. {paymentMethod==="PIX"?"No PIX, o pedido só é enviado à loja após a confirmação da Efí.":paymentMethod==="CREDIT_CARD"?"No cartão online, número e CVV são tokenizados pela Efí e não ficam armazenados no CLICK-FOOD.":paymentMethod==="CARD_ON_DELIVERY"?"No crédito na entrega, o pagamento é feito na maquininha ao receber ou retirar o pedido.":paymentMethod==="DEBIT_CARD_ON_DELIVERY"?"No débito na entrega, o pagamento é feito na maquininha ao receber ou retirar o pedido.":"No dinheiro, o pedido segue diretamente para a loja."}</Text></View>
       <Pressable style={styles.continueShopping} onPress={()=>setCartOpen(false)}><Text style={styles.continueShoppingText}>CONTINUAR COMPRANDO</Text></Pressable><Pressable style={[styles.checkout,(!cart.length||minimumMissing>0||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled))&&styles.disabled]} disabled={!cart.length||minimumMissing>0||placing||!selectedStore.open_now||(deliveryType==="DELIVERY"&&!selectedAddressId)||(!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled)} onPress={placeOrder}><Text style={styles.checkoutText}>{selectedStore.orders_paused?"PEDIDOS PAUSADOS":!selectedStore.open_now?"LOJA FECHADA":!selectedStore.pickup_enabled&&!selectedStore.clickfood_delivery_enabled&&!selectedStore.own_delivery_enabled?"PEDIDOS INDISPONÍVEIS":minimumMissing>0?`FALTAM ${brl(minimumMissing)}`:deliveryType==="DELIVERY"&&!selectedAddressId?"SELECIONE UM ENDEREÇO":placing?"FINALIZANDO...":"FINALIZAR PEDIDO"}</Text></Pressable></ScrollView></SafeAreaView></Modal>
     </ScrollView>
     {!!cart.length&&<Pressable accessibilityRole="button" accessibilityLabel={`Abrir carrinho com ${cartQuantity} itens`} style={styles.floatingCartTop} onPress={()=>setCartOpen(true)}><View style={styles.floatingCartLeft}><Text style={styles.floatingCartIcon}>🛒</Text><View><Text style={styles.floatingCartTitle}>Carrinho <Text style={styles.floatingCartBadge}>{cartQuantity}</Text></Text><Text style={styles.floatingCartMeta}>Toque para revisar ou finalizar</Text></View></View><Text style={styles.floatingCartPrice}>{brl(cartSubtotal)}</Text></Pressable>}
@@ -769,7 +773,7 @@ export default function App(){
         {cancellableStatuses.has(order.status)&&<Pressable style={styles.cancelButton} onPress={()=>cancelOrder(order)}><Text style={styles.cancelText}>CANCELAR PEDIDO</Text></Pressable>}
         {order.status==="DELIVERED"&&!reviewed&&ratingOrderId!==order.id&&<Pressable style={styles.rateButton} onPress={()=>{setRatingOrderId(order.id);setStars(5);setReviewComment("");}}><Text style={styles.rateText}>☆ AVALIAR PEDIDO</Text></Pressable>}
         {order.status==="DELIVERED"&&reviewed&&<Text style={styles.reviewed}>✓ Avaliação enviada</Text>}
-        {ratingOrderId===order.id&&<View style={styles.reviewBox}><Text style={styles.formTitle}>Como foi seu pedido?</Text><View style={styles.stars}>{[1,2,3,4,5].map(value=><Pressable key={value} onPress={()=>setStars(value)}><Text style={[styles.star,value<=stars&&styles.starActive]}>★</Text></Pressable>)}</View><TextInput style={styles.input} placeholder="Comentário opcional" value={reviewComment} onChangeText={setReviewComment}/><Pressable style={[styles.checkout,submittingReview&&styles.disabled]} disabled={submittingReview} onPress={()=>submitReview(order)}><Text style={styles.checkoutText}>{submittingReview?"ENVIANDO...":"ENVIAR AVALIAÇÃO"}</Text></Pressable><Pressable onPress={()=>setRatingOrderId(null)}><Text style={styles.switchText}>Cancelar</Text></Pressable></View>}
+        {ratingOrderId===order.id&&<CustomerDetailedReview order={{id:order.id,store_id:order.store_id}} customerId={session.user.id} onDone={()=>{setReviewedOrderIds(current=>new Set([...current,order.id]));setRatingOrderId(null);setMessage("Avaliação enviada. Obrigado por ajudar o CLICK-FOOD a melhorar.");}} onCancel={()=>setRatingOrderId(null)}/>}
       </View>;
     }):<Text style={styles.empty}>Nenhum pedido ainda.</Text>}
   </ScrollView>;

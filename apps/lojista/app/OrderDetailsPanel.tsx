@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
+import OrderThermalPrintButton from "./OrderThermalPrintButton";
 
 type Option={name:string;price:number;quantity:number};
 type Item={id:string;name:string;quantity:number;unitPrice:number;totalPrice:number;notes:string|null;options:Option[]};
 type Receipt={
  order:{order_number:number;delivery_type:string;customer_notes:string|null;subtotal:number;delivery_fee:number;discount:number;total:number;status:string;payment_status:string};
- customer:{name:string}|null;
+ customer:{name:string;phone:string|null}|null;
  address:{street:string;number:string|null;complement:string|null;district:string|null;postal_code:string|null;reference:string|null}|null;
  items:Item[];
  payments:Array<{method:string;provider:string|null;status:string;amount:number;transactionId:string|null;paidAt:string|null}>;
@@ -50,7 +51,7 @@ export default function OrderDetailsPanel({orderId}:{orderId:string}){
    {loading&&<p style={{margin:0}}>Carregando pedido...</p>}{error&&<p style={{margin:0,color:"#9a2828",fontWeight:800}}>{error}</p>}
    {data&&<>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginBottom:12}}>
-     <div><small style={{color:"#777"}}>CLIENTE</small><b style={{display:"block"}}>{data.customer?.name??"Cliente CLICK-FOOD"}</b></div>
+     <div><small style={{color:"#777"}}>CLIENTE</small><b style={{display:"block"}}>{data.customer?.name??"Cliente CLICK-FOOD"}</b>{data.customer?.phone&&<span style={{display:"block",fontSize:12,color:"#555",marginTop:2}}>☎ {data.customer.phone}</span>}</div>
      <div><small style={{color:"#777"}}>TIPO</small><b style={{display:"block"}}>{data.order.delivery_type==="DELIVERY"?"Entrega":"Retirada/Balcão"}</b></div>
      <div><small style={{color:"#777"}}>PAGAMENTO</small><b style={{display:"block"}}>{data.order.payment_status}</b></div>
     </div>
@@ -60,6 +61,7 @@ export default function OrderDetailsPanel({orderId}:{orderId:string}){
     <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #ddd",display:"grid",gap:4,fontSize:12}}><div style={{display:"flex",justifyContent:"space-between"}}><span>Subtotal</span><b>{brl(data.order.subtotal)}</b></div>{data.order.delivery_fee>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span>Entrega</span><b>{brl(data.order.delivery_fee)}</b></div>}{data.order.discount>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span>Desconto</span><b>− {brl(data.order.discount)}</b></div>}<div style={{display:"flex",justifyContent:"space-between",fontSize:15}}><b>Total</b><b>{brl(data.order.total)}</b></div></div>
     {data.payments.length>0&&<div style={{marginTop:10}}><small style={{color:"#777"}}>FORMA(S) DE PAGAMENTO</small>{data.payments.map((payment,index)=><div key={index} style={{fontSize:12,marginTop:3}}><b>{paymentLabel[payment.method]??payment.method}</b> • {brl(payment.amount)} • {payment.status}{payment.provider?` • ${payment.provider}`:""}</div>)}</div>}
     {data.delivery&&<div style={{marginTop:10,fontSize:12}}><small style={{color:"#777"}}>ENTREGA</small><div><b>{data.delivery.status}</b>{data.delivery.driver?.name?` • ${data.delivery.driver.name}`:" • aguardando entregador"}</div></div>}
+    <OrderThermalPrintButton orderId={orderId}/>
     {canGeneratePickupCode&&<div style={{marginTop:12,padding:14,borderRadius:14,background:"#111",color:"#fff",border:"2px solid #f4c400"}}>
       <small style={{color:"#f4c400",fontWeight:900,letterSpacing:.7}}>CÓDIGO PARA RETIRADA DO ENTREGADOR</small>
       <p style={{fontSize:12,color:"#ddd",margin:"6px 0 10px"}}>Mostre este código ao entregador quando ele chegar à loja. Ele confirma a retirada no aplicativo.</p>

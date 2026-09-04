@@ -10,6 +10,7 @@ const operationLinks = [
   ["Saúde operacional", "/saude-operacional"],
   ["Mapa", "/mapa"],
   ["Clientes", "/clientes"],
+  ["Avaliações", "/avaliacoes"],
   ["Catálogos", "/catalogos"],
   ["Documentos dos entregadores", "/documentos-entregadores"],
 ] as const;
