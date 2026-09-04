@@ -1,0 +1,82 @@
+name: CLICK-FOOD Corrigir Online Offline e gerar APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-entregador-online-offline-build-20260904.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  fix-online-offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+
+      - name: Corrigir botão online/offline
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('apps/entregador/App.tsx')
+          s=p.read_text()
+
+          old='import { canUseFloatingBubble, hasFloatingBubbleNativeModule, requestFloatingBubblePermission, startFloatingBubble } from "./FloatingBubble";'
+          new='import { canUseFloatingBubble, hasFloatingBubbleNativeModule, requestFloatingBubblePermission, startFloatingBubble, stopFloatingBubble } from "./FloatingBubble";'
+          if old in s:
+              s=s.replace(old,new,1)
+
+          old='  const [driverLocation,setDriverLocation]=useState<DriverLocation|null>(null); const [mapOpen,setMapOpen]=useState(false); const [earningsVisible,setEarningsVisible]=useState(true);'
+          new='  const [driverLocation,setDriverLocation]=useState<DriverLocation|null>(null); const [mapOpen,setMapOpen]=useState(false); const [earningsVisible,setEarningsVisible]=useState(true); const [statusBusy,setStatusBusy]=useState(false);'
+          if old not in s:
+              raise SystemExit('state marker not found')
+          s=s.replace(old,new,1)
+
+          start=s.index('  async function toggleOnline(){')
+          end=s.index('  async function activateFloatingBubble(){', start)
+          replacement='''  async function toggleOnline(){\n    if(!driver||statusBusy)return;\n    const driverId=driver.id;\n    const previous=driver.online;\n    const next=!previous;\n    setStatusBusy(true);\n    setMessage(next?"Entrando ONLINE...":"Ficando OFFLINE...");\n    setDriver(current=>current?.id===driverId?{...current,online:next}:current);\n    try{\n      const {data,error}=await supabase.functions.invoke("driver-status",{body:{online:next}});\n      if(error||data?.error){\n        setDriver(current=>current?.id===driverId?{...current,online:previous}:current);\n        setMessage(data?.error==="ACTIVE_DELIVERY_PREVENTS_OFFLINE"?"Finalize a entrega atual antes de ficar OFFLINE.":"Não foi possível alterar seu status. Tente novamente.");\n        return;\n      }\n      const {data:verified,error:verifyError}=await supabase.from("drivers").select("online").eq("id",driverId).maybeSingle();\n      const confirmed=verifyError||!verified?Boolean(data?.driver?.online):Boolean(verified.online);\n      setDriver(current=>current?.id===driverId?{...current,online:confirmed}:current);\n      if(confirmed!==next){\n        setMessage("O status não foi confirmado pelo servidor. Toque novamente.");\n        return;\n      }\n      if(!confirmed){\n        setOffer(null);\n        await Promise.allSettled([disableBackgroundTracking(),stopFloatingBubble()]);\n        setMessage("Você está OFFLINE. As novas chamadas foram pausadas.");\n        return;\n      }\n      await loadOffers();\n      setMessage("Você está ONLINE e disponível para receber chamadas.");\n      Alert.alert(\n        "Rastreamento durante entregas",\n        "Para receber chamadas e manter o acompanhamento mesmo com a tela bloqueada, permita ao CLICK-FOOD usar sua localização em segundo plano enquanto você estiver online.",\n        [\n          {text:"AGORA NÃO",style:"cancel"},\n          {text:"ATIVAR",onPress:async()=>{\n            const enabled=await enableBackgroundTracking(driverId);\n            setMessage(enabled?"Localização em segundo plano ativada enquanto você estiver ONLINE.":"A localização em segundo plano não foi autorizada. O app continuará atualizando sua posição enquanto estiver aberto.");\n          }},\n        ],\n      );\n    }finally{\n      setStatusBusy(false);\n    }\n  }\n'''
+          s=s[:start]+replacement+s[end:]
+
+          old='<Pressable style={[styles.mapOnlineButton,driver.online&&styles.mapOfflineButton]} onPress={toggleOnline}><Text style={[styles.mapOnlineText,driver.online&&styles.onlineTextOffline]}>{driver.online?"OFFLINE":"ONLINE"}</Text></Pressable>'
+          new='<Pressable disabled={statusBusy} style={[styles.mapOnlineButton,driver.online&&styles.mapOfflineButton,statusBusy&&styles.disabled]} onPress={toggleOnline}><Text style={[styles.mapOnlineText,driver.online&&styles.onlineTextOffline]}>{statusBusy?"ALTERANDO...":driver.online?"FICAR OFFLINE":"FICAR ONLINE"}</Text></Pressable>'
+          if old not in s:
+              raise SystemExit('button marker not found')
+          s=s.replace(old,new,1)
+
+          p.write_text(s)
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Validar TypeScript
+        run: |
+          npm ci --include=dev
+          cd apps/entregador
+          npx tsc --noEmit
+          grep -q 'FICAR OFFLINE' App.tsx
+          grep -q 'stopFloatingBubble' App.tsx
+          grep -q 'statusBusy' App.tsx
+
+      - name: Commitar correção
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/entregador/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix(entregador): alternar online e offline com confirmação'
+          git push origin main
+
+      - name: Disparar novo APK completo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-entregador-fast-ota.yml --ref main
