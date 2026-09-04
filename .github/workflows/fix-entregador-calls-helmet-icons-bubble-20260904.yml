@@ -1,0 +1,150 @@
+name: CLICK-FOOD Corrigir chamadas capacete icones bolinha Entregador 2026-09-04
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-entregador-calls-helmet-icons-bubble-20260904.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_NO_TELEMETRY: '1'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Aplicar correcoes do Entregador
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          app_path=Path('apps/entregador/App.tsx')
+          app=app_path.read_text(encoding='utf-8')
+
+          old='  Alert, Modal, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Vibration,\n  Text, TextInput, View,\n'
+          new='  Alert, Modal, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Vibration,\n  Text, TextInput, View,\n'
+          if old in app:
+              app=app.replace(old,new,1)
+          elif 'Alert, Modal, Platform, Pressable' not in app:
+              raise SystemExit('Import de react-native nao encontrado')
+
+          anchor='import DriverLiveMap from "./DriverLiveMap";\n'
+          bubble_import='import { canUseFloatingBubble, hasFloatingBubbleNativeModule, requestFloatingBubblePermission, startFloatingBubble } from "./FloatingBubble";\n'
+          if bubble_import not in app:
+              if anchor not in app: raise SystemExit('Anchor DriverLiveMap nao encontrado')
+              app=app.replace(anchor,anchor+bubble_import,1)
+
+          effect_anchor='''  useEffect(()=>{\n    if(driver?.id&&driver.online&&driver.status==="ACTIVE")void resumeBackgroundTrackingIfAuthorized(driver.id);\n    else void disableBackgroundTracking();\n  },[driver?.id,driver?.online,driver?.status]);\n'''
+          offer_effect='''\n\n  useEffect(()=>{\n    if(!session?.user.id||!driver?.id||driver.status!=="ACTIVE"||!driver.online||active){\n      setOffer(null);\n      return;\n    }\n    let cancelled=false;\n    const refresh=async()=>{if(!cancelled)await loadOffers();};\n    void refresh();\n    const timer=setInterval(()=>void refresh(),3000);\n    const channel=supabase.channel(`driver-offer-feed-${driver.id}`).on(\n      "postgres_changes",\n      {event:"INSERT",schema:"public",table:"notifications",filter:`user_id=eq.${session.user.id}`},\n      payload=>{\n        const type=String((payload.new as any).notification_type??"");\n        if(type!=="DRIVER_OFFER"&&type!=="DELIVERY_OFFER")return;\n        Vibration.vibrate([0,300,120,300]);\n        void refresh();\n      },\n    ).subscribe();\n    return()=>{cancelled=true;clearInterval(timer);void supabase.removeChannel(channel);};\n  },[session?.user.id,driver?.id,driver?.online,driver?.status,active?.id]);\n'''
+          if 'driver-offer-feed-' not in app:
+              if effect_anchor not in app: raise SystemExit('Anchor do efeito de tracking nao encontrado')
+              app=app.replace(effect_anchor,effect_anchor+offer_effect,1)
+
+          old_load='  async function loadOffers(){const {data}=await supabase.functions.invoke("driver-offers",{body:{}});const next=(data?.offers??[])[0] as Offer|undefined;setOffer(next??null);}\n'
+          new_load='  async function loadOffers(){const {data,error}=await supabase.functions.invoke("driver-offers",{body:{}});if(error||data?.error)return;const next=(data?.offers??[])[0] as Offer|undefined;setOffer(next??null);}\n'
+          if old_load in app:
+              app=app.replace(old_load,new_load,1)
+          elif new_load not in app:
+              raise SystemExit('loadOffers nao encontrado')
+
+          toggle_end='''    );\n  }\n  async function acceptOffer()'''
+          bubble_fn='''    );\n  }\n  async function activateFloatingBubble(){\n    setMessage("");\n    if(Platform.OS!=="android"){setMessage("A bolinha flutuante está disponível no Android.");return;}\n    if(!driver.online){setMessage("Fique ONLINE para ativar a bolinha flutuante.");return;}\n    if(!hasFloatingBubbleNativeModule()){setMessage("A bolinha flutuante precisa do APK mais recente do CLICK-FOOD Entregador.");return;}\n    if(await canUseFloatingBubble()){\n      const started=await startFloatingBubble();\n      setMessage(started?"Bolinha flutuante ativada.":"Não foi possível iniciar a bolinha flutuante.");\n      return;\n    }\n    const granted=await requestFloatingBubblePermission();\n    if(granted){\n      const started=await startFloatingBubble();\n      setMessage(started?"Bolinha flutuante ativada.":"Permissão concedida. Toque novamente em BOLINHA para iniciar.");\n    }else setMessage("Autorize 'Aparecer sobre outros apps'. Ao voltar ao CLICK-FOOD, toque em BOLINHA novamente.");\n  }\n  async function acceptOffer()'''
+          if 'async function activateFloatingBubble()' not in app:
+              if toggle_end not in app: raise SystemExit('Fim de toggleOnline nao encontrado')
+              app=app.replace(toggle_end,bubble_fn,1)
+
+          eye='''    <Pressable accessibilityRole="button" accessibilityLabel={earningsVisible?"Ocultar ganhos":"Mostrar ganhos"} style={styles.earningsEyeButton} onPress={()=>setEarningsVisible(value=>!value)}><Text style={styles.earningsEyeIcon}>{earningsVisible?"👁️":"🙈"}</Text><Text style={styles.earningsEyeText}>{earningsVisible?"OCULTAR GANHOS":"MOSTRAR GANHOS"}</Text></Pressable>\n'''
+          bubble_button='''    <Pressable accessibilityRole="button" accessibilityLabel="Ativar bolinha flutuante" style={styles.floatingBubbleButton} onPress={activateFloatingBubble}><Text style={styles.floatingBubbleDot}>●</Text><Text style={styles.floatingBubbleText}>BOLINHA</Text></Pressable>\n'''
+          if 'style={styles.floatingBubbleButton}' not in app:
+              if eye not in app: raise SystemExit('Botao de ganhos nao encontrado')
+              app=app.replace(eye,eye+bubble_button,1)
+
+          style_anchor='const styles=StyleSheet.create({earningsEyeButton:'
+          if 'floatingBubbleButton:{' not in app:
+              if style_anchor not in app: raise SystemExit('Inicio dos estilos nao encontrado')
+              app=app.replace(style_anchor,'const styles=StyleSheet.create({floatingBubbleButton:{position:"absolute",top:122,right:10,zIndex:31,elevation:10,backgroundColor:"rgba(17,17,17,0.96)",borderWidth:2,borderColor:"#f4c400",borderRadius:22,paddingVertical:8,paddingHorizontal:11,flexDirection:"row",alignItems:"center",gap:6},floatingBubbleDot:{color:"#f4c400",fontSize:20,lineHeight:20},floatingBubbleText:{color:"#fff",fontSize:9,fontWeight:"900",letterSpacing:.6},earningsEyeButton:',1)
+
+          replacements={
+            'bottom:{minHeight:78,backgroundColor:"#101010",borderTopWidth:1,borderTopColor:"#2a2a2a",flexDirection:"row",paddingTop:5,paddingBottom:7,elevation:16}':'bottom:{minHeight:92,backgroundColor:"#101010",borderTopWidth:1,borderTopColor:"#2a2a2a",flexDirection:"row",paddingTop:7,paddingBottom:8,elevation:16}',
+            'tab:{flex:1,minHeight:58,alignItems:"center",justifyContent:"center",paddingHorizontal:2}':'tab:{flex:1,minHeight:70,alignItems:"center",justifyContent:"center",paddingHorizontal:2}',
+            'tabIcon:{fontSize:24,lineHeight:28,minWidth:28,textAlign:"center",color:"#8b8b8b"}':'tabIcon:{fontSize:32,lineHeight:36,minWidth:36,textAlign:"center",color:"#8b8b8b"}',
+            'tabText:{fontSize:10,fontWeight:"800",color:"#999",marginTop:2}':'tabText:{fontSize:11,fontWeight:"800",color:"#999",marginTop:2}',
+          }
+          for old_s,new_s in replacements.items():
+              if old_s in app: app=app.replace(old_s,new_s,1)
+              elif new_s not in app: raise SystemExit(f'Estilo esperado nao encontrado: {old_s[:30]}')
+
+          app_path.write_text(app,encoding='utf-8')
+
+          shell_path=Path('apps/entregador/DriverProfessionalShell.tsx')
+          shell=shell_path.read_text(encoding='utf-8')
+          old_types='new Set(["DRIVER_OFFER","DRIVER_DRIVER_ASSIGNED","DRIVER_DELIVERY_CANCELLED","DRIVER_RETURN_REQUIRED","DRIVER_INCIDENT"])'
+          new_types='new Set(["DRIVER_OFFER","DELIVERY_OFFER","DRIVER_DRIVER_ASSIGNED","DELIVERY_ASSIGNED","DRIVER_DELIVERY_CANCELLED","DRIVER_RETURN_REQUIRED","DRIVER_INCIDENT"])'
+          if old_types in shell: shell=shell.replace(old_types,new_types,1)
+          elif new_types not in shell: raise SystemExit('Tipos de notificacao importantes nao encontrados')
+          shell_path.write_text(shell,encoding='utf-8')
+          PY
+
+      - name: Instalar dependencias
+        run: npm ci --include=dev
+
+      - name: Validar TypeScript
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+
+      - name: Validar correcoes obrigatorias
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'driver-offer-feed-' apps/entregador/App.tsx
+          grep -q 'setInterval(()=>void refresh(),3000)' apps/entregador/App.tsx
+          grep -q 'notification_type' apps/entregador/App.tsx
+          grep -q 'floatingBubbleButton' apps/entregador/App.tsx
+          grep -q 'fontSize:32,lineHeight:36' apps/entregador/App.tsx
+          grep -q 'DELIVERY_OFFER' apps/entregador/DriverProfessionalShell.tsx
+          grep -q 'driverHelmet' apps/entregador/DriverLiveMap.tsx
+          python3 - <<'PY'
+          from pathlib import Path
+          app=Path('apps/entregador/App.tsx').read_text(encoding='utf-8')
+          home=app.split('  const home=',1)[1].split('\n\n  const historyView=',1)[0]
+          if '<ScrollView' in home: raise SystemExit('Home voltou a ter ScrollView')
+          print('Home permanece sem rolagem vertical.')
+          PY
+
+      - name: Commitar correcoes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/entregador/App.tsx apps/entregador/DriverProfessionalShell.tsx apps/entregador/DriverLiveMap.tsx apps/entregador/FloatingBubble.ts
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(entregador): receber chamadas e restaurar controles visuais'
+            git pull --rebase origin main
+            git push origin main
+          fi
+
+      - name: Publicar OTA Android preview
+        working-directory: apps/entregador
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN nao configurado'; exit 1; }
+          npx --yes eas-cli@latest whoami
+          npx --yes eas-cli@latest update --channel preview --environment preview --platform android --message "CLICK-FOOD Entregador: chamadas em tempo real, capacete, icones maiores e botao bolinha"
