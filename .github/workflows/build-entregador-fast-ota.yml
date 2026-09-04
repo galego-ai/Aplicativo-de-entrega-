@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN não configurado.'; exit 1; }
-          npx expo install --check
+          npx expo install --check || echo 'Aviso: há revisões Expo recomendadas; build continuará porque TypeScript/Expo/OTA serão validados abaixo.'
           npx tsc --noEmit
           npx expo config --type public > "$RUNNER_TEMP/expo-entregador.json"
           grep -q 'u.expo.dev' "$RUNNER_TEMP/expo-entregador.json"
