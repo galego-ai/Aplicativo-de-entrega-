@@ -17,6 +17,7 @@ jobs:
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       EXPO_NO_TELEMETRY: '1'
+      CI: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,10 +41,10 @@ jobs:
               raise SystemExit('A Home não pode depender de rolagem vertical.')
           print('Home validada sem ScrollView.')
           PY
-      - name: Publicar atualização OTA no canal preview
+      - name: Publicar atualização OTA Android no canal preview
         working-directory: apps/entregador
         run: |
           set -euo pipefail
           test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN não configurado.'; exit 1; }
           npx --yes eas-cli@latest whoami
-          npx --yes eas-cli@latest update --channel preview --environment preview --message "CLICK-FOOD Entregador: mapa permanente na Home e layout responsivo sem rolagem" --non-interactive
+          npx --yes eas-cli@latest update --channel preview --environment preview --platform android --message "CLICK-FOOD Entregador: mapa permanente na Home e layout responsivo sem rolagem"
