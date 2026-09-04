@@ -1,0 +1,49 @@
+name: CLICK-FOOD Entregador Publicar Home Mapa OTA 2026-09-04
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-entregador-map-home-ota-20260904.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-ota:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependências
+        run: npm ci --include=dev
+      - name: Validar Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+      - name: Confirmar mapa permanente na Home
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '<DriverLiveMap online={driver.online} location={driverLocation} active={active}/>' apps/entregador/App.tsx
+          python3 - <<'PY'
+          from pathlib import Path
+          app=Path('apps/entregador/App.tsx').read_text(encoding='utf-8')
+          home=app.split('  const home=',1)[1].split('\n\n  const historyView=',1)[0]
+          if '<ScrollView' in home:
+              raise SystemExit('A Home não pode depender de rolagem vertical.')
+          print('Home validada sem ScrollView.')
+          PY
+      - name: Publicar atualização OTA no canal preview
+        working-directory: apps/entregador
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN não configurado.'; exit 1; }
+          npx --yes eas-cli@latest whoami
+          npx --yes eas-cli@latest update --channel preview --environment preview --message "CLICK-FOOD Entregador: mapa permanente na Home e layout responsivo sem rolagem" --non-interactive
