@@ -16,7 +16,7 @@ import {
 import { PasswordResetLink, DeleteAccountButton } from "./AccountLifecycle";
 import DriverWallet from "./DriverWallet";
 import DriverLiveMap from "./DriverLiveMap";
-import { canUseFloatingBubble, hasFloatingBubbleNativeModule, requestFloatingBubblePermission, startFloatingBubble } from "./FloatingBubble";
+import { canUseFloatingBubble, hasFloatingBubbleNativeModule, requestFloatingBubblePermission, startFloatingBubble, stopFloatingBubble } from "./FloatingBubble";
 
 type Screen = "home" | "history" | "wallet" | "profile";
 type Driver = { id: string; status: string; online: boolean; rating: number; acceptance_rate: number; city_id: string | null };
@@ -103,7 +103,7 @@ export default function App() {
   const [screen,setScreen]=useState<Screen>("home"); const [offer,setOffer]=useState<Offer|null>(null); const [active,setActive]=useState<ActiveDelivery|null>(null);
   const [history,setHistory]=useState<HistoryItem[]>([]); const [code,setCode]=useState(""); const [message,setMessage]=useState(""); const [loading,setLoading]=useState(true);
   const [incidentModal,setIncidentModal]=useState(false); const [incidentReason,setIncidentReason]=useState(""); const [incidentBusy,setIncidentBusy]=useState(false);
-  const [driverLocation,setDriverLocation]=useState<DriverLocation|null>(null); const [mapOpen,setMapOpen]=useState(false); const [earningsVisible,setEarningsVisible]=useState(true);
+  const [driverLocation,setDriverLocation]=useState<DriverLocation|null>(null); const [mapOpen,setMapOpen]=useState(false); const [earningsVisible,setEarningsVisible]=useState(true); const [statusBusy,setStatusBusy]=useState(false);
 
   useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)});const {data}=supabase.auth.onAuthStateChange((_e,s)=>setSession(s));return()=>data.subscription.unsubscribe();},[]);
   useEffect(()=>{if(session) bootstrap(); else {setDriver(null);setActive(null);setOffer(null);setDriverLocation(null)}},[session]);
@@ -182,31 +182,49 @@ export default function App() {
   async function loadHistory(_driverId?:string){const {data,error}=await supabase.functions.invoke("driver-delivery-history",{body:{}});if(error||data?.error){setMessage("Não foi possível atualizar o histórico de entregas.");return;}setHistory((data?.history??[]) as HistoryItem[]);}
   async function loadDriverLocation(driverId:string){const {data}=await supabase.from("driver_locations").select("latitude,longitude,heading,recorded_at").eq("driver_id",driverId).maybeSingle();if(!data)return;setDriverLocation({latitude:Number(data.latitude),longitude:Number(data.longitude),heading:data.heading==null?null:Number(data.heading),recordedAt:String(data.recorded_at)});}
   async function toggleOnline(){
-    if(!driver)return;
-    setMessage("");
-    const next=!driver.online;
-    const {data,error}=await supabase.functions.invoke("driver-status",{body:{online:next}});
-    if(error||data?.error){
-      setMessage(data?.error==="ACTIVE_DELIVERY_PREVENTS_OFFLINE"?"Finalize a entrega atual antes de ficar offline.":"Não foi possível alterar seu status.");
-      return;
+    if(!driver||statusBusy)return;
+    const driverId=driver.id;
+    const previous=driver.online;
+    const next=!previous;
+    setStatusBusy(true);
+    setMessage(next?"Entrando ONLINE...":"Ficando OFFLINE...");
+    setDriver(current=>current?.id===driverId?{...current,online:next}:current);
+    try{
+      const {data,error}=await supabase.functions.invoke("driver-status",{body:{online:next}});
+      if(error||data?.error){
+        setDriver(current=>current?.id===driverId?{...current,online:previous}:current);
+        setMessage(data?.error==="ACTIVE_DELIVERY_PREVENTS_OFFLINE"?"Finalize a entrega atual antes de ficar OFFLINE.":"Não foi possível alterar seu status. Tente novamente.");
+        return;
+      }
+      const {data:verified,error:verifyError}=await supabase.from("drivers").select("online").eq("id",driverId).maybeSingle();
+      const confirmed=verifyError||!verified?Boolean(data?.driver?.online):Boolean(verified.online);
+      setDriver(current=>current?.id===driverId?{...current,online:confirmed}:current);
+      if(confirmed!==next){
+        setMessage("O status não foi confirmado pelo servidor. Toque novamente.");
+        return;
+      }
+      if(!confirmed){
+        setOffer(null);
+        await Promise.allSettled([disableBackgroundTracking(),stopFloatingBubble()]);
+        setMessage("Você está OFFLINE. As novas chamadas foram pausadas.");
+        return;
+      }
+      await loadOffers();
+      setMessage("Você está ONLINE e disponível para receber chamadas.");
+      Alert.alert(
+        "Rastreamento durante entregas",
+        "Para receber chamadas e manter o acompanhamento mesmo com a tela bloqueada, permita ao CLICK-FOOD usar sua localização em segundo plano enquanto você estiver online.",
+        [
+          {text:"AGORA NÃO",style:"cancel"},
+          {text:"ATIVAR",onPress:async()=>{
+            const enabled=await enableBackgroundTracking(driverId);
+            setMessage(enabled?"Localização em segundo plano ativada enquanto você estiver ONLINE.":"A localização em segundo plano não foi autorizada. O app continuará atualizando sua posição enquanto estiver aberto.");
+          }},
+        ],
+      );
+    }finally{
+      setStatusBusy(false);
     }
-    setDriver({...driver,online:Boolean(data.driver.online)});
-    if(!next){
-      await disableBackgroundTracking();
-      return;
-    }
-    await loadOffers();
-    Alert.alert(
-      "Rastreamento durante entregas",
-      "Para receber chamadas e manter o acompanhamento mesmo com a tela bloqueada, permita ao CLICK-FOOD usar sua localização em segundo plano enquanto você estiver online.",
-      [
-        {text:"AGORA NÃO",style:"cancel"},
-        {text:"ATIVAR",onPress:async()=>{
-          const enabled=await enableBackgroundTracking(driver.id);
-          setMessage(enabled?"Localização em segundo plano ativada enquanto você estiver online.":"A localização em segundo plano não foi autorizada. O app continuará atualizando sua posição enquanto estiver aberto.");
-        }},
-      ],
-    );
   }
   async function activateFloatingBubble(){
     if(!driver)return;
@@ -247,7 +265,7 @@ export default function App() {
       {active?<View style={styles.mapControlsContent}>
         <View style={styles.driverActiveCard}><View style={styles.driverActiveHeader}><View style={{flex:1}}><Text style={styles.driverActiveKicker}>Entrega em andamento</Text><Text style={styles.driverActiveOrder}>Pedido #{active.orderNumber}</Text></View><View style={styles.driverActiveStatusDot}/></View><Text numberOfLines={1} style={styles.driverStatusText}>{driverStatusLabel[active.status]??active.status}</Text><Text numberOfLines={2} style={styles.driverAddress}>{active.status.includes("STORE")||active.status==="DRIVER_ASSIGNED"?active.pickup.storeName:destinationLine}</Text></View>
         <View style={styles.nextStepCard}><Text style={styles.nextStepKicker}>Próxima etapa</Text><Text numberOfLines={2} style={styles.nextStepTitle}>{nextStepText}</Text>{needsCode&&<><Text style={styles.codePrompt}>{codeButtonLabel}</Text><TextInput style={styles.codeInput} placeholder="Código de 4 dígitos" placeholderTextColor="#777" keyboardType="number-pad" maxLength={4} value={code} onChangeText={setCode}/></>}{nextAction&&<Pressable style={styles.actionButton} onPress={()=>deliveryAction(nextAction[0])}><Text style={styles.actionText}>{needsCode&&codeButtonLabel?codeButtonLabel:nextAction[1]}</Text></Pressable>}{active.status==="DRIVER_AT_CUSTOMER"&&<Pressable style={styles.problemSecondary} onPress={()=>Alert.alert("Cliente não encontrado","Confirme apenas se você já está no endereço e tentou localizar o cliente.",[{text:"VOLTAR",style:"cancel"},{text:"CONFIRMAR",style:"destructive",onPress:()=>reportDeliveryProblem("CUSTOMER_UNAVAILABLE")}])}><Text style={styles.problemSecondaryText}>CLIENTE NÃO ENCONTRADO</Text></Pressable>}{["DRIVER_ASSIGNED","DRIVER_TO_STORE","DRIVER_AT_STORE","PICKUP_CONFIRMED","DRIVER_TO_CUSTOMER","DRIVER_AT_CUSTOMER","RETURN_REQUIRED"].includes(active.status)&&<Pressable style={styles.problemButton} onPress={()=>{setIncidentReason("");setIncidentModal(true)}}><Text style={styles.problemText}>REPORTAR PROBLEMA</Text></Pressable>}<Text style={styles.earning}>Ganho desta entrega: {earningsText(active.earning)}</Text></View>
-      </View>:<View style={styles.idleMapCard}><View style={{flex:1}}><Text style={styles.idleHeroKicker}>{driver.online?"VOCÊ ESTÁ ONLINE":"VOCÊ ESTÁ OFFLINE"}</Text><Text style={styles.idleMapTitle}>{driver.online?"Aguardando entregas":"Fique online para começar"}</Text><Text style={styles.idleMapMeta}>{history.length} entregas • {driver.rating.toFixed(1)} ★ • {earningsText(completedTotal)}</Text></View><Pressable style={[styles.mapOnlineButton,driver.online&&styles.mapOfflineButton]} onPress={toggleOnline}><Text style={[styles.mapOnlineText,driver.online&&styles.onlineTextOffline]}>{driver.online?"OFFLINE":"ONLINE"}</Text></Pressable></View>}
+      </View>:<View style={styles.idleMapCard}><View style={{flex:1}}><Text style={styles.idleHeroKicker}>{driver.online?"VOCÊ ESTÁ ONLINE":"VOCÊ ESTÁ OFFLINE"}</Text><Text style={styles.idleMapTitle}>{driver.online?"Aguardando entregas":"Fique online para começar"}</Text><Text style={styles.idleMapMeta}>{history.length} entregas • {driver.rating.toFixed(1)} ★ • {earningsText(completedTotal)}</Text></View><Pressable disabled={statusBusy} style={[styles.mapOnlineButton,driver.online&&styles.mapOfflineButton,statusBusy&&styles.disabled]} onPress={toggleOnline}><Text style={[styles.mapOnlineText,driver.online&&styles.onlineTextOffline]}>{statusBusy?"ALTERANDO...":driver.online?"FICAR OFFLINE":"FICAR ONLINE"}</Text></Pressable></View>}
     </View>
   </View>;
 
