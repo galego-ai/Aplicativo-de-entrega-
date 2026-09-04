@@ -186,3 +186,5 @@ jobs:
           path: artifacts/CLICK-FOOD-Entregador-OTA.apk
           if-no-files-found: error
           retention-days: 30
+
+# rebuild: chamadas + capacete + icones maiores + bolinha nativa
