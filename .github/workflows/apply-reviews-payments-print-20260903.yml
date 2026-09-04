@@ -59,6 +59,7 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git restore apps/admin/tsconfig.json apps/lojista/tsconfig.json 2>/dev/null || true
           git add apps/cliente/App.tsx apps/lojista/app/OrderDetailsPanel.tsx apps/lojista/app/page.tsx apps/admin/app/AdminNavigationTools.tsx apps/admin/app/pagamentos/page.tsx
           if git diff --cached --quiet; then
             echo 'Nenhuma alteração pendente.'
