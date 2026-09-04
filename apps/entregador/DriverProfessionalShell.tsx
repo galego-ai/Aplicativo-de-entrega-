@@ -19,7 +19,7 @@ type PixType="CPF"|"CNPJ"|"EMAIL"|"PHONE"|"RANDOM";
 Notifications.setNotificationHandler({handleNotification:async()=>({shouldPlaySound:true,shouldSetBadge:true,shouldShowBanner:true,shouldShowList:true})});
 const topInset=Platform.OS==="android"?(StatusBar.currentHeight??24):0;
 const brl=(value:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value||0);
-const importantDriverNotificationTypes=new Set(["DRIVER_OFFER","DRIVER_DRIVER_ASSIGNED","DRIVER_DELIVERY_CANCELLED","DRIVER_RETURN_REQUIRED","DRIVER_INCIDENT"]);
+const importantDriverNotificationTypes=new Set(["DRIVER_OFFER","DELIVERY_OFFER","DRIVER_DRIVER_ASSIGNED","DELIVERY_ASSIGNED","DRIVER_DELIVERY_CANCELLED","DRIVER_RETURN_REQUIRED","DRIVER_INCIDENT"]);
 function usefulDriverNotification(item:NotificationRow){const type=String(item.notification_type||"");if(type)return importantDriverNotificationTypes.has(type);return /(nova entrega|entrega confirmada|cancel|retorno|ocorrência|incidente)/i.test(`${item.title} ${item.body}`);}
 
 async function installationId(){const key="@clickfood/driver/installation-id";let value=await AsyncStorage.getItem(key);if(!value){value=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;await AsyncStorage.setItem(key,value);}return value;}
