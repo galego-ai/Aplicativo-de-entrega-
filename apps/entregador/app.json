@@ -9,6 +9,7 @@
     "userInterfaceStyle": "light",
     "plugins": [
       "./plugins/withClickFoodFloatingBubble",
+      "./plugins/withClickFoodAndroidBuildTuning",
       [
         "expo-location",
         {
