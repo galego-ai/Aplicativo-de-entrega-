@@ -9,6 +9,10 @@ type FloatingBubbleNative={
 
 const native=NativeModules.ClickFoodFloatingBubble as FloatingBubbleNative|undefined;
 
+export function hasFloatingBubbleNativeModule(){
+  return Platform.OS==="android"&&Boolean(native);
+}
+
 export async function canUseFloatingBubble(){
   if(Platform.OS!=="android")return false;
   if(!native)return false;
