@@ -1,0 +1,136 @@
+name: CLICK-FOOD Corrigir chamadas push e UI Entregador V2 2026-09-04
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-entregador-calls-helmet-icons-bubble-v2-20260904.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_NO_TELEMETRY: '1'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Aplicar correcoes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('apps/entregador/App.tsx')
+          s=p.read_text(encoding='utf-8')
+
+          s=s.replace('  Alert, Modal, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Vibration,\n  Text, TextInput, View,\n','  Alert, Modal, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Vibration,\n  Text, TextInput, View,\n',1)
+          if 'Alert, Modal, Platform, Pressable' not in s: raise SystemExit('Platform import ausente')
+
+          if 'import Constants from "expo-constants";' not in s:
+              s=s.replace('import * as Location from "expo-location";\n','import * as Location from "expo-location";\nimport Constants from "expo-constants";\nimport * as Notifications from "expo-notifications";\n',1)
+          if 'from "./FloatingBubble";' not in s:
+              s=s.replace('import DriverLiveMap from "./DriverLiveMap";\n','import DriverLiveMap from "./DriverLiveMap";\nimport { canUseFloatingBubble, hasFloatingBubbleNativeModule, requestFloatingBubblePermission, startFloatingBubble } from "./FloatingBubble";\n',1)
+
+          tracking='''  useEffect(()=>{\n    if(driver?.id&&driver.online&&driver.status==="ACTIVE")void resumeBackgroundTrackingIfAuthorized(driver.id);\n    else void disableBackgroundTracking();\n  },[driver?.id,driver?.online,driver?.status]);\n'''
+          feed='''\n\n  useEffect(()=>{\n    if(!session?.user.id||!driver?.id||driver.status!=="ACTIVE"||!driver.online||active){setOffer(null);return;}\n    const userId=session.user.id;\n    const driverId=driver.id;\n    let cancelled=false;\n    const refresh=async()=>{if(!cancelled)await loadOffers();};\n    void refresh();\n    const timer=setInterval(()=>void refresh(),3000);\n    const channel=supabase.channel(`driver-offer-feed-${driverId}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"notifications",filter:`user_id=eq.${userId}`},payload=>{\n      const type=String((payload.new as any).notification_type??"");\n      if(type!=="DRIVER_OFFER"&&type!=="DELIVERY_OFFER")return;\n      Vibration.vibrate([0,300,120,300]);\n      void refresh();\n    }).subscribe();\n    return()=>{cancelled=true;clearInterval(timer);void supabase.removeChannel(channel);};\n  },[session?.user.id,driver?.id,driver?.online,driver?.status,active?.id]);\n\n  useEffect(()=>{\n    if(!session?.user.id||!driver?.id||driver.status!=="ACTIVE"||!driver.online)return;\n    let cancelled=false;\n    (async()=>{\n      try{\n        if(Platform.OS==="android")await Notifications.setNotificationChannelAsync("clickfood-chamadas",{name:"Chamadas CLICK-FOOD",description:"Novas chamadas de entrega",importance:Notifications.AndroidImportance.MAX,sound:"clickfood_chamada.wav",vibrationPattern:[0,300,120,300,120,450],lightColor:"#F4C400"});\n        let permission=await Notifications.getPermissionsAsync();\n        if(permission.status!=="granted")permission=await Notifications.requestPermissionsAsync();\n        if(permission.status!=="granted"){if(!cancelled)setMessage("Ative as notificações do CLICK-FOOD para receber chamadas com o app minimizado.");return;}\n        const projectId=Constants.expoConfig?.extra?.eas?.projectId??Constants.easConfig?.projectId;\n        if(!projectId){if(!cancelled)setMessage("Não foi possível identificar o serviço de notificações.");return;}\n        const token=(await Notifications.getExpoPushTokenAsync({projectId})).data;\n        const platform:"ANDROID"|"IOS"|"UNKNOWN"=Platform.OS==="android"?"ANDROID":Platform.OS==="ios"?"IOS":"UNKNOWN";\n        const {data,error}=await supabase.functions.invoke("register-push-token",{body:{token,app:"DRIVER",platform,appIdentifier:"br.com.clickfood.entregador"}});\n        if((error||data?.error)&&!cancelled)setMessage("Não foi possível ativar as chamadas em segundo plano. Mantenha o app aberto e tente novamente.");\n      }catch{if(!cancelled)setMessage("Não foi possível ativar as chamadas em segundo plano. Verifique as notificações do aparelho.");}\n    })();\n    return()=>{cancelled=true;};\n  },[session?.user.id,driver?.id,driver?.online,driver?.status]);\n'''
+          if 'driver-offer-feed-' not in s:
+              if tracking not in s: raise SystemExit('Tracking anchor ausente')
+              s=s.replace(tracking,tracking+feed,1)
+
+          old='  async function loadOffers(){const {data}=await supabase.functions.invoke("driver-offers",{body:{}});const next=(data?.offers??[])[0] as Offer|undefined;setOffer(next??null);}\n'
+          new='  async function loadOffers(){const {data,error}=await supabase.functions.invoke("driver-offers",{body:{}});if(error||data?.error)return;const next=(data?.offers??[])[0] as Offer|undefined;setOffer(next??null);}\n'
+          if old in s:s=s.replace(old,new,1)
+          elif new not in s:raise SystemExit('loadOffers ausente')
+
+          mark='''    );\n  }\n  async function acceptOffer()'''
+          fn='''    );\n  }\n  async function activateFloatingBubble(){\n    setMessage("");\n    if(Platform.OS!=="android"){setMessage("A bolinha flutuante está disponível no Android.");return;}\n    if(!driver.online){setMessage("Fique ONLINE para ativar a bolinha flutuante.");return;}\n    if(!hasFloatingBubbleNativeModule()){setMessage("A bolinha flutuante precisa do APK mais recente do CLICK-FOOD Entregador.");return;}\n    if(await canUseFloatingBubble()){const started=await startFloatingBubble();setMessage(started?"Bolinha flutuante ativada.":"Não foi possível iniciar a bolinha flutuante.");return;}\n    const granted=await requestFloatingBubblePermission();\n    if(granted){const started=await startFloatingBubble();setMessage(started?"Bolinha flutuante ativada.":"Permissão concedida. Toque novamente em BOLINHA para iniciar.");}\n    else setMessage("Autorize 'Aparecer sobre outros apps'. Ao voltar ao CLICK-FOOD, toque em BOLINHA novamente.");\n  }\n  async function acceptOffer()'''
+          if 'async function activateFloatingBubble()' not in s:
+              if mark not in s:raise SystemExit('toggleOnline anchor ausente')
+              s=s.replace(mark,fn,1)
+
+          eye='    <Pressable accessibilityRole="button" accessibilityLabel={earningsVisible?"Ocultar ganhos":"Mostrar ganhos"} style={styles.earningsEyeButton} onPress={()=>setEarningsVisible(value=>!value)}><Text style={styles.earningsEyeIcon}>{earningsVisible?"👁️":"🙈"}</Text><Text style={styles.earningsEyeText}>{earningsVisible?"OCULTAR GANHOS":"MOSTRAR GANHOS"}</Text></Pressable>\n'
+          btn='    <Pressable accessibilityRole="button" accessibilityLabel="Ativar bolinha flutuante" style={styles.floatingBubbleButton} onPress={activateFloatingBubble}><Text style={styles.floatingBubbleDot}>●</Text><Text style={styles.floatingBubbleText}>BOLINHA</Text></Pressable>\n'
+          if 'style={styles.floatingBubbleButton}' not in s:
+              if eye not in s:raise SystemExit('Botao olho ausente')
+              s=s.replace(eye,eye+btn,1)
+
+          if 'floatingBubbleButton:{' not in s:
+              a='const styles=StyleSheet.create({earningsEyeButton:'
+              b='const styles=StyleSheet.create({floatingBubbleButton:{position:"absolute",top:122,right:10,zIndex:31,elevation:10,backgroundColor:"rgba(17,17,17,0.96)",borderWidth:2,borderColor:"#f4c400",borderRadius:22,paddingVertical:8,paddingHorizontal:11,flexDirection:"row",alignItems:"center",gap:6},floatingBubbleDot:{color:"#f4c400",fontSize:20,lineHeight:20},floatingBubbleText:{color:"#fff",fontSize:9,fontWeight:"900",letterSpacing:.6},earningsEyeButton:'
+              if a not in s:raise SystemExit('Style anchor ausente')
+              s=s.replace(a,b,1)
+
+          pairs=[
+          ('bottom:{minHeight:78,backgroundColor:"#101010",borderTopWidth:1,borderTopColor:"#2a2a2a",flexDirection:"row",paddingTop:5,paddingBottom:7,elevation:16}','bottom:{minHeight:92,backgroundColor:"#101010",borderTopWidth:1,borderTopColor:"#2a2a2a",flexDirection:"row",paddingTop:7,paddingBottom:8,elevation:16}'),
+          ('tab:{flex:1,minHeight:58,alignItems:"center",justifyContent:"center",paddingHorizontal:2}','tab:{flex:1,minHeight:70,alignItems:"center",justifyContent:"center",paddingHorizontal:2}'),
+          ('tabIcon:{fontSize:24,lineHeight:28,minWidth:28,textAlign:"center",color:"#8b8b8b"}','tabIcon:{fontSize:32,lineHeight:36,minWidth:36,textAlign:"center",color:"#8b8b8b"}'),
+          ('tabText:{fontSize:10,fontWeight:"800",color:"#999",marginTop:2}','tabText:{fontSize:11,fontWeight:"800",color:"#999",marginTop:2}')]
+          for a,b in pairs:
+              if a in s:s=s.replace(a,b,1)
+              elif b not in s:raise SystemExit('Estilo de navegacao ausente')
+          p.write_text(s,encoding='utf-8')
+
+          q=Path('apps/entregador/DriverProfessionalShell.tsx')
+          t=q.read_text(encoding='utf-8')
+          a='new Set(["DRIVER_OFFER","DRIVER_DRIVER_ASSIGNED","DRIVER_DELIVERY_CANCELLED","DRIVER_RETURN_REQUIRED","DRIVER_INCIDENT"])'
+          b='new Set(["DRIVER_OFFER","DELIVERY_OFFER","DRIVER_DRIVER_ASSIGNED","DELIVERY_ASSIGNED","DRIVER_DELIVERY_CANCELLED","DRIVER_RETURN_REQUIRED","DRIVER_INCIDENT"])'
+          if a in t:t=t.replace(a,b,1)
+          elif b not in t:raise SystemExit('Tipos shell ausentes')
+          q.write_text(t,encoding='utf-8')
+          PY
+
+      - name: Instalar dependencias
+        run: npm ci --include=dev
+      - name: Validar TypeScript
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+      - name: Validar requisitos
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'driver-offer-feed-' apps/entregador/App.tsx
+          grep -q 'setInterval(()=>void refresh(),3000)' apps/entregador/App.tsx
+          grep -q 'register-push-token' apps/entregador/App.tsx
+          grep -q 'floatingBubbleButton' apps/entregador/App.tsx
+          grep -q 'fontSize:32,lineHeight:36' apps/entregador/App.tsx
+          grep -q 'DELIVERY_OFFER' apps/entregador/DriverProfessionalShell.tsx
+          grep -q 'driverHelmet' apps/entregador/DriverLiveMap.tsx
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('apps/entregador/App.tsx').read_text(encoding='utf-8')
+          home=s.split('  const home=',1)[1].split('\n\n  const historyView=',1)[0]
+          if '<ScrollView' in home:raise SystemExit('Home com ScrollView')
+          print('Home sem rolagem vertical; requisitos OK.')
+          PY
+      - name: Commitar
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/entregador/App.tsx apps/entregador/DriverProfessionalShell.tsx apps/entregador/DriverLiveMap.tsx apps/entregador/FloatingBubble.ts
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(entregador): restaurar chamadas push bolinha e icones grandes'
+            git pull --rebase origin main
+            git push origin main
+          fi
+      - name: Publicar OTA Android preview
+        working-directory: apps/entregador
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN nao configurado'; exit 1; }
+          npx --yes eas-cli@latest whoami
+          npx --yes eas-cli@latest update --channel preview --environment preview --platform android --message "CLICK-FOOD Entregador: chamadas push, busca 3s, capacete, icones grandes e bolinha"
