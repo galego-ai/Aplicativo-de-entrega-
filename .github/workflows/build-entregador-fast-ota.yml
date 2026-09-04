@@ -27,6 +27,7 @@ jobs:
       EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY }}
       EXPO_NO_TELEMETRY: '1'
       NODE_ENV: production
+      JAVA_TOOL_OPTIONS: '-Xmx3g -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8'
 
     steps:
       - name: Checkout
@@ -74,6 +75,8 @@ jobs:
           npx expo config --type public > "$RUNNER_TEMP/expo-entregador.json"
           grep -q 'u.expo.dev' "$RUNNER_TEMP/expo-entregador.json"
           grep -q 'expo-updates' package.json
+          grep -q 'withClickFoodAndroidBuildTuning' app.json
+          test -f plugins/withClickFoodAndroidBuildTuning.js
           npx --yes eas-cli@latest whoami >/dev/null
           npx --yes eas-cli@latest project:info --non-interactive
 
