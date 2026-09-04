@@ -65,7 +65,7 @@ export default function DriverLiveMap({
   useEffect(() => {
     const timer = setTimeout(fitMap, 100);
     return () => clearTimeout(timer);
-  }, [active?.status, active?.orderNumber, pickup?.latitude, pickup?.longitude, destination?.latitude, destination?.longitude]);
+  }, [active?.status, active?.orderNumber, pickup?.latitude, pickup?.longitude, destination?.latitude, destination?.longitude, driverPosition?.latitude, driverPosition?.longitude]);
 
   async function openNavigation() {
     if (!navigationTarget) return;
@@ -85,6 +85,9 @@ export default function DriverLiveMap({
       toolbarEnabled={false}
       rotateEnabled
     >
+      {driverPosition && <Marker coordinate={driverPosition} title="Você" description="Localização atual do entregador" anchor={{ x: 0.5, y: 0.5 }}>
+        <View style={[styles.driverPin, online && styles.driverPinOnline]}><Text style={styles.driverHelmet}>🪖</Text></View>
+      </Marker>}
       {pickup && <Marker coordinate={pickup} title={active?.pickup.storeName ?? "Loja"} description="Retirada do pedido">
         <View style={styles.storePin}><Text style={styles.pinEmoji}>🏪</Text></View>
       </Marker>}
@@ -123,6 +126,9 @@ const styles = StyleSheet.create({
   title: { color: "#fff", fontSize: 14, fontWeight: "900", marginTop: 3 },
   statusDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: "#777" },
   statusDotOnline: { backgroundColor: "#29a764" },
+  driverPin: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", backgroundColor: "#fff", borderWidth: 3, borderColor: "#111", elevation: 8 },
+  driverPinOnline: { backgroundColor: "#f4c400", borderColor: "#111" },
+  driverHelmet: { fontSize: 26, lineHeight: 30, textAlign: "center" },
   storePin: { backgroundColor: "#fff", borderRadius: 18, padding: 7, borderWidth: 2, borderColor: "#111" },
   customerPin: { backgroundColor: "#fff", borderRadius: 18, padding: 7, borderWidth: 2, borderColor: "#111" },
   pinEmoji: { fontSize: 20 },
