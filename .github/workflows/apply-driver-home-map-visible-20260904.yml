@@ -24,6 +24,19 @@ jobs:
           cache: npm
       - name: Aplicar ajuste da Home do entregador
         run: python3 scripts/apply-driver-home-map-visible-20260904.py
+      - name: Corrigir tipagem da captura do entregador
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('apps/entregador/App.tsx')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('if(!driver||driver.status!=="ACTIVE")return;\n    let subscription:Location.LocationSubscription|undefined;', 'if(!driver||driver.status!=="ACTIVE")return;\n    const driverId=driver.id;\n    const isOnline=driver.online;\n    let subscription:Location.LocationSubscription|undefined;', 1)
+          s=s.replace('driver_id:driver.id,latitude:position.coords.latitude', 'driver_id:driverId,latitude:position.coords.latitude', 1)
+          s=s.replace('await applyPosition(current,driver.online);', 'await applyPosition(current,isOnline);', 1)
+          s=s.replace('if(cancelled||!driver.online)return;', 'if(cancelled||!isOnline)return;', 1)
+          p.write_text(s,encoding='utf-8')
+          PY
       - name: Instalar dependências
         run: npm ci --include=dev
       - name: Validar TypeScript do Entregador
@@ -45,6 +58,8 @@ jobs:
               raise SystemExit('Mapa nao usa localizacao do entregador como centro inicial.')
           if 'Location.getCurrentPositionAsync' not in app:
               raise SystemExit('GPS inicial nao foi configurado.')
+          if 'const driverId=driver.id;' not in app:
+              raise SystemExit('Captura segura do driverId nao foi aplicada.')
           print('Validacao da Home do entregador concluida.')
           PY
       - name: Commit e push
