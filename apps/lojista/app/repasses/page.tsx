@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 type Payout={id:string;amount:number;gross_amount?:number;anticipation?:boolean;anticipation_fee?:number;anticipation_days?:number;method:string;status:string;destination_value:string|null;review_notes:string|null;requested_at:string;processed_at:string|null;automatic_payout?:boolean};
-type Anticipation={availableGross:number;fee:number;net:number;maxDays:number;minRateMonthly:number;maxRateMonthly:number;details:any[]};
+type Anticipation={availableGross:number;fee:number;net:number;maxDays:number;minRateMonthly:number;maxRateMonthly:number;requestedGross?:number;details:any[]};
 type PixType="CPF"|"CNPJ"|"EMAIL"|"PHONE"|"RANDOM";
 const brl=(v:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v||0);
 const dt=(v:string|null)=>v?new Date(v).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}):"-";
