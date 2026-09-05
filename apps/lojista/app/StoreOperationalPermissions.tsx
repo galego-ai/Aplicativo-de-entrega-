@@ -1,0 +1,20 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabase";
+
+type Methods={cash:boolean;pix:boolean;creditCardOnline:boolean;cardOnDelivery:boolean;debitCardOnDelivery:boolean};
+type DeliveryAllowed={pickup:boolean;own:boolean;clickfood:boolean};
+const emptyMethods:Methods={cash:false,pix:false,creditCardOnline:false,cardOnDelivery:false,debitCardOnDelivery:false};
+
+export default function StoreOperationalPermissions({storeId,canManage}:{storeId:string;canManage:boolean}){
+ const[loading,setLoading]=useState(true);const[allowed,setAllowed]=useState<Methods>(emptyMethods);const[enabled,setEnabled]=useState<Methods>(emptyMethods);const[delivery,setDelivery]=useState<DeliveryAllowed>({pickup:false,own:false,clickfood:false});const[msg,setMsg]=useState("");const[saving,setSaving]=useState(false);
+ async function load(){setLoading(true);const[p,d]=await Promise.all([supabase.functions.invoke("store-payment-settings-action",{body:{action:"READ",storeId}}),supabase.from("store_delivery_permissions").select("pickup_allowed,own_delivery_allowed,clickfood_delivery_allowed").eq("store_id",storeId).maybeSingle()]);if(!p.error&&!p.data?.error){setAllowed(p.data.allowed??emptyMethods);setEnabled(p.data.enabled??emptyMethods);}if(d.data)setDelivery({pickup:Boolean(d.data.pickup_allowed),own:Boolean(d.data.own_delivery_allowed),clickfood:Boolean(d.data.clickfood_delivery_allowed)});setLoading(false);}
+ useEffect(()=>{void load();},[storeId]);
+ function toggle(key:keyof Methods){if(!canManage||!allowed[key])return;setEnabled(v=>({...v,[key]:!v[key]}));}
+ async function save(){setSaving(true);setMsg("");const{data,error}=await supabase.functions.invoke("store-payment-settings-action",{body:{action:"UPDATE",storeId,methods:enabled}});setSaving(false);if(error||data?.error){setMsg(data?.error==="PAYMENT_METHOD_NOT_RELEASED_BY_MATRIX"?"A Matriz não liberou uma das formas selecionadas.":"Não foi possível salvar as formas de pagamento.");return;}setMsg("Formas de pagamento atualizadas.");await load();}
+ const pay:Array<[keyof Methods,string]>=[["pix","PIX"],["creditCardOnline","Cartão online"],["cash","Dinheiro"],["cardOnDelivery","Crédito na entrega"],["debitCardOnDelivery","Débito na entrega"]];
+ if(loading)return <section className="mgCard"><b>Carregando liberações da Matriz...</b></section>;
+ return <section className="mgCard" style={{marginBottom:16}}><small style={{fontWeight:900,color:"#8b7000"}}>LIBERAÇÕES DA MATRIZ</small><h2 style={{margin:"6px 0"}}>Entrega e pagamentos permitidos</h2><p style={{color:"#666",lineHeight:1.5}}>A loja só escolhe entre opções previamente liberadas pela Matriz. Configuração de entregadores CLICK-FOOD permanece exclusiva da Matriz.</p><div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"12px 0"}}><b style={badge(delivery.clickfood)}>CLICK-FOOD {delivery.clickfood?"LIBERADO":"BLOQUEADO"}</b><b style={badge(delivery.own)}>ENTREGA PRÓPRIA {delivery.own?"LIBERADA":"BLOQUEADA"}</b><b style={badge(delivery.pickup)}>RETIRADA {delivery.pickup?"LIBERADA":"BLOQUEADA"}</b></div><h3>Formas de pagamento</h3><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8}}>{pay.map(([key,label])=><label key={key} style={{display:"flex",gap:8,alignItems:"center",padding:10,border:"1px solid #ddd",borderRadius:10,opacity:allowed[key]?1:.45}}><input type="checkbox" disabled={!canManage||!allowed[key]} checked={enabled[key]&&allowed[key]} onChange={()=>toggle(key)}/><span><b>{label}</b><br/><small>{allowed[key]?"Liberado pela Matriz":"Não liberado"}</small></span></label>)}</div>{msg&&<div className="setupMessage" style={{marginTop:10}}>{msg}</div>}<button className="setupPrimary" disabled={!canManage||saving} onClick={()=>void save()} style={{marginTop:12}}>{saving?"SALVANDO...":"SALVAR PAGAMENTOS"}</button>{delivery.own&&<p style={{marginTop:12}}><a href="/entregadores">Configurar entregadores da entrega própria →</a></p>}</section>;
+}
+function badge(ok:boolean):React.CSSProperties{return{padding:"7px 9px",borderRadius:999,fontSize:10,background:ok?"#dff6e8":"#ffe4e1",color:ok?"#176a3a":"#9f251b"}}
