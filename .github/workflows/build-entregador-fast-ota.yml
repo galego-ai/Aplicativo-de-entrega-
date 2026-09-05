@@ -187,4 +187,4 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-# rebuild prioritizado: chamadas + capacete + icones maiores + bolinha nativa + online/offline
+# rebuild 20260904: moto + ganhos do dia + olho simples + status verde/vermelho + avaliações anônimas
