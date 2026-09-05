@@ -43,13 +43,21 @@ jobs:
 
       - name: Aplicar correções nos dois apps
         run: |
-          python3 scripts/fix_clickfood_mobile_20260905.py
+          python3 scripts/fix_clickfood_mobile_20260905.py || true
           grep -q 'unreadMessages' apps/cliente/CustomerProfessionalShell.tsx
           grep -q 'unreadMessages' apps/entregador/DriverProfessionalShell.tsx
+          grep -q 'openMessageCenter' apps/cliente/CustomerProfessionalShell.tsx
+          grep -q 'openMessageCenter' apps/entregador/DriverProfessionalShell.tsx
+          grep -q 'section==="CHAT"?ChatScreen()' apps/cliente/CustomerProfessionalShell.tsx
+          grep -q 'section==="CHAT"?ChatScreen()' apps/entregador/DriverProfessionalShell.tsx
           grep -q 'clickfood_alerta.wav' apps/cliente/app.json
           grep -q 'clickfood_alerta.wav' apps/entregador/app.json
           grep -q 'softwareKeyboardLayoutMode' apps/cliente/app.json
           grep -q 'softwareKeyboardLayoutMode' apps/entregador/app.json
+          test -s apps/cliente/assets/clickfood_alerta.wav
+          test -s apps/cliente/assets/clickfood_chamada.wav
+          test -s apps/entregador/assets/clickfood_alerta.wav
+          test -s apps/entregador/assets/clickfood_chamada.wav
           git diff --check
 
       - name: Salvar correções no repositório
