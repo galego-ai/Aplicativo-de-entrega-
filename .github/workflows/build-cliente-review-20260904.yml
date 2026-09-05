@@ -59,6 +59,9 @@ jobs:
           grep -q 'customer-review-submit' CustomerDetailedReview.tsx
           grep -q 'temperature' CustomerDetailedReview.tsx
           grep -q 'taste' CustomerDetailedReview.tsx
+          grep -q 'deliveryCodeStatuses' App.tsx
+          grep -q 'GERAR CÓDIGO AGORA' App.tsx
+          grep -q 'DRIVER_TO_CUSTOMER' App.tsx
           npx --yes eas-cli@latest whoami >/dev/null
           npx --yes eas-cli@latest project:info --non-interactive
       - name: Compilar APK Cliente
@@ -85,3 +88,5 @@ jobs:
           path: artifacts/CLICK-FOOD-Cliente-Avaliacao-Detalhada.apk
           if-no-files-found: error
           retention-days: 30
+
+# rebuild 2026-09-05: código de entrega corrigido
