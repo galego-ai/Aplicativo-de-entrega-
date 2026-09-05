@@ -1,0 +1,34 @@
+name: CLICK-FOOD Alinhar Efí PIX mTLS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-clickfood-efi-mtls-source-20260905.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Aplicar padrão mTLS Efí
+        run: |
+          python3 scripts/fix_clickfood_efi_mtls_20260905.py
+          grep -R -q 'certChain' supabase/functions/efi-pix-create/index.ts
+          grep -R -q 'privateKey' supabase/functions/efi-pix-create/index.ts
+          git diff --check
+      - name: Salvar correção
+        run: |
+          git config user.name 'clickfood-bot'
+          git config user.email 'clickfood-bot@users.noreply.github.com'
+          git add supabase/functions/efi-pix-*/index.ts
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(efi): usar certChain e privateKey no PIX'
+            git push origin HEAD:main
+          fi
