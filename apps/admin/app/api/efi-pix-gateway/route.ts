@@ -15,7 +15,7 @@ type GatewayBody = {
   clientId?: string;
   clientSecret?: string;
   pixKey?: string;
-  operation?: "AUTH_CHECK"|"CREATE"|"STATUS"|"CANCEL"|"REFUND_PUT"|"REFUND_GET"|"WEBHOOK_SETUP"|"SEND"|"SEND_STATUS";
+  operation?: "AUTH_CHECK"|"CREATE"|"STATUS"|"CANCEL"|"REFUND_PUT"|"REFUND_GET"|"WEBHOOK_SETUP"|"WEBHOOK_GET"|"SEND"|"SEND_STATUS";
   data?: Record<string, unknown>;
 };
 
@@ -41,7 +41,7 @@ function requestJson(input:{p12:Buffer;path:string;method:string;headers?:Record
       headers:{
         Accept:"application/json",
         "Content-Type":"application/json",
-        "User-Agent":"CLICK-FOOD-EfiGateway/1.0",
+        "User-Agent":"CLICK-FOOD-EfiGateway/1.1",
         ...(input.headers??{}),
         ...(payload?{"Content-Length":Buffer.byteLength(payload).toString()}:{}),
       },
@@ -65,13 +65,11 @@ function requestJson(input:{p12:Buffer;path:string;method:string;headers?:Record
 async function accessToken(p12:Buffer,clientId:string,clientSecret:string){
   const basic=Buffer.from(`${clientId}:${clientSecret}`,"utf8").toString("base64");
   const result=await requestJson({p12,path:"/oauth/token",method:"POST",headers:{Authorization:`Basic ${basic}`},body:{grant_type:"client_credentials"}});
-  if(!result.ok||!result.data?.access_token)return {ok:false,status:result.status,token:null};
-  return {ok:true,status:result.status,token:String(result.data.access_token)};
+  if(!result.ok||!result.data?.access_token)return {ok:false,status:result.status,token:null,scope:""};
+  return {ok:true,status:result.status,token:String(result.data.access_token),scope:String(result.data?.scope??"")};
 }
 
-function safeProvider(result:{status:number;ok:boolean;data:any}){
-  return {ok:result.ok,providerStatus:result.status,data:result.data};
-}
+function safeProvider(result:{status:number;ok:boolean;data:any}){return {ok:result.ok,providerStatus:result.status,data:result.data};}
 
 export async function POST(req:Request){
   try{
@@ -89,7 +87,7 @@ export async function POST(req:Request){
 
     const auth=await accessToken(p12,clientId,clientSecret);
     if(!auth.ok||!auth.token)return NextResponse.json({ok:false,error:"EFI_AUTH_FAILED",providerStatus:auth.status},{status:502});
-    if(body.operation==="AUTH_CHECK")return NextResponse.json({ok:true,authenticated:true,providerStatus:auth.status});
+    if(body.operation==="AUTH_CHECK")return NextResponse.json({ok:true,authenticated:true,providerStatus:auth.status,scope:auth.scope.split(/\s+/).filter(Boolean)});
 
     const token=auth.token;
     const headers={Authorization:`Bearer ${token}`};
@@ -134,6 +132,12 @@ export async function POST(req:Request){
       const webhookUrl=String(data.webhookUrl??"");
       if(!pixKey||!webhookUrl.startsWith("https://"))return NextResponse.json({ok:false,error:"WEBHOOK_INPUT_INVALID"},{status:400});
       const result=await requestJson({p12,path:`/v2/webhook/${encodeURIComponent(pixKey)}`,method:"PUT",headers:{...headers,"x-skip-mtls-checking":"true"},body:{webhookUrl}});
+      return NextResponse.json(safeProvider(result),{status:result.ok?200:502});
+    }
+
+    if(body.operation==="WEBHOOK_GET"){
+      if(!pixKey)return NextResponse.json({ok:false,error:"PIX_KEY_REQUIRED"},{status:400});
+      const result=await requestJson({p12,path:`/v2/webhook/${encodeURIComponent(pixKey)}`,method:"GET",headers});
       return NextResponse.json(safeProvider(result),{status:result.ok?200:502});
     }
 
