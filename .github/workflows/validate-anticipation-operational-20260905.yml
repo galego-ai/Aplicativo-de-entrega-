@@ -1,0 +1,40 @@
+name: CLICK-FOOD Validar Antecipacao Operacional
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/fix_anticipation_type_20260905.py'
+      - '.github/workflows/validate-anticipation-operational-20260905.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Corrigir tipo da previa
+        run: python scripts/fix_anticipation_type_20260905.py
+      - name: Instalar dependencias
+        run: npm install --ignore-scripts
+      - name: Build Matriz
+        run: npm run build:admin
+      - name: Build Lojista
+        run: npm run build:lojista
+      - name: Type-check Entregador
+        run: npx tsc --noEmit -p apps/entregador/tsconfig.json
+      - name: Salvar correcao
+        run: |
+          git config user.name clickfood-bot
+          git config user.email clickfood-bot@users.noreply.github.com
+          git add apps/lojista/app/repasses/page.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix(financeiro): validar previa de antecipacao'
+          git push origin main
