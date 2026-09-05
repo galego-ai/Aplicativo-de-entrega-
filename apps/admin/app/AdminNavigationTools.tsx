@@ -15,7 +15,7 @@ const operationLinks = [
   ["Catálogos", "/catalogos"],
   ["Documentos dos entregadores", "/documentos-entregadores"],
 ] as const;
-const financeLinks = [["Relatórios", "/relatorios"],["Cobrança", "/cobranca"],["Pagamentos", "/pagamentos"],["Repasses", "/repasses"]] as const;
+const financeLinks = [["Relatórios", "/relatorios"],["Cobrança", "/cobranca"],["Pagamentos", "/pagamentos"],["Regras de Divisão", "/regras-divisao"],["Repasses", "/repasses"]] as const;
 const communicationLinks = [["Marketing", "/marketing"],["Notificações", "/notificacoes"],["Suporte", "/suporte"]] as const;
 const adminLinks = [["Usuários", "/usuarios"],["Termos & Privacidade", "/legal"]] as const;
 const RECOVERY_URL = "https://rmlbmacoqnynqdqmxecz.supabase.co/functions/v1/password-recovery";
