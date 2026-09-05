@@ -1,0 +1,34 @@
+name: CLICK-FOOD Aplicar Antecipacao Operacional
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/patch_anticipation_operational_20260905.py'
+      - '.github/workflows/apply-anticipation-operational-20260905.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Aplicar patch de antecipacao
+        run: python scripts/patch_anticipation_operational_20260905.py
+      - name: Validar alteracoes
+        run: |
+          grep -q 'settlementDelayDays' apps/admin/app/regras-divisao/page.tsx
+          grep -q 'REQUEST_ANTICIPATION' apps/lojista/app/repasses/page.tsx
+          grep -q 'DRIVER_ANTICIPATE' apps/entregador/DriverWallet.tsx
+          grep -q 'ANTECIPAÇÃO' apps/admin/app/repasses/page.tsx
+      - name: Salvar no main
+        run: |
+          git config user.name clickfood-bot
+          git config user.email clickfood-bot@users.noreply.github.com
+          git add apps/admin/app/regras-divisao/page.tsx apps/admin/app/repasses/page.tsx apps/lojista/app/repasses/page.tsx apps/entregador/DriverWallet.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat(financeiro): antecipacao operacional loja e entregador'
+          git push origin main
