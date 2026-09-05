@@ -1,0 +1,74 @@
+name: CLICK-FOOD Corrigir Codigo Cliente
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-cliente-delivery-code-20260905.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Corrigir fluxo do codigo de entrega
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/cliente/App.tsx')
+          s=p.read_text()
+
+          old='const terminalStatuses=new Set(["DELIVERED","CANCELLED","REJECTED","PAYMENT_FAILED","REFUNDED"]);'
+          new=old+'\nconst deliveryCodeStatuses=new Set(["PICKUP_CONFIRMED","DRIVER_TO_CUSTOMER","DRIVER_AT_CUSTOMER"]);'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='useEffect(()=>{if(!session||tab!=="orders"||tracking?.deliveryStatus!=="DRIVER_AT_CUSTOMER"||!tracking.deliveryId||deliveryCode)return;const deliveryId=tracking.deliveryId;const refresh=()=>void fetchDeliveryCode(deliveryId);void refresh();const timer=setInterval(refresh,4000);return()=>clearInterval(timer);},[session?.user.id,tab,tracking?.deliveryId,tracking?.deliveryStatus,deliveryCode]);'
+          new='useEffect(()=>{if(!session||tab!=="orders"||!tracking?.deliveryId||!deliveryCodeStatuses.has(String(tracking.deliveryStatus??""))||deliveryCode)return;const deliveryId=tracking.deliveryId;const refresh=()=>void fetchDeliveryCode(deliveryId);void refresh();const timer=setInterval(refresh,4000);return()=>clearInterval(timer);},[session?.user.id,tab,tracking?.deliveryId,tracking?.deliveryStatus,deliveryCode]);'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='''  async function fetchDeliveryCode(deliveryId:string){\n    setDeliveryCodeBusy(true);\n    const codeResult=await supabase.functions.invoke("delivery-code",{body:{deliveryId,kind:"DELIVERY"}});\n    setDeliveryCodeBusy(false);\n    if(!codeResult.error&&!codeResult.data?.error&&/^\\d{4}$/.test(String(codeResult.data?.code??""))){\n      setDeliveryCode(String(codeResult.data.code));\n      return true;\n    }\n    setDeliveryCode(null);\n    return false;\n  }'''
+          new='''  async function fetchDeliveryCode(deliveryId:string){\n    setDeliveryCodeBusy(true);\n    const codeResult=await supabase.functions.invoke("delivery-code",{body:{deliveryId,kind:"DELIVERY"}});\n    setDeliveryCodeBusy(false);\n    if(!codeResult.error&&!codeResult.data?.error&&/^\\d{4}$/.test(String(codeResult.data?.code??""))){\n      setDeliveryCode(String(codeResult.data.code));\n      return true;\n    }\n    setDeliveryCode(null);\n    const errorCode=String(codeResult.data?.error??"");\n    if(errorCode==="DELIVERY_CODE_NOT_AVAILABLE")setMessage("O código será liberado automaticamente assim que o pedido sair da loja.");\n    else setMessage("Não foi possível gerar o código de entrega. Toque em Atualizar e tente novamente.");\n    return false;\n  }'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='''    setTracking({orderId:activeOrder.id,deliveryId:delivery.id,deliveryStatus:delivery.status,driverId:delivery.driver_id,driverLat,driverLng,storeLat:relation?.latitude==null?null:Number(relation.latitude),storeLng:relation?.longitude==null?null:Number(relation.longitude),destinationLat,destinationLng});\n    if(String(delivery.status)==="DRIVER_AT_CUSTOMER"){\n      await fetchDeliveryCode(String(delivery.id));\n    }else{setDeliveryCode(null);setDeliveryCodeBusy(false);}'''
+          new='''    setTracking({orderId:activeOrder.id,deliveryId:delivery.id,deliveryStatus:delivery.status,driverId:delivery.driver_id,driverLat,driverLng,storeLat:relation?.latitude==null?null:Number(relation.latitude),storeLng:relation?.longitude==null?null:Number(relation.longitude),destinationLat,destinationLng});\n    if(deliveryCodeStatuses.has(String(delivery.status))){\n      await fetchDeliveryCode(String(delivery.id));\n    }else{setDeliveryCode(null);setDeliveryCodeBusy(false);}'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='tracking.deliveryStatus==="DRIVER_AT_CUSTOMER"&&!deliveryCode&&!deliveryCodeBusy'
+          new='deliveryCodeStatuses.has(String(tracking.deliveryStatus))&&!deliveryCode&&!deliveryCodeBusy'
+          assert old in s
+          s=s.replace(old,new,1)
+
+          p.write_text(s)
+          PY
+      - name: Validar cliente
+        run: |
+          npm ci --include=dev
+          cd apps/cliente
+          npx tsc --noEmit
+          grep -q 'deliveryCodeStatuses' App.tsx
+          grep -q 'PICKUP_CONFIRMED' App.tsx
+          grep -q 'GERAR CÓDIGO AGORA' App.tsx
+      - name: Commitar correção
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/cliente/App.tsx
+          git commit -m 'fix(cliente): gerar código durante etapa final da entrega'
+          git push
