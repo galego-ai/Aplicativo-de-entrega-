@@ -4,7 +4,7 @@ const required=(name:string)=>{const v=Deno.env.get(name)?.trim();if(!v)throw ne
 const baseUrl=()=>Deno.env.get("EFI_PIX_SANDBOX")==="false"?"https://pix.api.efipay.com.br":"https://pix-h.api.efipay.com.br";
 function decodeB64(name:string){const value=Deno.env.get(name)?.trim();if(!value)return null;try{const binary=atob(value);const bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));return new TextDecoder().decode(bytes);}catch{throw new Error(`INVALID_SECRET_${name}`);}}
 function tlsSecret(pemName:string,b64Name:string){return decodeB64(b64Name)??required(pemName);}
-function httpClient(){return Deno.createHttpClient({cert:tlsSecret("EFI_PIX_CERT_PEM","EFI_PIX_CERT_B64"),key:tlsSecret("EFI_PIX_KEY_PEM","EFI_PIX_KEY_B64")});}
+function httpClient(){return Deno.createHttpClient({certChain:tlsSecret("EFI_PIX_CERT_PEM","EFI_PIX_CERT_B64"),privateKey:tlsSecret("EFI_PIX_KEY_PEM","EFI_PIX_KEY_B64")});}
 async function token(client:Deno.HttpClient){const id=required("EFI_PIX_CLIENT_ID"),secret=required("EFI_PIX_CLIENT_SECRET");const res=await fetch(`${baseUrl()}/oauth/token`,{method:"POST",headers:{Authorization:`Basic ${btoa(`${id}:${secret}`)}`,"Content-Type":"application/json"},body:JSON.stringify({grant_type:"client_credentials"}),client} as any);let data:any={};try{data=await res.json();}catch{}if(!res.ok||!data.access_token)throw new Error(`EFI_OAUTH_${res.status}`);return String(data.access_token);}
 
 export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{

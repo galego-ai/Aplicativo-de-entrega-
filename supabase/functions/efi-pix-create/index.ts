@@ -18,7 +18,7 @@ function httpClient(){
   const cert=tlsSecret("EFI_PIX_CERT_PEM","EFI_PIX_CERT_B64");
   const key=tlsSecret("EFI_PIX_KEY_PEM","EFI_PIX_KEY_B64");
   if(!cert.includes("BEGIN CERTIFICATE")||!key.includes("PRIVATE KEY"))throw new Error("EFI_MTLS_INVALID");
-  try{return Deno.createHttpClient({cert,key});}catch{throw new Error("EFI_MTLS_INVALID");}
+  try{return Deno.createHttpClient({certChain:cert,privateKey:key});}catch{throw new Error("EFI_MTLS_INVALID");}
 }
 
 async function token(client:Deno.HttpClient){

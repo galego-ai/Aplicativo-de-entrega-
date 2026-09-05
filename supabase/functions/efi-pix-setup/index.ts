@@ -27,7 +27,7 @@ function tlsMaterial(){
 
 function httpClient(){
   const {cert,key}=tlsMaterial();
-  try{return Deno.createHttpClient({cert,key});}
+  try{return Deno.createHttpClient({certChain:cert,privateKey:key});}
   catch{throw new Error("EFI_MTLS_PAIR_INVALID");}
 }
 
