@@ -1,0 +1,110 @@
+name: CLICK-FOOD Entregador Chat Teclado Sons
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-entregador-chat-sounds-20260905.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: click-food-entregador-chat-sounds-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_NO_TELEMETRY: '1'
+      NODE_ENV: production
+      JAVA_TOOL_OPTIONS: '-Xmx3g -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Validar Entregador
+        run: |
+          npm ci --include=dev
+          cd apps/entregador
+          npx tsc --noEmit
+          grep -q 'unreadMessages' DriverProfessionalShell.tsx
+          grep -q 'openMessageCenter' DriverProfessionalShell.tsx
+          grep -q 'clickfood_alerta.wav' app.json
+          grep -q 'clickfood_chamada.wav' app.json
+          grep -q 'softwareKeyboardLayoutMode' app.json
+          test -s assets/clickfood_alerta.wav
+          test -s assets/clickfood_chamada.wav
+          npx --yes eas-cli@latest whoami >/dev/null
+          npx --yes eas-cli@latest project:info --non-interactive
+      - name: Recuperar Google Maps real
+        working-directory: apps/entregador
+        run: |
+          set -euo pipefail
+          if [ -n "${GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then exit 0; fi
+          TMP="$RUNNER_TEMP/maps-entregador"; mkdir -p "$TMP"
+          npx --yes eas-cli@latest build:list --platform android --status finished --limit 10 --non-interactive --json > "$TMP/builds.json"
+          mapfile -t URLS < <(jq -r '.[] | (.artifacts.applicationArchiveUrl // .artifacts.buildUrl // empty)' "$TMP/builds.json")
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"; APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"; fi
+          test -n "$APKANALYZER"
+          KEY=''; INDEX=0
+          for URL in "${URLS[@]}"; do
+            INDEX=$((INDEX+1)); PRIOR="$TMP/$INDEX.apk"
+            curl --fail --silent --show-error --location --retry 2 "$URL" -o "$PRIOR" || continue
+            unzip -tq "$PRIOR" >/dev/null 2>&1 || continue
+            "$APKANALYZER" manifest print "$PRIOR" > "$TMP/$INDEX.xml"
+            CANDIDATE="$(perl -0777 -ne 'if(/<meta-data\b(?=[^>]*com\.google\.android\.geo\.API_KEY)[^>]*android:value="([^"]+)"/s){print $1}' "$TMP/$INDEX.xml")"
+            if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' ]; then KEY="$CANDIDATE"; break; fi
+          done
+          test -n "$KEY"
+          echo "::add-mask::$KEY"
+          echo "GOOGLE_MAPS_API_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "GOOGLE_MAPS_ANDROID_API_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY=$KEY" >> "$GITHUB_ENV"
+      - name: Configurar Gradle
+        run: |
+          mkdir -p "$HOME/.gradle"
+          cat > "$HOME/.gradle/gradle.properties" <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8
+          org.gradle.workers.max=2
+          org.gradle.parallel=false
+          org.gradle.daemon=false
+          kotlin.compiler.execution.strategy=in-process
+          EOF
+      - name: Compilar APK Entregador
+        working-directory: apps/entregador
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/apk-entregador"
+          mkdir -p "$OUT" "$GITHUB_WORKSPACE/artifacts"
+          export EAS_LOCAL_BUILD_ARTIFACTS_DIR="$OUT"
+          export EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          npx --yes eas-cli@latest build --platform android --profile preview --local --non-interactive
+          APK="$(find "$OUT" -type f -name '*.apk' | head -n 1 || true)"
+          test -n "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-Chat-Sons.apk"
+          test -s "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-Chat-Sons.apk"
+          unzip -tq "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-Chat-Sons.apk" >/dev/null
+          sha256sum "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-Chat-Sons.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CLICK-FOOD-Entregador-Chat-Sons-20260905
+          path: artifacts/CLICK-FOOD-Entregador-Chat-Sons.apk
+          retention-days: 30
