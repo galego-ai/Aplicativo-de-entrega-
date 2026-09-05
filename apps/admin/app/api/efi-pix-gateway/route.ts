@@ -5,7 +5,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPECTED_TOKEN_HASH = "6b594f5fd20b4cc9590ffb9b9671d17b1823ff349eaa8bac170d06f22b153ab5";
+const EXPECTED_TOKEN_HASH = "8b331573ba58225855686be43939ea3d8243a3bcac8e3d7d9073066427bf27ed";
 const EXPECTED_P12_HASH = "1338c49c1ff55bbbd8fcd03141efded58fabf7611f526649a465efe45dee277f";
 const EFI_BASE = "https://pix.api.efipay.com.br";
 
@@ -15,7 +15,7 @@ type GatewayBody = {
   clientId?: string;
   clientSecret?: string;
   pixKey?: string;
-  operation?: "AUTH_CHECK"|"CREATE"|"STATUS"|"CANCEL"|"REFUND_PUT"|"REFUND_GET"|"WEBHOOK_SETUP";
+  operation?: "AUTH_CHECK"|"CREATE"|"STATUS"|"CANCEL"|"REFUND_PUT"|"REFUND_GET"|"WEBHOOK_SETUP"|"SEND"|"SEND_STATUS";
   data?: Record<string, unknown>;
 };
 
@@ -134,6 +134,23 @@ export async function POST(req:Request){
       const webhookUrl=String(data.webhookUrl??"");
       if(!pixKey||!webhookUrl.startsWith("https://"))return NextResponse.json({ok:false,error:"WEBHOOK_INPUT_INVALID"},{status:400});
       const result=await requestJson({p12,path:`/v2/webhook/${encodeURIComponent(pixKey)}`,method:"PUT",headers:{...headers,"x-skip-mtls-checking":"true"},body:{webhookUrl}});
+      return NextResponse.json(safeProvider(result),{status:result.ok?200:502});
+    }
+
+    if(body.operation==="SEND"){
+      const idEnvio=String(data.idEnvio??"").trim();
+      const destinationKey=String(data.destinationKey??"").trim();
+      const amount=Number(data.amount??0);
+      const description=String(data.description??"Repasse CLICK-FOOD").slice(0,140);
+      if(!idEnvio||!destinationKey||!pixKey||!Number.isFinite(amount)||amount<=0)return NextResponse.json({ok:false,error:"INVALID_SEND_INPUT"},{status:400});
+      const result=await requestJson({p12,path:`/v3/gn/pix/${encodeURIComponent(idEnvio)}`,method:"PUT",headers,body:{valor:amount.toFixed(2),pagador:{chave:pixKey,infoPagador:description},favorecido:{chave:destinationKey}}});
+      return NextResponse.json(safeProvider(result),{status:result.ok?200:502});
+    }
+
+    if(body.operation==="SEND_STATUS"){
+      const idEnvio=String(data.idEnvio??"").trim();
+      if(!idEnvio)return NextResponse.json({ok:false,error:"SEND_ID_REQUIRED"},{status:400});
+      const result=await requestJson({p12,path:`/v2/gn/pix/enviados/id-envio/${encodeURIComponent(idEnvio)}`,method:"GET",headers});
       return NextResponse.json(safeProvider(result),{status:result.ok?200:502});
     }
 
