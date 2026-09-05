@@ -1,0 +1,99 @@
+name: Apply Chat Safe Area Both Apps 20260905
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-chat-safearea-both-apps-20260905.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Corrigir chat Cliente e Entregador
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          integrated = [
+              Path('apps/cliente/CustomerProfessionalShell.tsx'),
+              Path('apps/entregador/DriverProfessionalShell.tsx'),
+          ]
+
+          for path in integrated:
+              s = path.read_text()
+              old = 'behavior={Platform.OS==="ios"?"padding":undefined} keyboardVerticalOffset={0}'
+              new = 'behavior={Platform.OS==="ios"?"padding":"height"} keyboardVerticalOffset={Platform.OS==="android"?8:0}'
+              assert old in s, f'KeyboardAvoidingView do chat não encontrado em {path}'
+              s = s.replace(old, new, 1)
+
+              old = 'multiline maxLength={2000}/><Pressable style={[styles.sendButton'
+              new = 'multiline maxLength={2000} blurOnSubmit={false} onFocus={()=>setTimeout(()=>chatScroll.current?.scrollToEnd({animated:true}),80)}/><Pressable style={[styles.sendButton'
+              assert old in s, f'TextInput integrado não encontrado em {path}'
+              s = s.replace(old, new, 1)
+
+              old = 'composer:{paddingHorizontal:10,paddingTop:9,paddingBottom:Platform.OS==="android"?8:12,flexDirection:"row",alignItems:"flex-end",gap:8,borderTopWidth:1,borderTopColor:"#ddd",backgroundColor:"#fff"}'
+              new = 'composer:{paddingHorizontal:10,paddingTop:10,paddingBottom:Platform.OS==="android"?38:14,flexDirection:"row",alignItems:"flex-end",gap:8,borderTopWidth:1,borderTopColor:"#ddd",backgroundColor:"#fff",elevation:8,shadowColor:"#000",shadowOpacity:.08,shadowRadius:5}'
+              assert old in s, f'Estilo composer integrado não encontrado em {path}'
+              s = s.replace(old, new, 1)
+
+              path.write_text(s)
+
+          standalone = [
+              Path('apps/cliente/OrderChatHost.tsx'),
+              Path('apps/entregador/OrderChatHost.tsx'),
+          ]
+
+          for path in standalone:
+              s = path.read_text()
+              old = 'behavior={Platform.OS==="ios"?"padding":undefined}'
+              new = 'behavior={Platform.OS==="ios"?"padding":"height"}'
+              assert old in s, f'KeyboardAvoidingView auxiliar não encontrado em {path}'
+              s = s.replace(old, new, 1)
+
+              old = 'multiline maxLength={2000}/><Pressable style={[styles.send,'
+              new = 'multiline maxLength={2000} blurOnSubmit={false} onFocus={()=>setTimeout(()=>scroll.current?.scrollToEnd({animated:true}),80)}/><Pressable style={[styles.send,'
+              assert old in s, f'TextInput auxiliar não encontrado em {path}'
+              s = s.replace(old, new, 1)
+
+              old = 'composer:{padding:10,flexDirection:"row",alignItems:"flex-end",gap:8,borderTopWidth:1,borderColor:"#ddd",backgroundColor:"#fff"}'
+              new = 'composer:{paddingHorizontal:10,paddingTop:10,paddingBottom:Platform.OS==="android"?38:14,flexDirection:"row",alignItems:"flex-end",gap:8,borderTopWidth:1,borderColor:"#ddd",backgroundColor:"#fff",elevation:8,shadowColor:"#000",shadowOpacity:.08,shadowRadius:5}'
+              assert old in s, f'Estilo composer auxiliar não encontrado em {path}'
+              s = s.replace(old, new, 1)
+
+              old = '<ScrollView ref={scroll} style={styles.messages} contentContainerStyle={{padding:14,gap:8}}>'
+              new = '<ScrollView ref={scroll} style={styles.messages} contentContainerStyle={{padding:14,gap:8}} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS==="ios"?"interactive":"on-drag"}>'
+              assert old in s, f'ScrollView auxiliar não encontrado em {path}'
+              s = s.replace(old, new, 1)
+
+              path.write_text(s)
+
+          print('Chat corrigido em Cliente e Entregador, integrado e auxiliar.')
+          PY
+      - name: Instalar dependências
+        run: npm ci --include=dev
+      - name: Validar Cliente
+        working-directory: apps/cliente
+        run: npx tsc --noEmit
+      - name: Validar Entregador
+        working-directory: apps/entregador
+        run: npx tsc --noEmit
+      - name: Commit da correção
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/cliente/CustomerProfessionalShell.tsx apps/cliente/OrderChatHost.tsx apps/entregador/DriverProfessionalShell.tsx apps/entregador/OrderChatHost.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "fix(chat): manter campo acima do teclado e barra Android"
+          git push
