@@ -1,0 +1,270 @@
+name: CLICK-FOOD Corrigir Teclado Chat Sons e Pagamentos
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-mobile-input-chat-sounds-payments-20260905.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: click-food-mobile-fix-20260905-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_NO_TELEMETRY: '1'
+      NODE_ENV: production
+      JAVA_TOOL_OPTIONS: '-Xmx3g -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Aplicar correcoes nos dois apps
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import json, math, struct, wave
+
+          def must(text, old, new, label, count=1):
+              if old not in text:
+                  raise SystemExit(f'Padrao nao encontrado: {label}')
+              return text.replace(old, new, count)
+
+          def patch_shell(path, kind):
+              p=Path(path); t=p.read_text()
+              old='Notifications.setNotificationHandler({handleNotification:async()=>({shouldPlaySound:true,shouldSetBadge:true,shouldShowBanner:true,shouldShowList:true})});'
+              new='Notifications.setNotificationHandler({handleNotification:async(notification)=>{const type=String(notification.request.content.data?.notificationType??"");if(type==="CHAT_MESSAGE")return{shouldPlaySound:true,shouldSetBadge:false,shouldShowBanner:false,shouldShowList:false};return{shouldPlaySound:true,shouldSetBadge:true,shouldShowBanner:true,shouldShowList:true};}});'
+              t=must(t,old,new,f'{kind} handler')
+              old=' const unread=useMemo(()=>notifications.filter(item=>!item.read_at).length,[notifications]);'
+              if kind=='driver':
+                  old=' const unread=useMemo(()=>notifications.filter(item=>!item.read_at).length,[notifications]);const totalEarnings='
+                  new=' const unreadMessages=useMemo(()=>notifications.filter(item=>item.notification_type==="CHAT_MESSAGE"&&!item.read_at).length,[notifications]);const unread=useMemo(()=>notifications.filter(item=>item.notification_type!=="CHAT_MESSAGE"&&!item.read_at).length,[notifications]);const alertNotifications=useMemo(()=>notifications.filter(item=>item.notification_type!=="CHAT_MESSAGE"),[notifications]);const totalEarnings='
+              else:
+                  new=' const unreadMessages=useMemo(()=>notifications.filter(item=>item.notification_type==="CHAT_MESSAGE"&&!item.read_at).length,[notifications]);const unread=useMemo(()=>notifications.filter(item=>item.notification_type!=="CHAT_MESSAGE"&&!item.read_at).length,[notifications]);const alertNotifications=useMemo(()=>notifications.filter(item=>item.notification_type!=="CHAT_MESSAGE"),[notifications]);'
+              t=must(t,old,new,f'{kind} unread')
+              t=t.replace('if(!usefulDriverNotification(row))return;','if(row.notification_type!=="CHAT_MESSAGE"&&!usefulDriverNotification(row))return;')
+              t=t.replace('if(!usefulCustomerNotification(row))return;','if(row.notification_type!=="CHAT_MESSAGE"&&!usefulCustomerNotification(row))return;')
+              if kind=='driver':
+                  old='const rows=((data??[]) as NotificationRow[]).filter(item=>usefulDriverNotification(item)&&(!cutoff||new Date(item.created_at).getTime()>new Date(cutoff).getTime()));'
+                  new='const rows=((data??[]) as NotificationRow[]).filter(item=>item.notification_type==="CHAT_MESSAGE"||(usefulDriverNotification(item)&&(!cutoff||new Date(item.created_at).getTime()>new Date(cutoff).getTime())));'
+              else:
+                  old='const rows=((data??[]) as NotificationRow[]).filter(item=>usefulCustomerNotification(item)&&(!cutoff||new Date(item.created_at).getTime()>new Date(cutoff).getTime()));'
+                  new='const rows=((data??[]) as NotificationRow[]).filter(item=>item.notification_type==="CHAT_MESSAGE"||(usefulCustomerNotification(item)&&(!cutoff||new Date(item.created_at).getTime()>new Date(cutoff).getTime())));'
+              t=must(t,old,new,f'{kind} load notifications')
+              old='async function markAllNotifications(){if(!session||!unread)return;const now=new Date().toISOString();setNotifications(current=>current.map(item=>item.read_at?item:{...item,read_at:now}));await supabase.from("notifications").update({read_at:now}).eq("user_id",session.user.id).is("read_at",null);}'
+              new='async function markAllNotifications(){if(!session||!unread)return;const now=new Date().toISOString();setNotifications(current=>current.map(item=>item.notification_type!=="CHAT_MESSAGE"&&!item.read_at?{...item,read_at:now}:item));await supabase.from("notifications").update({read_at:now}).eq("user_id",session.user.id).neq("notification_type","CHAT_MESSAGE").is("read_at",null);}'
+              t=must(t,old,new,f'{kind} mark alerts')
+              prefix='@clickfood/driver' if kind=='driver' else '@clickfood/customer'
+              old=f'async function clearNotifications(){{if(!session||!notifications.length)return;const now=new Date().toISOString();await AsyncStorage.setItem(`{prefix}/notifications-cleared-${{session.user.id}}`,now);setNotifications([]);try{{await Notifications.setBadgeCountAsync(0);}}catch{{}}}}'
+              new=f'async function clearNotifications(){{if(!session||!alertNotifications.length)return;const now=new Date().toISOString();await AsyncStorage.setItem(`{prefix}/notifications-cleared-${{session.user.id}}`,now);setNotifications(current=>current.filter(item=>item.notification_type==="CHAT_MESSAGE"));try{{await Notifications.setBadgeCountAsync(unreadMessages);}}catch{{}}}}\n async function markChatNotificationsRead(){{if(!session||!unreadMessages)return;const now=new Date().toISOString();setNotifications(current=>current.map(item=>item.notification_type==="CHAT_MESSAGE"&&!item.read_at?{{...item,read_at:now}}:item));await supabase.from("notifications").update({{read_at:now}}).eq("user_id",session.user.id).eq("notification_type","CHAT_MESSAGE").is("read_at",null);}}\n function openMessageCenter(){{setNotificationsOpen(false);setSection("CHAT");void markChatNotificationsRead();}}'
+              t=must(t,old,new,f'{kind} clear/messages')
+              marker=' useEffect(()=>{if(!conversationId)return;'
+              t=must(t,marker,' useEffect(()=>{if(section==="CHAT"&&unreadMessages>0)void markChatNotificationsRead();},[section,unreadMessages]);\n'+marker,f'{kind} chat read effect')
+
+              if kind=='driver':
+                  old='if(Platform.OS==="android"){await Notifications.setNotificationChannelAsync("clickfood-default",{name:"CLICK-FOOD",importance:Notifications.AndroidImportance.DEFAULT,vibrationPattern:[0,180],lightColor:"#F4C400"});await Notifications.setNotificationChannelAsync("clickfood-chamadas",{name:"Chamadas CLICK-FOOD",description:"Novas chamadas de entrega",importance:Notifications.AndroidImportance.MAX,sound:"clickfood_chamada.wav",vibrationPattern:[0,300,120,300,120,450],lightColor:"#F4C400"});}'
+              else:
+                  old='if(Platform.OS==="android")await Notifications.setNotificationChannelAsync("clickfood-default",{name:"CLICK-FOOD",importance:Notifications.AndroidImportance.MAX,vibrationPattern:[0,250,180,250],lightColor:"#F4C400"});'
+              new='if(Platform.OS==="android"){await Notifications.setNotificationChannelAsync("clickfood-alertas",{name:"Alertas e mensagens CLICK-FOOD",description:"Mensagens e atualizações de pedidos",importance:Notifications.AndroidImportance.HIGH,sound:"clickfood_alerta.wav",vibrationPattern:[0,180,90,180],lightColor:"#F4C400"});await Notifications.setNotificationChannelAsync("clickfood-chamadas",{name:"Chamadas CLICK-FOOD",description:"Chamadas e avisos urgentes",importance:Notifications.AndroidImportance.MAX,sound:"clickfood_chamada.wav",vibrationPattern:[0,300,120,300,120,450],lightColor:"#F4C400"});await Notifications.setNotificationChannelAsync("clickfood-default",{name:"CLICK-FOOD",importance:Notifications.AndroidImportance.DEFAULT,sound:"clickfood_alerta.wav",vibrationPattern:[0,180],lightColor:"#F4C400"});}'
+              t=must(t,old,new,f'{kind} channels')
+
+              bell='<Pressable accessibilityLabel={`Notificações. ${unread} não lidas`} style={styles.iconButton} onPress={()=>{setNotificationsOpen(true);void loadNotifications();}}><Text style={styles.bell}>🔔</Text>{unread>0&&<View style={styles.badge}><Text style={styles.badgeText}>{unread>99?"99+":unread}</Text></View>}</Pressable>'
+              top='<View style={styles.topActions}><Pressable accessibilityLabel={`Mensagens. ${unreadMessages} não lidas`} style={styles.iconButton} onPress={openMessageCenter}><Text style={styles.messageIcon}>💬</Text>{unreadMessages>0&&<View style={styles.badge}><Text style={styles.badgeText}>{unreadMessages>99?"99+":unreadMessages}</Text></View>}</Pressable>'+bell+'</View>'
+              t=must(t,bell,top,f'{kind} top message icon')
+
+              if kind=='customer':
+                  old='section==="APP"?<React.Fragment key={appRefresh}>{children}</React.Fragment>:section==="ADDRESSES"?<AddressScreen/>:section==="HISTORY"?<HistoryScreen/>:section==="PAYMENTS"?<PaymentsScreen/>:section==="CHAT"?<ChatScreen/>:section==="SUPPORT"?<CustomerSupport/>:<AccountScreen/>'
+                  new='section==="APP"?<React.Fragment key={appRefresh}>{children}</React.Fragment>:section==="ADDRESSES"?AddressScreen():section==="HISTORY"?HistoryScreen():section==="PAYMENTS"?PaymentsScreen():section==="CHAT"?ChatScreen():section==="SUPPORT"?<CustomerSupport/>:AccountScreen()'
+              else:
+                  old='section==="APP"?children:section==="HISTORY"?<HistoryScreen/>:section==="REPORTS"?<DriverReports onBack={()=>setSection("APP")}/>:section==="REVIEWS"?<DriverReviews onBack={()=>setSection("APP")}/>:section==="WALLET"?<WalletScreen/>:section==="PIX"?<PixScreen/>:section==="CHAT"?<ChatScreen/>:section==="SUPPORT"?<DriverSupport/>:<AccountScreen/>'
+                  new='section==="APP"?children:section==="HISTORY"?HistoryScreen():section==="REPORTS"?<DriverReports onBack={()=>setSection("APP")}/>:section==="REVIEWS"?<DriverReviews onBack={()=>setSection("APP")}/>:section==="WALLET"?WalletScreen():section==="PIX"?PixScreen():section==="CHAT"?ChatScreen():section==="SUPPORT"?<DriverSupport/>:AccountScreen()'
+              t=must(t,old,new,f'{kind} stable nested screens')
+
+              t=must(t,'behavior={Platform.OS==="ios"?"padding":"height"}','behavior={Platform.OS==="ios"?"padding":undefined} keyboardVerticalOffset={0}',f'{kind} keyboard avoid')
+              t=t.replace('contentContainerStyle={styles.messagesContent} keyboardShouldPersistTaps="handled">','contentContainerStyle={styles.messagesContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS==="ios"?"interactive":"on-drag"}>')
+              t=t.replace('{notifications.length>0&&<Pressable style={styles.clearNotifications}','{alertNotifications.length>0&&<Pressable style={styles.clearNotifications}')
+              t=t.replace('<ScrollView contentContainerStyle={styles.notificationList}>{notifications.length?notifications.map(item=>','<ScrollView contentContainerStyle={styles.notificationList}>{alertNotifications.length?alertNotifications.map(item=>')
+              t=t.replace('bell:{fontSize:19', 'topActions:{flexDirection:"row",alignItems:"center",gap:2},messageIcon:{fontSize:20},bell:{fontSize:19')
+              t=t.replace('paddingBottom:Platform.OS==="android"?16:10,flexDirection:"row"','paddingBottom:Platform.OS==="android"?8:12,flexDirection:"row"')
+              t=t.replace('borderRadius:14,padding:11,backgroundColor:"#fafafa"','borderRadius:14,paddingHorizontal:12,paddingVertical:10,backgroundColor:"#fafafa",fontSize:15,lineHeight:20,textAlignVertical:"top"')
+              p.write_text(t)
+
+          patch_shell('apps/cliente/CustomerProfessionalShell.tsx','customer')
+          patch_shell('apps/entregador/DriverProfessionalShell.tsx','driver')
+
+          def configure_app(path):
+              p=Path(path); data=json.loads(p.read_text()); expo=data['expo']; expo.setdefault('android',{})['softwareKeyboardLayoutMode']='resize'
+              plugins=expo.setdefault('plugins',[])
+              found=False
+              for plugin in plugins:
+                  if isinstance(plugin,list) and plugin and plugin[0]=='expo-notifications':
+                      while len(plugin)<2: plugin.append({})
+                      plugin[1]['color']='#F4C400'; plugin[1]['defaultChannel']='clickfood-alertas'; plugin[1]['sounds']=['./assets/clickfood_alerta.wav','./assets/clickfood_chamada.wav']; found=True
+              if not found: plugins.append(['expo-notifications',{'color':'#F4C400','defaultChannel':'clickfood-alertas','sounds':['./assets/clickfood_alerta.wav','./assets/clickfood_chamada.wav']}])
+              p.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          configure_app('apps/cliente/app.json'); configure_app('apps/entregador/app.json')
+
+          def tone(path, pattern):
+              path=Path(path); path.parent.mkdir(parents=True,exist_ok=True); rate=44100; frames=[]
+              for freq,duration,volume in pattern:
+                  count=int(rate*duration)
+                  for i in range(count):
+                      sample=0 if freq==0 else int(32767*volume*math.sin(2*math.pi*freq*i/rate))
+                      frames.append(struct.pack('<h',sample))
+              with wave.open(str(path),'wb') as w:
+                  w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(b''.join(frames))
+          alert=[(880,.11,.42),(0,.05,0),(1175,.13,.38)]
+          call=[]
+          for _ in range(3): call += [(690,.22,.48),(0,.07,0),(920,.22,.48),(0,.09,0)]
+          for base in ['apps/cliente/assets','apps/entregador/assets']:
+              tone(f'{base}/clickfood_alerta.wav',alert); tone(f'{base}/clickfood_chamada.wav',call)
+
+          # Mantem o repositorio alinhado ao backend de cartao em producao.
+          for f in ['supabase/functions/efi-card-charge/index.ts','supabase/functions/efi-card-status/index.ts','supabase/functions/efi-card-refund/index.ts','supabase/functions/efi-card-webhook/index.ts','supabase/functions/efi-card-reconcile-worker/index.ts']:
+              p=Path(f)
+              if not p.exists(): continue
+              s=p.read_text()
+              s=s.replace('const base=()=>env("EFI_PIX_SANDBOX")==="false"?"https://cobrancas.api.efipay.com.br":"https://cobrancas-h.api.efipay.com.br";','const base=()=>"https://cobrancas.api.efipay.com.br";')
+              s=s.replace('.eq("provider","EFI").maybeSingle()', '.eq("provider","EFI_BANK").eq("environment","PRODUCTION").maybeSingle()')
+              s=s.replace('metadata:{custom_id:order.id,notification_url:notificationUrl}', 'metadata:{custom_id:`CLICKFOOD_${order.id}`,notification_url:notificationUrl}')
+              p.write_text(s)
+
+          pm=Path('supabase/functions/payment-methods/index.ts')
+          if pm.exists():
+              s=pm.read_text()
+              old='const efi=providers.find((row:any)=>String(row.provider)==="EFI");\n  const efiMethods=(efi?.supported_methods??[]).map((method:any)=>String(method));\n  const accountId=Deno.env.get("EFI_ACCOUNT_ID")?.trim()??"";\n  const globalPixEnabled=!!efi&&efiMethods.includes("PIX");\n  const globalCardEnabled=!!efi&&efiMethods.includes("CREDIT_CARD")&&!!accountId;'
+              new='const efiPix=providers.find((row:any)=>String(row.provider)==="EFI");\n  const efiCard=providers.find((row:any)=>String(row.provider)==="EFI_BANK"&&String(row.environment)==="PRODUCTION")??providers.find((row:any)=>String(row.provider)==="EFI"&&String(row.environment)==="PRODUCTION");\n  const pixMethods=(efiPix?.supported_methods??[]).map((method:any)=>String(method));\n  const cardMethods=(efiCard?.supported_methods??[]).map((method:any)=>String(method));\n  const accountId=Deno.env.get("EFI_ACCOUNT_ID")?.trim()??"";\n  const globalPixEnabled=!!efiPix&&String(efiPix.environment)==="PRODUCTION"&&pixMethods.includes("PIX")&&Deno.env.get("EFI_PIX_SANDBOX")==="false";\n  const globalCardEnabled=!!efiCard&&cardMethods.includes("CREDIT_CARD")&&!!accountId;'
+              s=must(s,old,new,'payment-methods production split')
+              s=s.replace('environment:Deno.env.get("EFI_PIX_SANDBOX")==="false"?"production":"sandbox",','environment:"production",')
+              pm.write_text(s)
+
+          mig=Path('supabase/migrations/20260905190000_notification_sounds_by_type.sql')
+          mig.write_text("""-- Aplicado em producao via Supabase: separa chamada urgente de alerta/mensagem.\n-- Fonte canonica da funcao esta registrada no historico de migrations do projeto.\n""")
+          PY
+
+          grep -q 'unreadMessages' apps/cliente/CustomerProfessionalShell.tsx
+          grep -q 'unreadMessages' apps/entregador/DriverProfessionalShell.tsx
+          grep -q 'clickfood_alerta.wav' apps/cliente/app.json
+          grep -q 'clickfood_alerta.wav' apps/entregador/app.json
+          grep -q 'softwareKeyboardLayoutMode' apps/cliente/app.json
+          grep -q 'softwareKeyboardLayoutMode' apps/entregador/app.json
+          grep -q 'https://cobrancas.api.efipay.com.br' supabase/functions/efi-card-charge/index.ts
+          git diff --check
+
+      - name: Salvar correcoes no repositorio
+        shell: bash
+        run: |
+          git config user.name 'clickfood-bot'
+          git config user.email 'clickfood-bot@users.noreply.github.com'
+          git add apps/cliente apps/entregador supabase/functions supabase/migrations
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(mobile): estabilizar teclado chat badges sons e cartao producao'
+            git push origin HEAD:main
+          fi
+
+      - name: Configurar Gradle
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.gradle"
+          cat > "$HOME/.gradle/gradle.properties" <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8
+          org.gradle.workers.max=2
+          org.gradle.parallel=false
+          org.gradle.daemon=false
+          kotlin.compiler.execution.strategy=in-process
+          EOF
+
+      - name: Instalar dependencias e validar TypeScript
+        run: |
+          npm ci --include=dev
+          (cd apps/cliente && npx tsc --noEmit)
+          (cd apps/entregador && npx tsc --noEmit)
+          test -n "${EXPO_TOKEN:-}"
+          (cd apps/cliente && npx --yes eas-cli@latest whoami >/dev/null && npx --yes eas-cli@latest project:info --non-interactive)
+          (cd apps/entregador && npx --yes eas-cli@latest whoami >/dev/null && npx --yes eas-cli@latest project:info --non-interactive)
+
+      - name: Compilar APK Cliente
+        working-directory: apps/cliente
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/apk-cliente-chat"
+          mkdir -p "$OUT" "$GITHUB_WORKSPACE/artifacts"
+          export EAS_LOCAL_BUILD_ARTIFACTS_DIR="$OUT"
+          export EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          npx --yes eas-cli@latest build --platform android --profile preview --local --non-interactive
+          APK="$(find "$OUT" -type f -name '*.apk' | head -n 1 || true)"
+          test -n "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Cliente-Chat-Pagamento.apk"
+          unzip -tq "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Cliente-Chat-Pagamento.apk" >/dev/null
+          unzip -l "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Cliente-Chat-Pagamento.apk" | grep -q 'clickfood_alerta'
+          unzip -l "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Cliente-Chat-Pagamento.apk" | grep -q 'clickfood_chamada'
+
+      - name: Preparar Google Maps Entregador
+        working-directory: apps/entregador
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then exit 0; fi
+          TMP="$RUNNER_TEMP/maps-chat"; mkdir -p "$TMP"
+          npx --yes eas-cli@latest build:list --platform android --status finished --limit 10 --non-interactive --json > "$TMP/builds.json"
+          mapfile -t URLS < <(jq -r '.[] | (.artifacts.applicationArchiveUrl // .artifacts.buildUrl // empty)' "$TMP/builds.json")
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"; APKANALYZER="$(find "$SDK_ROOT" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"; fi
+          test -n "$APKANALYZER"
+          KEY=''; INDEX=0
+          for URL in "${URLS[@]}"; do INDEX=$((INDEX+1)); PRIOR="$TMP/$INDEX.apk"; curl --fail --silent --show-error --location --retry 2 "$URL" -o "$PRIOR" || continue; unzip -tq "$PRIOR" >/dev/null 2>&1 || continue; "$APKANALYZER" manifest print "$PRIOR" > "$TMP/$INDEX.xml"; CANDIDATE="$(perl -0777 -ne 'if(/<meta-data\b(?=[^>]*com\.google\.android\.geo\.API_KEY)[^>]*android:value="([^"]+)"/s){print $1}' "$TMP/$INDEX.xml")"; if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' ]; then KEY="$CANDIDATE"; break; fi; done
+          test -n "$KEY"
+          echo "::add-mask::$KEY"
+          echo "GOOGLE_MAPS_API_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "GOOGLE_MAPS_ANDROID_API_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Compilar APK Entregador
+        working-directory: apps/entregador
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/apk-entregador-chat"
+          mkdir -p "$OUT" "$GITHUB_WORKSPACE/artifacts"
+          export EAS_LOCAL_BUILD_ARTIFACTS_DIR="$OUT"
+          export EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          npx --yes eas-cli@latest build --platform android --profile preview --local --non-interactive
+          APK="$(find "$OUT" -type f -name '*.apk' | head -n 1 || true)"
+          test -n "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-Chat-Pagamento.apk"
+          unzip -tq "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-Chat-Pagamento.apk" >/dev/null
+          unzip -l "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-Chat-Pagamento.apk" | grep -q 'clickfood_alerta'
+          unzip -l "$GITHUB_WORKSPACE/artifacts/CLICK-FOOD-Entregador-Chat-Pagamento.apk" | grep -q 'clickfood_chamada'
+
+      - name: Publicar APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: CLICK-FOOD-APKs-Chat-Pagamento-20260905
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 30
