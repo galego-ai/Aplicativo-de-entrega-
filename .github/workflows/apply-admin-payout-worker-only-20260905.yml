@@ -1,0 +1,36 @@
+name: CLICK-FOOD Fila Segura EFI
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/patch_admin_payout_worker_only_20260905.py'
+      - '.github/workflows/apply-admin-payout-worker-only-20260905.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Aplicar fila segura
+        run: python scripts/patch_admin_payout_worker_only_20260905.py
+      - name: Instalar dependencias
+        run: npm install --ignore-scripts
+      - name: Build Matriz
+        run: npm run build:admin
+      - name: Salvar no main
+        run: |
+          git config user.name clickfood-bot
+          git config user.email clickfood-bot@users.noreply.github.com
+          git add apps/admin/app/repasses/page.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix(financeiro): usar somente fila segura Efi'
+          git push origin main
