@@ -24,15 +24,17 @@
         "expo-notifications",
         {
           "color": "#F4C400",
-          "defaultChannel": "clickfood-default",
+          "defaultChannel": "clickfood-alertas",
           "sounds": [
+            "./assets/clickfood_alerta.wav",
             "./assets/clickfood_chamada.wav"
           ]
         }
       ]
     ],
     "android": {
-      "package": "br.com.clickfood.entregador"
+      "package": "br.com.clickfood.entregador",
+      "softwareKeyboardLayoutMode": "resize"
     },
     "ios": {
       "bundleIdentifier": "br.com.clickfood.entregador",

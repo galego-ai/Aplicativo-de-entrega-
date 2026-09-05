@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const env=(name:string)=>Deno.env.get(name)?.trim()||"";
-const base=()=>env("EFI_PIX_SANDBOX")==="false"?"https://cobrancas.api.efipay.com.br":"https://cobrancas-h.api.efipay.com.br";
+const base=()=>"https://cobrancas.api.efipay.com.br";
 const creds=()=>({id:env("EFI_CHARGES_CLIENT_ID")||env("EFI_PIX_CLIENT_ID"),secret:env("EFI_CHARGES_CLIENT_SECRET")||env("EFI_PIX_CLIENT_SECRET")});
 const safe=(a:string,b:string)=>{if(!a||a.length!==b.length)return false;let diff=0;for(let i=0;i<a.length;i++)diff|=a.charCodeAt(i)^b.charCodeAt(i);return diff===0;};
 
@@ -21,7 +21,7 @@ export default {fetch:async(req:Request)=>{
   const tokenResult=await supabase.from("card_reconcile_worker_tokens").select("token").eq("singleton",true).maybeSingle();
   if(tokenResult.error||!tokenResult.data?.token||!safe(String(tokenResult.data.token),received))return Response.json({error:"UNAUTHORIZED"},{status:401});
 
-  const configResult=await supabase.from("payment_provider_configs").select("enabled,credentials_configured,supported_methods").eq("provider","EFI").maybeSingle();
+  const configResult=await supabase.from("payment_provider_configs").select("enabled,credentials_configured,supported_methods").eq("provider","EFI_BANK").eq("environment","PRODUCTION").maybeSingle();
   const config:any=configResult.data;
   if(configResult.error)return Response.json({error:"PAYMENT_CONFIG_LOOKUP_FAILED"},{status:500});
   if(!config?.enabled||!config?.credentials_configured||!(config.supported_methods??[]).includes("CREDIT_CARD"))return Response.json({ok:true,skipped:"EFI_CARD_DISABLED",checked:0,reconciled:0});

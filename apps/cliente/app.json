@@ -8,12 +8,31 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "plugins": [
-      ["expo-location", {"locationWhenInUsePermission": "O CLICK-FOOD usa sua localização para calcular a entrega até o endereço informado."}],
-      ["expo-notifications", {"color": "#F4C400", "defaultChannel": "clickfood-default"}]
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O CLICK-FOOD usa sua localização para calcular a entrega até o endereço informado."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#F4C400",
+          "defaultChannel": "clickfood-alertas",
+          "sounds": [
+            "./assets/clickfood_alerta.wav",
+            "./assets/clickfood_chamada.wav"
+          ]
+        }
+      ]
     ],
     "android": {
       "package": "br.com.clickfood.cliente",
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
+      "softwareKeyboardLayoutMode": "resize"
     },
     "ios": {
       "bundleIdentifier": "br.com.clickfood.cliente",

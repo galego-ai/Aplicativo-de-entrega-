@@ -1,7 +1,7 @@
 import { withSupabase } from "npm:@supabase/server@1.4.1";
 
 const env=(name:string)=>Deno.env.get(name)?.trim()||"";
-const base=()=>env("EFI_PIX_SANDBOX")==="false"?"https://cobrancas.api.efipay.com.br":"https://cobrancas-h.api.efipay.com.br";
+const base=()=>"https://cobrancas.api.efipay.com.br";
 const creds=()=>({id:env("EFI_CHARGES_CLIENT_ID")||env("EFI_PIX_CLIENT_ID"),secret:env("EFI_CHARGES_CLIENT_SECRET")||env("EFI_PIX_CLIENT_SECRET")});
 
 async function auth(){
