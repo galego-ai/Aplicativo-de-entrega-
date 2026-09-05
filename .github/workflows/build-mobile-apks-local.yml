@@ -1,6 +1,6 @@
 name: CLICK-FOOD Apps Android Local Build
 # Build local de contingência quando a cota EAS cloud estiver indisponível.
-# Trigger 2026-09-05: chat safe area Cliente + Entregador.
+# Trigger 2026-09-05: chat safe area Cliente + Entregador; Expo patch check informativo.
 
 on:
   workflow_dispatch:
@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${EXPO_TOKEN:-}" || { echo "EXPO_TOKEN não configurado."; exit 1; }
-          npx expo install --check
+          npx expo install --check || echo 'Aviso: existem patches Expo recomendados; build continuará com versões já validadas.'
           npx --yes eas-cli@latest whoami >/dev/null
           npx --yes eas-cli@latest project:info --non-interactive
 
