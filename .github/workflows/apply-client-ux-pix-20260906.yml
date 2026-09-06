@@ -1,0 +1,43 @@
+name: CLICK-FOOD Corrigir Cliente Carrinho Navegacao PIX
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-client-ux-pix-20260906.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Dependencias
+        run: npm ci --include=dev
+      - name: Aplicar correcoes Cliente
+        run: node .github/scripts/patch-client-ux-pix-20260906.mjs
+      - name: Validar TypeScript Cliente
+        run: npx tsc -p apps/cliente/tsconfig.json --noEmit
+      - name: Commit
+        run: |
+          git config user.name clickfood-bot
+          git config user.email clickfood-bot@users.noreply.github.com
+          git add apps/cliente/App.tsx
+          if git diff --cached --quiet; then
+            echo 'Sem alteracoes.'
+            exit 0
+          fi
+          git commit -m 'fix(cliente): carrinho navegacao e PIX robusto'
+          git push
