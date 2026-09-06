@@ -7,6 +7,12 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "icon": "./assets/clickfood-entregador-icon.png",
+    "splash": {
+      "image": "./assets/clickfood-entregador-splash.jpg",
+      "resizeMode": "cover",
+      "backgroundColor": "#000000"
+    },
     "plugins": [
       "./plugins/withClickFoodFloatingBubble",
       "./plugins/withClickFoodAndroidBuildTuning",
