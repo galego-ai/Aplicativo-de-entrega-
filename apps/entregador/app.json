@@ -9,7 +9,7 @@
     "userInterfaceStyle": "light",
     "icon": "./assets/clickfood-entregador-icon.png",
     "splash": {
-      "image": "./assets/clickfood-entregador-splash.png",
+      "image": "./assets/clickfood-entregador-splash.jpg",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
