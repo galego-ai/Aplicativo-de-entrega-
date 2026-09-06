@@ -138,6 +138,20 @@ export default function App() {
     else void disableBackgroundTracking();
   },[driver?.id,driver?.online,driver?.status]);
 
+  // CLICKFOOD_EXTERNAL_RELEASE_REFRESH: se Loja/Matriz concluir ou liberar a entrega por contingência,
+  // o app deve abandonar a tela antiga automaticamente sem exigir ação do entregador.
+  useEffect(()=>{
+    if(!session?.user.id||!driver?.id||driver.status!=="ACTIVE")return;
+    let cancelled=false;
+    const refresh=async()=>{if(cancelled)return;try{await loadActive();}catch{}};
+    void refresh();
+    const timer=setInterval(()=>void refresh(),2500);
+    const channel=supabase.channel(`driver-active-release-${driver.id}`)
+      .on("postgres_changes",{event:"*",schema:"public",table:"deliveries",filter:`driver_id=eq.${driver.id}`},()=>void refresh())
+      .subscribe();
+    return()=>{cancelled=true;clearInterval(timer);void supabase.removeChannel(channel);};
+  },[session?.user.id,driver?.id,driver?.status]);
+
 
   useEffect(()=>{
     if(!session?.user.id||!driver?.id||driver.status!=="ACTIVE"||!driver.online||active){setOffer(null);return;}
