@@ -660,7 +660,7 @@ export default function App(){
         const discounted=shown<base&&!hasVariants;
         const soldOut=product.control_inventory&&Number(product.stock_quantity??0)<=0;
         return <View style={[styles.productTile,soldOut&&styles.productTileSoldOut]} key={product.id}>
-          <Pressable accessibilityRole="button" accessibilityLabel={soldOut?`${product.name} esgotado`:`Abrir ${product.name}`} disabled={soldOut} style={styles.productImageButton} onPress={()=>beginProduct(product)}>{product.image_url?<Image source={{uri:product.image_url}} style={[styles.productImage,soldOut&&styles.productImageSoldOut]}/>:<View style={[styles.productImageFallback,soldOut&&styles.productImageSoldOut]}><Text style={styles.productImageFallbackText}>🍽️</Text></View>}</Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={soldOut?`${product.name} esgotado`:`Abrir ${product.name}`} disabled={soldOut} style={styles.productImageButton} onPress={()=>{setSelectedProduct(product);setMessage("");}}>{product.image_url?<Image source={{uri:product.image_url}} style={[styles.productImage,soldOut&&styles.productImageSoldOut]}/>:<View style={[styles.productImageFallback,soldOut&&styles.productImageSoldOut]}><Text style={styles.productImageFallbackText}>🍽️</Text></View>}</Pressable>
           <View style={{flex:1}}>
             <Text style={styles.productName}>{product.name}</Text><Text style={styles.meta}>{product.description||""}</Text>
             <Text style={styles.price}>{hasVariants?"A partir de ":""}{brl(shown)}</Text>
