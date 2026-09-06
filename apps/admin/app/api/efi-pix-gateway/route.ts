@@ -5,7 +5,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPECTED_TOKEN_HASH = "8b331573ba58225855686be43939ea3d8243a3bcac8e3d7d9073066427bf27ed";
+const EXPECTED_TOKEN_HASH = "6b594f5fd20b4cc9590ffb9b9671d17b1823ff349eaa8bac170d06f22b153ab5";
 const EXPECTED_P12_HASH = "1338c49c1ff55bbbd8fcd03141efded58fabf7611f526649a465efe45dee277f";
 const EFI_BASE = "https://pix.api.efipay.com.br";
 
