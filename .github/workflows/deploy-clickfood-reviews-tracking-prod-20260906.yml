@@ -1,0 +1,81 @@
+name: CLICK-FOOD Ativar Tracking e Avaliacoes PROD
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-clickfood-reviews-tracking-prod-20260906.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: gcuhwfksodymhxjtrkiu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar credencial Supabase sem expor segredo
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo 'SUPABASE_ACCESS_TOKEN nao configurado nos Secrets do repositorio.'
+            exit 1
+          fi
+          echo 'Credencial Supabase encontrada.'
+
+      - name: Aplicar migrations de avaliacoes e privacidade do rastreamento
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            supabase/migrations/20260906143000_matrix_detailed_reviews_access.sql \
+            supabase/migrations/20260906143500_customer_tracking_after_store_departure.sql \
+            > /tmp/clickfood-prod.sql
+          jq -n --rawfile query /tmp/clickfood-prod.sql '{query:$query,read_only:false}' > /tmp/query.json
+          HTTP_CODE=$(curl --silent --show-error \
+            --output /tmp/query-response.json \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --data-binary @/tmp/query.json \
+            "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query")
+          if [ "$HTTP_CODE" != '201' ]; then
+            echo "Falha ao aplicar migrations. HTTP ${HTTP_CODE}."
+            cat /tmp/query-response.json
+            exit 1
+          fi
+          echo 'Migrations de producao aplicadas.'
+
+      - name: Instalar Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Publicar funcoes de avaliacoes
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions deploy customer-review-submit --project-ref "$PROJECT_REF"
+          supabase functions deploy reviews-dashboard-read --project-ref "$PROJECT_REF"
+
+      - name: Confirmar funcoes publicadas
+        shell: bash
+        run: |
+          set -euo pipefail
+          for fn in customer-review-submit reviews-dashboard-read; do
+            CODE=$(curl --silent --show-error \
+              --output "/tmp/${fn}.json" \
+              --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              "https://api.supabase.com/v1/projects/${PROJECT_REF}/functions/${fn}")
+            test "$CODE" = '200' || { echo "Funcao ${fn} nao confirmada: HTTP ${CODE}."; exit 1; }
+            jq -e '.status == "ACTIVE"' "/tmp/${fn}.json" >/dev/null
+            echo "${fn}: ACTIVE"
+          done
