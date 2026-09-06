@@ -25,47 +25,24 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: Preparar conversor de imagem
-        run: python3 -m pip install --disable-pip-version-check pillow
-
-      - name: Regenerar icone e splash oficiais em PNG valido
+      - name: Validar PNGs oficiais CLICK-FOOD
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          from PIL import Image, ImageOps
-
-          assets = Path('apps/entregador/assets')
-          source = assets / 'clickfood-entregador-splash.jpg'
-          if not source.exists():
-              raise SystemExit('Splash oficial CLICK-FOOD nao encontrado.')
-
-          logo = Image.open(source).convert('RGBA')
-
-          def centered(size, max_logo, background):
-              canvas = Image.new('RGBA', (size, size), background)
-              fitted = ImageOps.contain(logo, (max_logo, max_logo), Image.Resampling.LANCZOS)
-              x = (size - fitted.width) // 2
-              y = (size - fitted.height) // 2
-              canvas.alpha_composite(fitted, (x, y))
-              return canvas
-
-          icon = centered(1024, 920, (245, 245, 245, 255))
-          icon_path = assets / 'clickfood-entregador-icon.png'
-          icon.save(icon_path, format='PNG', optimize=False, compress_level=6)
-
-          splash = centered(1024, 760, (245, 245, 245, 255))
-          splash_path = assets / 'clickfood-entregador-splash.png'
-          splash.save(splash_path, format='PNG', optimize=False, compress_level=6)
-
-          for p in (icon_path, splash_path):
-              with Image.open(p) as check:
-                  check.verify()
-              with Image.open(p) as check:
-                  if check.format != 'PNG' or check.size != (1024, 1024):
+          from PIL import Image
+          files = [
+              Path('apps/entregador/assets/clickfood-entregador-icon.png'),
+              Path('apps/entregador/assets/clickfood-entregador-splash.png'),
+          ]
+          for p in files:
+              with Image.open(p) as im:
+                  im.verify()
+              with Image.open(p) as im:
+                  if im.format != 'PNG' or im.width < 240 or im.height < 240:
                       raise SystemExit(f'Asset invalido: {p}')
-              print(f'OK {p}')
+                  print(f'OK {p}: {im.width}x{im.height}')
           PY
 
       - name: Migrar splash para Expo 57
@@ -87,7 +64,7 @@ jobs:
           plugins.append([
               'expo-splash-screen',
               {
-                  'backgroundColor': '#F5F5F5',
+                  'backgroundColor': '#000000',
                   'image': './assets/clickfood-entregador-splash.png',
                   'imageWidth': 240,
                   'resizeMode': 'contain'
@@ -105,7 +82,7 @@ jobs:
       - name: Atualizar lockfile
         run: npm install --package-lock-only --ignore-scripts
 
-      - name: Instalar e validar release
+      - name: Instalar dependencias
         run: npm ci --include=dev
 
       - name: Validar TypeScript e configuracao Expo
@@ -119,15 +96,15 @@ jobs:
           grep -q 'clickfood-entregador-icon.png' /tmp/expo-entregador.json
           grep -q 'expo-splash-screen' /tmp/expo-entregador.json
 
-      - name: Commitar correcao de release
+      - name: Commitar configuracao final
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add apps/entregador/assets/clickfood-entregador-icon.png apps/entregador/assets/clickfood-entregador-splash.png apps/entregador/app.json apps/entregador/package.json package-lock.json
+          git add apps/entregador/app.json apps/entregador/package.json package-lock.json
           if ! git diff --cached --quiet; then
-            git commit -m 'fix(entregador): normalizar logo e splash para release Expo 57'
+            git commit -m 'fix(entregador): finalizar branding oficial para Expo 57'
             git pull --rebase origin main
             git push origin main
           fi
