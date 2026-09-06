@@ -153,6 +153,28 @@ export default function App(){
   useEffect(()=>{if(!session){setFavoriteStoreIds(new Set());return;}void AsyncStorage.getItem(`@clickfood/customer/favorite-stores-${session.user.id}`).then(raw=>{try{const ids=raw?JSON.parse(raw):[];setFavoriteStoreIds(new Set(Array.isArray(ids)?ids.map(String):[]));}catch{setFavoriteStoreIds(new Set());}});},[session?.user.id]);
   useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();loadLoyalty();}else{setTracking(null);setDriverCard(null);setOrders([]);setPixCharge(null);setLoyaltyWallets([]);setLoyaltyTotal(0);}},[session]);
   useEffect(()=>{if(!session||tab!=="orders")return;const timer=setInterval(()=>loadOrders(),20000);return()=>clearInterval(timer);},[session?.user.id,tab]);
+  // RELEASE_PIX_AUTO_CONFIRM: enquanto houver PIX pendente, consulta a Efí automaticamente.
+  useEffect(()=>{
+    if(!session?.user.id||tab!=="orders"||!pixCharge?.orderId)return;
+    const orderId=pixCharge.orderId;
+    const expiresAt=pixCharge.expires_at;
+    let cancelled=false;let checking=false;
+    const check=async()=>{
+      if(cancelled||checking||new Date(expiresAt).getTime()<=Date.now())return;
+      checking=true;
+      try{
+        const result=await supabase.functions.invoke("efi-pix-status",{body:{orderId}});
+        if(!cancelled&&!result.error&&!result.data?.error&&result.data?.paid){
+          setPixCharge(null);
+          setMessage("Pagamento PIX confirmado! Seu pedido foi enviado para a loja.");
+          await loadOrders();
+        }
+      }finally{checking=false;}
+    };
+    void check();
+    const timer=setInterval(()=>void check(),4000);
+    return()=>{cancelled=true;clearInterval(timer);};
+  },[session?.user.id,tab,pixCharge?.orderId,pixCharge?.txid,pixCharge?.expires_at]);
   useEffect(()=>{if(!session||tab!=="orders")return;let refreshTimer:ReturnType<typeof setTimeout>|undefined;const refresh=()=>{if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>{void loadOrders();},180);};const channel=supabase.channel(`customer-orders-live-${session.user.id}`).on("postgres_changes",{event:"*",schema:"public",table:"orders",filter:`customer_id=eq.${session.user.id}`},refresh).on("postgres_changes",{event:"*",schema:"public",table:"deliveries"},refresh).subscribe();return()=>{if(refreshTimer)clearTimeout(refreshTimer);void supabase.removeChannel(channel);};},[session?.user.id,tab]);
   useEffect(()=>{if(!session||tab!=="orders"||!tracking?.driverId)return;const driverId=tracking.driverId;const channel=supabase.channel(`customer-driver-live-${driverId}`).on("postgres_changes",{event:"*",schema:"public",table:"driver_locations",filter:`driver_id=eq.${driverId}`},payload=>{const row=(payload.new??{}) as any;const latitude=Number(row.latitude),longitude=Number(row.longitude);if(!Number.isFinite(latitude)||!Number.isFinite(longitude))return;setTracking(current=>current&&current.driverId===driverId?{...current,driverLat:latitude,driverLng:longitude}:current);}).subscribe();return()=>{void supabase.removeChannel(channel);};},[session?.user.id,tab,tracking?.driverId]);
   useEffect(()=>{if(!session||tab!=="orders"||!tracking?.deliveryId||!deliveryCodeStatuses.has(String(tracking.deliveryStatus??""))||deliveryCode)return;const deliveryId=tracking.deliveryId;const refresh=()=>void fetchDeliveryCode(deliveryId);void refresh();const timer=setInterval(refresh,4000);return()=>clearInterval(timer);},[session?.user.id,tab,tracking?.deliveryId,tracking?.deliveryStatus,deliveryCode]);

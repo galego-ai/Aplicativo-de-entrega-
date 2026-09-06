@@ -175,7 +175,7 @@ export default function App() {
     let cancelled=false;
     (async()=>{
       try{
-        if(Platform.OS==="android")await Notifications.setNotificationChannelAsync("clickfood-chamadas",{name:"Chamadas CLICK-FOOD",description:"Novas chamadas de entrega",importance:Notifications.AndroidImportance.MAX,sound:"clickfood_chamada.wav",vibrationPattern:[0,300,120,300,120,450],lightColor:"#F4C400"});
+        if(Platform.OS==="android")await Notifications.setNotificationChannelAsync("clickfood-chamadas-v2",{name:"Chamadas CLICK-FOOD",description:"Novas chamadas de entrega",importance:Notifications.AndroidImportance.MAX,sound:"clickfood_chamada.wav",vibrationPattern:[0,300,120,300,120,450],lightColor:"#F4C400"});
         let permission=await Notifications.getPermissionsAsync();
         if(permission.status!=="granted")permission=await Notifications.requestPermissionsAsync();
         if(permission.status!=="granted"){if(!cancelled)setMessage("Ative as notificações do CLICK-FOOD para receber chamadas com o app minimizado.");return;}
