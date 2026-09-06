@@ -1,0 +1,126 @@
+name: CLICK-FOOD Build Final Publicacao 2026-09-06
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-release-final-20260906.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: click-food-release-final-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    name: Release ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: cliente
+            label: Cliente
+            filename: CLICK-FOOD-Cliente-PRODUCAO-RC.apk
+            artifact: CLICK-FOOD-Cliente-PRODUCAO-RC
+          - app: entregador
+            label: Entregador
+            filename: CLICK-FOOD-Entregador-PRODUCAO-RC.apk
+            artifact: CLICK-FOOD-Entregador-PRODUCAO-RC
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+      EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Dependencias
+        run: npm ci --include=dev
+      - name: Validar Expo e EAS
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN ausente'; exit 1; }
+          npx expo install --check
+          npx --yes eas-cli@latest whoami >/dev/null
+          npx --yes eas-cli@latest project:info --non-interactive
+      - name: Recuperar Google Maps se segredo nao estiver definido
+        working-directory: apps/${{ matrix.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${GOOGLE_MAPS_ANDROID_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}" ] || [ -n "${EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:-}" ]; then
+            echo 'Google Maps protegido disponivel.'
+            exit 0
+          fi
+          TMP="$RUNNER_TEMP/maps-${{ matrix.app }}"
+          mkdir -p "$TMP"
+          npx --yes eas-cli@latest build:list --platform android --status finished --limit 10 --non-interactive --json > "$TMP/builds.json"
+          mapfile -t URLS < <(jq -r '.[] | (.artifacts.applicationArchiveUrl // .artifacts.buildUrl // empty)' "$TMP/builds.json")
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then APKANALYZER="$(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" -type f -name apkanalyzer -perm -111 2>/dev/null | head -n 1 || true)"; fi
+          test -n "$APKANALYZER" || { echo 'apkanalyzer ausente'; exit 1; }
+          KEY=''; INDEX=0
+          for URL in "${URLS[@]}"; do
+            INDEX=$((INDEX+1)); PRIOR="$TMP/prior-$INDEX.apk"
+            curl --fail --silent --show-error --location --retry 2 "$URL" -o "$PRIOR" || continue
+            unzip -tq "$PRIOR" >/dev/null 2>&1 || continue
+            "$APKANALYZER" manifest print "$PRIOR" > "$TMP/manifest.xml"
+            CANDIDATE="$(perl -0777 -ne 'if(/<meta-data\b(?=[^>]*com\.google\.android\.geo\.API_KEY)[^>]*android:value="([^"]+)"/s){print $1}' "$TMP/manifest.xml")"
+            if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != 'CLICK_FOOD_MAPS_KEY_NOT_CONFIGURED' ]; then KEY="$CANDIDATE"; break; fi
+          done
+          test -n "$KEY" || { echo 'Google Maps real nao localizado'; exit 1; }
+          echo "::add-mask::$KEY"
+          {
+            echo "GOOGLE_MAPS_API_KEY=$KEY"
+            echo "GOOGLE_MAPS_ANDROID_API_KEY=$KEY"
+            echo "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=$KEY"
+            echo "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY=$KEY"
+          } >> "$GITHUB_ENV"
+      - name: Compilar APK local assinado
+        working-directory: apps/${{ matrix.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/release-${{ matrix.app }}"
+          mkdir -p "$OUT"
+          export EAS_LOCAL_BUILD_ARTIFACTS_DIR="$OUT"
+          export EAS_LOCAL_BUILD_SKIP_CLEANUP=1
+          npx --yes eas-cli@latest build --platform android --profile preview --local --non-interactive
+          APK="$(find "$OUT" -type f -name '*.apk' | head -n 1 || true)"
+          if [ -z "$APK" ]; then APK="$(find . -type f -name '*.apk' | head -n 1 || true)"; fi
+          test -n "$APK" || { echo 'APK nao encontrado'; exit 1; }
+          mkdir -p "$GITHUB_WORKSPACE/release-artifacts"
+          cp "$APK" "$GITHUB_WORKSPACE/release-artifacts/${{ matrix.filename }}"
+          unzip -tq "$GITHUB_WORKSPACE/release-artifacts/${{ matrix.filename }}" >/dev/null
+      - name: Validar APK final
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="release-artifacts/${{ matrix.filename }}"
+          test -s "$APK"
+          unzip -tq "$APK" >/dev/null
+          if [ '${{ matrix.app }}' = 'entregador' ]; then
+            unzip -l "$APK" | grep -Eiq 'clickfood_chamada|clickfood.chamada' || { echo 'Som de chamada nao encontrado dentro do APK'; exit 1; }
+          fi
+          sha256sum "$APK"
+      - name: Publicar APK final
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-artifacts/${{ matrix.filename }}
+          if-no-files-found: error
+          retention-days: 30
