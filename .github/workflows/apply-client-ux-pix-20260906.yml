@@ -1,4 +1,5 @@
 name: CLICK-FOOD Corrigir Cliente Carrinho Navegacao PIX
+# execução 2026-09-06: produto clicável, carrinho, navegação persistente e PIX
 
 on:
   workflow_dispatch:
