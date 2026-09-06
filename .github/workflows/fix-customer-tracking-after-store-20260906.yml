@@ -1,9 +1,13 @@
 name: CLICK-FOOD Corrigir Rastreamento Cliente Pos-Loja
 
 on:
+  workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - '.github/workflows/fix-customer-tracking-after-store-20260906.yml'
+      - '.github/scripts/patch-customer-tracking-after-store-20260906.mjs'
 
 permissions:
   contents: write
@@ -12,92 +16,33 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Aplicar regra de rastreamento
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          p = Path('apps/cliente/App.tsx')
-          s = p.read_text(encoding='utf-8')
-
-          def replace_once(old, new, label):
-              global s
-              if old not in s:
-                  raise SystemExit(f'Padrao nao encontrado: {label}')
-              s = s.replace(old, new, 1)
-
-          replace_once(
-              'const deliveryCodeStatuses=new Set(["PICKUP_CONFIRMED","DRIVER_TO_CUSTOMER","DRIVER_AT_CUSTOMER"]);',
-              'const deliveryCodeStatuses=new Set(["PICKUP_CONFIRMED","DRIVER_TO_CUSTOMER","DRIVER_AT_CUSTOMER"]);\nconst customerTrackingStatuses=new Set(["DRIVER_TO_CUSTOMER","DRIVER_AT_CUSTOMER"]);',
-              'status permitidos para rastreamento',
-          )
-
-          replace_once(
-              'if(!session||tab!=="orders"||!tracking?.driverId)return;',
-              'if(!session||tab!=="orders"||!tracking?.driverId||!customerTrackingStatuses.has(String(tracking.deliveryStatus??"")))return;',
-              'bloqueio da assinatura realtime',
-          )
-          replace_once(
-              '},[session?.user.id,tab,tracking?.driverId]);',
-              '},[session?.user.id,tab,tracking?.driverId,tracking?.deliveryStatus]);',
-              'dependencia do status da entrega',
-          )
-
-          old_block = '''    if(delivery.driver_id){
-      const[locationResult,cardResult]=await Promise.all([
-        supabase.from("driver_locations").select("latitude,longitude").eq("driver_id",delivery.driver_id).maybeSingle(),
-        supabase.functions.invoke("customer-driver-card",{body:{orderId:activeOrder.id}}),
-      ]);
-      if(locationResult.data){driverLat=Number(locationResult.data.latitude);driverLng=Number(locationResult.data.longitude);}
-      if(!cardResult.error&&cardResult.data?.driver)setDriverCard(cardResult.data.driver as DriverCard);else setDriverCard(null);
-    }else setDriverCard(null);'''
-          new_block = '''    if(delivery.driver_id){
-      const cardResult=await supabase.functions.invoke("customer-driver-card",{body:{orderId:activeOrder.id}});
-      if(!cardResult.error&&cardResult.data?.driver)setDriverCard(cardResult.data.driver as DriverCard);else setDriverCard(null);
-      if(customerTrackingStatuses.has(String(delivery.status))){
-        const{data:location}=await supabase.from("driver_locations").select("latitude,longitude").eq("driver_id",delivery.driver_id).maybeSingle();
-        if(location){driverLat=Number(location.latitude);driverLng=Number(location.longitude);}
-      }
-    }else setDriverCard(null);'''
-          replace_once(old_block, new_block, 'consulta de localizacao somente apos saida da loja')
-
-          replace_once(
-              '{tracking.driverId&&<Pressable style={styles.trackDeliveryButton} onPress={()=>setTrackingMapOpen(true)}><Text style={styles.trackDeliveryButtonText}>⌖ RASTREAR ENTREGA</Text></Pressable>}\n      {!tracking.driverId&&<Text style={styles.liveHint}>Assim que um entregador aceitar o chamado, o rastreamento ficará disponível.</Text>}',
-              '{tracking.driverId&&customerTrackingStatuses.has(String(tracking.deliveryStatus))&&<Pressable style={styles.trackDeliveryButton} onPress={()=>setTrackingMapOpen(true)}><Text style={styles.trackDeliveryButtonText}>⌖ RASTREAR ENTREGA</Text></Pressable>}\n      {tracking.driverId&&!customerTrackingStatuses.has(String(tracking.deliveryStatus))&&<Text style={styles.liveHint}>O rastreamento será liberado automaticamente quando o entregador sair do restaurante.</Text>}\n      {!tracking.driverId&&<Text style={styles.liveHint}>Assim que um entregador aceitar o chamado, você verá os dados da entrega. O mapa será liberado somente após a saída do restaurante.</Text>}',
-              'botao e mensagem de rastreamento',
-          )
-
-          replace_once(
-              '<Modal visible={trackingMapOpen&&!!tracking} animationType="slide"',
-              '<Modal visible={trackingMapOpen&&!!tracking&&customerTrackingStatuses.has(String(tracking?.deliveryStatus??""))} animationType="slide"',
-              'protecao do modal de mapa',
-          )
-
-          p.write_text(s, encoding='utf-8')
-          print('Rastreamento do cliente protegido apos DRIVER_TO_CUSTOMER.')
-          PY
-
-      - name: Validar alteracao
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Dependencias
+        run: npm ci --include=dev
+      - name: Aplicar rastreamento pos-loja
+        run: node .github/scripts/patch-customer-tracking-after-store-20260906.mjs
+      - name: Validar TypeScript Cliente
+        run: npx tsc -p apps/cliente/tsconfig.json --noEmit
+      - name: Validar regra
         run: |
           grep -q 'customerTrackingStatuses' apps/cliente/App.tsx
           grep -q 'rastreamento será liberado automaticamente quando o entregador sair do restaurante' apps/cliente/App.tsx
-          grep -q 'DRIVER_TO_CUSTOMER' apps/cliente/App.tsx
-
       - name: Commit
-        shell: bash
         run: |
-          if git diff --quiet; then
-            echo 'Nenhuma alteracao pendente.'
+          git config user.name clickfood-bot
+          git config user.email clickfood-bot@users.noreply.github.com
+          git add apps/cliente/App.tsx
+          if git diff --cached --quiet; then
+            echo 'Sem alteracoes.'
             exit 0
           fi
-          git config user.name 'clickfood-bot'
-          git config user.email 'clickfood-bot@users.noreply.github.com'
-          git add apps/cliente/App.tsx
           git commit -m 'fix(cliente): rastrear entregador somente apos sair da loja'
-          git push origin HEAD:main
+          git push
