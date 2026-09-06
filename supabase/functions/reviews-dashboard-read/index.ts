@@ -53,27 +53,30 @@ export default {
     const storeIds = [...new Set(reviews.map((item) => item.store_id))];
     const orderIds = [...new Set(reviews.map((item) => item.order_id))];
     const customerIds = [...new Set(reviews.map((item) => item.customer_id))];
+    const driverIds = [...new Set(reviews.map((item) => item.driver_id).filter((id): id is string => Boolean(id)))];
+    const profileIds = [...new Set([...customerIds, ...driverIds])];
 
     const [storesResult, ordersResult, profilesResult] = await Promise.all([
       ctx.supabaseAdmin.from("stores").select("id,name").in("id", storeIds),
       ctx.supabaseAdmin.from("orders").select("id,order_number").in("id", orderIds),
-      ctx.supabaseAdmin.from("profiles").select("id,full_name").in("id", customerIds),
+      ctx.supabaseAdmin.from("profiles").select("id,full_name").in("id", profileIds),
     ]);
 
     if (storesResult.error || ordersResult.error || profilesResult.error) {
       return Response.json({ error: "REVIEWS_RELATIONS_READ_FAILED" }, { status: 500 });
     }
 
-    const storeNames = new Map((storesResult.data ?? []).map((row) => [String(row.id), String(row.name ?? "Loja") ]));
+    const storeNames = new Map((storesResult.data ?? []).map((row) => [String(row.id), String(row.name ?? "Loja")]));
     const orderNumbers = new Map((ordersResult.data ?? []).map((row) => [String(row.id), Number(row.order_number ?? 0)]));
-    const customerNames = new Map((profilesResult.data ?? []).map((row) => [String(row.id), String(row.full_name ?? "Cliente") ]));
+    const profileNames = new Map((profilesResult.data ?? []).map((row) => [String(row.id), String(row.full_name ?? "Usuário")]));
 
     return Response.json({
       reviews: reviews.map((item) => ({
         ...item,
         storeName: storeNames.get(item.store_id) ?? "Loja",
         orderNumber: orderNumbers.get(item.order_id) || null,
-        customerName: customerNames.get(item.customer_id) ?? "Cliente",
+        customerName: profileNames.get(item.customer_id) ?? "Cliente",
+        driverName: item.driver_id ? profileNames.get(item.driver_id) ?? "Entregador" : null,
       })),
     });
   }),
