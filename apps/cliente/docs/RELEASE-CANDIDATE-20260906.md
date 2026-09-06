@@ -7,6 +7,7 @@ Inclui:
 - produto/imagem clicável e carrinho revisado;
 - navegação inferior persistente;
 - canal Android de chamadas do Entregador `clickfood-chamadas-v2` com som dedicado;
-- integrações atuais de produção do CLICK-FOOD.
+- integrações atuais de produção do CLICK-FOOD;
+- patches oficiais de compatibilidade do Expo SDK validados por `expo install --check`.
 
-Este arquivo apenas registra a release candidate e dispara o workflow de APK; não contém credenciais.
+Esta revisão é a candidata final de QA antes da publicação nas lojas. O arquivo não contém credenciais.
