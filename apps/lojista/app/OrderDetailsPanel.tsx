@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import OrderThermalPrintButton from "./OrderThermalPrintButton";
 
@@ -25,11 +25,18 @@ export default function OrderDetailsPanel({orderId}:{orderId:string}){
  const[open,setOpen]=useState(false);const[loading,setLoading]=useState(false);const[data,setData]=useState<Receipt|null>(null);const[error,setError]=useState("");
  const[pickupCode,setPickupCode]=useState("");const[codeLoading,setCodeLoading]=useState(false);const[codeError,setCodeError]=useState("");
  const[completionLoading,setCompletionLoading]=useState(false);const[completionError,setCompletionError]=useState("");const[completionSuccess,setCompletionSuccess]=useState("");
+ async function loadReceipt(){
+  if(data||loading)return;
+  setLoading(true);setError("");
+  const result=await supabase.functions.invoke("store-order-receipt",{body:{orderId}});
+  setLoading(false);
+  if(result.error||result.data?.error){setError("Não foi possível carregar os detalhes deste pedido.");return;}
+  setData(result.data as Receipt);
+ }
+ useEffect(()=>{void loadReceipt();},[orderId]);
  async function toggle(){
   if(open){setOpen(false);return;}
-  setOpen(true);if(data||loading)return;setLoading(true);setError("");
-  const result=await supabase.functions.invoke("store-order-receipt",{body:{orderId}});
-  setLoading(false);if(result.error||result.data?.error){setError("Não foi possível carregar os detalhes deste pedido.");return;}setData(result.data as Receipt);
+  setOpen(true);await loadReceipt();
  }
  async function generatePickupCode(){
   if(!data?.delivery?.id||codeLoading)return;
@@ -66,6 +73,12 @@ export default function OrderDetailsPanel({orderId}:{orderId:string}){
  const canGeneratePickupCode=Boolean(data?.delivery&&pickupCodeStatuses.has(data.delivery.status));
  const canMarkDelivered=Boolean(data?.delivery&&data.order.delivery_type==="DELIVERY"&&storeCompletionOrderStatuses.has(data.order.status)&&storeCompletionDeliveryStatuses.has(data.delivery.status));
  return <div style={{marginTop:9}}>
+  {canMarkDelivered&&<div style={{marginBottom:9,padding:12,borderRadius:12,background:"#eef9f0",border:"2px solid #2d8a4a"}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:8}}><div><b style={{display:"block",color:"#176b35"}}>PEDIDO EM ANDAMENTO</b><small style={{color:"#3f5c47"}}>O pedido já saiu com o entregador.</small></div><span style={{padding:"5px 8px",borderRadius:999,background:"#d9f2df",color:"#176b35",fontSize:11,fontWeight:900}}>{data?.order.status}</span></div>
+    <button type="button" onClick={markDelivered} disabled={completionLoading} style={{width:"100%",padding:"13px 14px",borderRadius:10,border:0,background:"#1f8f4d",color:"#fff",fontWeight:1000,cursor:completionLoading?"wait":"pointer",fontSize:14}}>{completionLoading?"FINALIZANDO...":"ENTREGUE — LIBERAR ENTREGADOR"}</button>
+    {completionError&&<p style={{margin:"9px 0 0",color:"#9a2828",fontSize:12,fontWeight:800}}>{completionError}</p>}
+  </div>}
+  {completionSuccess&&<div style={{marginBottom:9,padding:11,borderRadius:10,background:"#e5f7ea",color:"#176b35",fontSize:12,fontWeight:900}}>{completionSuccess}</div>}
   <button type="button" onClick={toggle} style={{width:"100%",padding:"9px 10px",borderRadius:9,border:"1px solid #d9d9d9",background:"#fff",fontWeight:900,cursor:"pointer"}}>{open?"OCULTAR DETALHES":"VER DETALHES DO PEDIDO"}</button>
   {open&&<div style={{marginTop:8,padding:12,borderRadius:12,background:"#f8f8f8",border:"1px solid #e5e5e5"}}>
    {loading&&<p style={{margin:0}}>Carregando pedido...</p>}{error&&<p style={{margin:0,color:"#9a2828",fontWeight:800}}>{error}</p>}
@@ -81,13 +94,6 @@ export default function OrderDetailsPanel({orderId}:{orderId:string}){
     <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #ddd",display:"grid",gap:4,fontSize:12}}><div style={{display:"flex",justifyContent:"space-between"}}><span>Subtotal</span><b>{brl(data.order.subtotal)}</b></div>{data.order.delivery_fee>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span>Entrega</span><b>{brl(data.order.delivery_fee)}</b></div>}{data.order.discount>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span>Desconto</span><b>− {brl(data.order.discount)}</b></div>}<div style={{display:"flex",justifyContent:"space-between",fontSize:15}}><b>Total</b><b>{brl(data.order.total)}</b></div></div>
     {data.payments.length>0&&<div style={{marginTop:10}}><small style={{color:"#777"}}>FORMA(S) DE PAGAMENTO</small>{data.payments.map((payment,index)=><div key={index} style={{fontSize:12,marginTop:3}}><b>{paymentLabel[payment.method]??payment.method}</b> • {brl(payment.amount)} • {payment.status}{payment.provider?` • ${payment.provider}`:""}</div>)}</div>}
     {data.delivery&&<div style={{marginTop:10,fontSize:12}}><small style={{color:"#777"}}>ENTREGA</small><div><b>{data.delivery.status}</b>{data.delivery.driver?.name?` • ${data.delivery.driver.name}`:" • aguardando entregador"}</div></div>}
-    {canMarkDelivered&&<div style={{marginTop:12,padding:14,borderRadius:14,background:"#eef9f0",border:"2px solid #2d8a4a"}}>
-      <b style={{display:"block",color:"#176b35",marginBottom:5}}>Finalização da entrega</b>
-      <p style={{fontSize:12,color:"#3f5c47",margin:"0 0 10px"}}>Use somente depois de confirmar que o cliente recebeu o pedido. O entregador será liberado imediatamente para a próxima entrega.</p>
-      <button type="button" onClick={markDelivered} disabled={completionLoading} style={{width:"100%",padding:"13px 14px",borderRadius:10,border:0,background:"#1f8f4d",color:"#fff",fontWeight:1000,cursor:completionLoading?"wait":"pointer",fontSize:14}}>{completionLoading?"FINALIZANDO...":"ENTREGUE — LIBERAR ENTREGADOR"}</button>
-      {completionError&&<p style={{margin:"10px 0 0",color:"#9a2828",fontSize:12,fontWeight:800}}>{completionError}</p>}
-    </div>}
-    {completionSuccess&&<div style={{marginTop:10,padding:11,borderRadius:10,background:"#e5f7ea",color:"#176b35",fontSize:12,fontWeight:900}}>{completionSuccess}</div>}
     <OrderThermalPrintButton orderId={orderId}/>
     {canGeneratePickupCode&&<div style={{marginTop:12,padding:14,borderRadius:14,background:"#111",color:"#fff",border:"2px solid #f4c400"}}>
       <small style={{color:"#f4c400",fontWeight:900,letterSpacing:.7}}>CÓDIGO PARA RETIRADA DO ENTREGADOR</small>
