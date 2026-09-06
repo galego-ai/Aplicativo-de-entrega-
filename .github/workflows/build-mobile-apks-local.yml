@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: click-food-local-android-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-local:
