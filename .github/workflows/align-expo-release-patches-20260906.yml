@@ -1,0 +1,53 @@
+name: CLICK-FOOD Alinhar Patches Expo Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/align-expo-release-patches-20260906.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar arvore atual
+        run: npm ci --include=dev
+      - name: Alinhar Cliente com Expo SDK
+        run: npm install --workspace=@clickfood/cliente --save-exact=false expo@~57.0.20 expo-location@~57.0.16 expo-notifications@~57.0.17
+      - name: Alinhar Entregador com Expo SDK
+        run: npm install --workspace=@clickfood/entregador --save-exact=false expo@~57.0.20 expo-location@~57.0.16 expo-notifications@~57.0.17 expo-task-manager@~57.0.16
+      - name: Validar compatibilidade Cliente
+        working-directory: apps/cliente
+        run: npx expo install --check
+      - name: Validar compatibilidade Entregador
+        working-directory: apps/entregador
+        run: npx expo install --check
+      - name: TypeScript Cliente
+        run: npx tsc -p apps/cliente/tsconfig.json --noEmit
+      - name: TypeScript Entregador
+        run: npx tsc -p apps/entregador/tsconfig.json --noEmit
+      - name: Commit
+        run: |
+          git config user.name clickfood-bot
+          git config user.email clickfood-bot@users.noreply.github.com
+          git add apps/cliente/package.json apps/entregador/package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo 'Dependencias ja alinhadas.'
+            exit 0
+          fi
+          git commit -m 'chore(release): alinhar patches oficiais do Expo SDK'
+          git push
