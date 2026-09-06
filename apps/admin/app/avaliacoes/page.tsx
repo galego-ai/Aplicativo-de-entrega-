@@ -18,18 +18,29 @@ type ReviewRow = {
   comment: string | null;
   created_at: string;
   storeName: string;
+  driverName: string | null;
   orderNumber: number | null;
   customerName: string;
 };
 
 type ReviewsDashboardResponse = { reviews?: ReviewRow[] };
 
+type RatingKey = keyof Pick<
+  ReviewRow,
+  | "store_rating"
+  | "driver_rating"
+  | "delivery_rating"
+  | "delivery_time_rating"
+  | "taste_rating"
+  | "temperature_rating"
+>;
+
 const stars = (value: number | null) =>
   value
     ? "★".repeat(Math.round(value)) + "☆".repeat(5 - Math.round(value))
     : "—";
 
-const average = (rows: ReviewRow[], key: keyof Pick<ReviewRow, "store_rating" | "driver_rating" | "delivery_rating" | "delivery_time_rating" | "taste_rating" | "temperature_rating">) => {
+const average = (rows: ReviewRow[], key: RatingKey) => {
   const values = rows
     .map((row) => Number(row[key]))
     .filter((value) => Number.isFinite(value) && value > 0);
@@ -71,6 +82,7 @@ async function fetchAllReviews(from: string, to: string): Promise<ReviewRow[]> {
     taste_rating: row.taste_rating == null ? null : Number(row.taste_rating),
     temperature_rating: row.temperature_rating == null ? null : Number(row.temperature_rating),
     storeName: row.storeName || "Loja",
+    driverName: row.driverName || (row.driver_id ? "Entregador" : null),
     customerName: row.customerName || "Cliente",
     orderNumber: row.orderNumber ? Number(row.orderNumber) : null,
   }));
@@ -81,6 +93,8 @@ export default function ReviewsPage() {
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [from, setFrom] = useState("2020-01-01");
   const [to, setTo] = useState(today());
+  const [selectedStore, setSelectedStore] = useState("");
+  const [selectedDriver, setSelectedDriver] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -106,7 +120,7 @@ export default function ReviewsPage() {
 
   useEffect(() => {
     void load();
-    // Filtros são aplicados pelo botão para evitar consultas a cada tecla.
+    // O período é aplicado pelo botão para evitar consultas a cada mudança.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -126,14 +140,47 @@ export default function ReviewsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, from, to]);
 
+  const stores = useMemo(() => {
+    const map = new Map<string, string>();
+    rows.forEach((row) => map.set(row.store_id, row.storeName));
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [rows]);
+
+  const drivers = useMemo(() => {
+    const map = new Map<string, string>();
+    rows.forEach((row) => {
+      if (row.driver_id) map.set(row.driver_id, row.driverName || "Entregador");
+    });
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [rows]);
+
+  const filteredRows = useMemo(
+    () =>
+      rows.filter(
+        (row) =>
+          (!selectedStore || row.store_id === selectedStore) &&
+          (!selectedDriver || row.driver_id === selectedDriver),
+      ),
+    [rows, selectedStore, selectedDriver],
+  );
+
   const metrics = useMemo(
     () => ({
-      store: average(rows, "store_rating"),
-      driver: average(rows, "driver_rating"),
-      delivery: average(rows, "delivery_rating"),
+      store: average(filteredRows, "store_rating"),
+      driver: average(filteredRows, "driver_rating"),
+      delivery: average(filteredRows, "delivery_rating"),
     }),
-    [rows],
+    [filteredRows],
   );
+
+  function clearEntityFilters() {
+    setSelectedStore("");
+    setSelectedDriver("");
+  }
 
   if (allowed === null) {
     return <main className="adminPage"><div className="adminPanel">Carregando...</div></main>;
@@ -149,7 +196,7 @@ export default function ReviewsPage() {
         <div>
           <small>QUALIDADE • MATRIZ CLICK-FOOD</small>
           <h1>Todas as avaliações</h1>
-          <p>A Matriz visualiza, sem filtro por loja, as avaliações de restaurantes, pedidos e entregadores de toda a plataforma.</p>
+          <p>A Matriz pode analisar toda a plataforma ou selecionar um estabelecimento e/ou entregador individualmente.</p>
         </div>
         <a className="adminLink" href="/">← Matriz</a>
       </header>
@@ -158,10 +205,30 @@ export default function ReviewsPage() {
         <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
           <label>De<br /><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
           <label>Até<br /><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-          <button onClick={() => void load()}>{loading ? "CARREGANDO..." : "FILTRAR"}</button>
-          <button onClick={() => setFrom(daysAgo(7))}>7 DIAS</button>
-          <button onClick={() => setFrom(daysAgo(30))}>30 DIAS</button>
-          <button onClick={() => setFrom("2020-01-01")}>TODAS</button>
+          <button type="button" onClick={() => void load()}>{loading ? "CARREGANDO..." : "APLICAR PERÍODO"}</button>
+          <button type="button" onClick={() => setFrom(daysAgo(7))}>7 DIAS</button>
+          <button type="button" onClick={() => setFrom(daysAgo(30))}>30 DIAS</button>
+          <button type="button" onClick={() => setFrom("2020-01-01")}>TODAS</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 10, marginTop: 14 }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <b>Estabelecimento</b>
+            <select value={selectedStore} onChange={(event) => setSelectedStore(event.target.value)}>
+              <option value="">Todos os estabelecimentos</option>
+              {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+            </select>
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <b>Entregador</b>
+            <select value={selectedDriver} onChange={(event) => setSelectedDriver(event.target.value)}>
+              <option value="">Todos os entregadores</option>
+              {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}
+            </select>
+          </label>
+          <div style={{ display: "flex", alignItems: "end" }}>
+            <button type="button" onClick={clearEntityFilters}>LIMPAR FILTROS</button>
+          </div>
         </div>
       </section>
 
@@ -172,23 +239,24 @@ export default function ReviewsPage() {
           <div style={{ padding: 14, border: "1px solid #e5e5e5", borderRadius: 12 }}><small>Média restaurantes</small><div style={{ fontSize: 26, fontWeight: 900, marginTop: 4 }}>{metrics.store} <span style={{ fontSize: 13, color: "#b78f00" }}>★</span></div></div>
           <div style={{ padding: 14, border: "1px solid #e5e5e5", borderRadius: 12 }}><small>Média entregadores</small><div style={{ fontSize: 26, fontWeight: 900, marginTop: 4 }}>{metrics.driver} <span style={{ fontSize: 13, color: "#b78f00" }}>★</span></div></div>
           <div style={{ padding: 14, border: "1px solid #e5e5e5", borderRadius: 12 }}><small>Média entrega</small><div style={{ fontSize: 26, fontWeight: 900, marginTop: 4 }}>{metrics.delivery} <span style={{ fontSize: 13, color: "#b78f00" }}>★</span></div></div>
-          <div style={{ padding: 14, border: "1px solid #e5e5e5", borderRadius: 12 }}><small>Total no período</small><div style={{ fontSize: 26, fontWeight: 900, marginTop: 4 }}>{rows.length}</div></div>
+          <div style={{ padding: 14, border: "1px solid #e5e5e5", borderRadius: 12 }}><small>Resultados filtrados</small><div style={{ fontSize: 26, fontWeight: 900, marginTop: 4 }}>{filteredRows.length}<span style={{ fontSize: 12, color: "#777", fontWeight: 600 }}> / {rows.length}</span></div></div>
         </div>
       </section>
 
       <section className="adminPanel">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-          <div><h2>Avaliações do período</h2><p className="muted">Visão global da Matriz: todas as lojas e todos os entregadores.</p></div>
-          <button onClick={() => void load()}>Atualizar</button>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div><h2>Avaliações do período</h2><p className="muted">Os indicadores e a lista abaixo respeitam os filtros de estabelecimento e entregador.</p></div>
+          <button type="button" onClick={() => void load()}>Atualizar</button>
         </div>
 
         <div className="adminList">
-          {rows.map((review) => (
+          {filteredRows.map((review) => (
             <div key={review.id} style={{ display: "block", padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                 <div>
                   <b>{review.storeName} • {review.orderNumber ? `Pedido #${review.orderNumber}` : "Pedido"}</b>
                   <small>{review.customerName} • {new Date(review.created_at).toLocaleString("pt-BR")}</small>
+                  {review.driver_id && <small>Entregador: {review.driverName || "Entregador"}</small>}
                 </div>
                 <b style={{ color: "#9a7800" }}>{stars(review.store_rating)}</b>
               </div>
@@ -205,7 +273,7 @@ export default function ReviewsPage() {
               {review.comment && <p style={{ margin: "10px 0 0", padding: 10, background: "#f7f7f7", borderRadius: 10 }}>“{review.comment}”</p>}
             </div>
           ))}
-          {!rows.length && <p className="muted">Nenhuma avaliação neste período.</p>}
+          {!filteredRows.length && <p className="muted">Nenhuma avaliação encontrada para os filtros selecionados.</p>}
         </div>
       </section>
     </main>
