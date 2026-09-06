@@ -149,6 +149,27 @@ export default function App(){
   const estimatedDeliveryFee=deliveryType==="PICKUP"?0:deliveryPreviewUsable&&deliveryPreview?(freeDeliveryApplies?0:deliveryPreview.fee):null;
   const checkoutEstimatedTotal=cartSubtotal+(estimatedDeliveryFee??0);
 
+  useEffect(()=>{
+    if(!pixCharge?.orderId)return;
+    let running=false;
+    const check=async()=>{
+      if(running)return;
+      running=true;
+      try{
+        const result=await supabase.functions.invoke("efi-pix-status",{body:{orderId:pixCharge.orderId}});
+        if(!result.error&&result.data?.paid){
+          setPixCharge(null);
+          setMessage("Pagamento PIX confirmado! Seu pedido foi enviado para a loja.");
+          await loadOrders();
+          setTab("orders");
+        }
+      }finally{running=false;}
+    };
+    const pixAutoStatusTimer=setInterval(()=>{void check();},4000);
+    void check();
+    return()=>clearInterval(pixAutoStatusTimer);
+  },[pixCharge?.orderId,pixCharge?.txid]);
+
   useEffect(()=>{supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false);});const{data}=supabase.auth.onAuthStateChange((_event,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[]);
   useEffect(()=>{if(!session){setFavoriteStoreIds(new Set());return;}void AsyncStorage.getItem(`@clickfood/customer/favorite-stores-${session.user.id}`).then(raw=>{try{const ids=raw?JSON.parse(raw):[];setFavoriteStoreIds(new Set(Array.isArray(ids)?ids.map(String):[]));}catch{setFavoriteStoreIds(new Set());}});},[session?.user.id]);
   useEffect(()=>{if(session){loadStores();loadOrders();loadAddresses();loadReviewed();loadPaymentMethods();loadLoyalty();}else{setTracking(null);setDriverCard(null);setOrders([]);setPixCharge(null);setLoyaltyWallets([]);setLoyaltyTotal(0);}},[session]);
@@ -233,9 +254,14 @@ export default function App(){
     const{data:paymentRows}=await supabase.from("payments").select("order_id,method,created_at").in("order_id",pendingIds).order("created_at",{ascending:false});
     const pixOrderId=(paymentRows??[]).find((row:any)=>String(row.method)==="PIX")?.order_id;
     if(!pixOrderId){setPixCharge(null);return;}
-    const{data}=await supabase.from("efi_pix_charges").select("txid,brcode,status,expires_at").eq("order_id",pixOrderId).order("created_at",{ascending:false}).limit(1).maybeSingle();
-    if(data?.brcode)setPixCharge({orderId:String(pixOrderId),txid:data.txid,brcode:data.brcode,status:data.status,expires_at:data.expires_at});
-    else setPixCharge(null);
+    const orderId=String(pixOrderId);
+    const statusResult=await supabase.functions.invoke("efi-pix-status",{body:{orderId}});
+    if(!statusResult.error&&statusResult.data?.paid){setPixCharge(null);return;}
+    const{data:createData,error:createError}=await supabase.functions.invoke("efi-pix-create",{body:{orderId}});
+    if(!createError&&!createData?.error&&createData?.charge?.brcode){
+      const charge=createData.charge;
+      setPixCharge({orderId,txid:charge.txid,brcode:charge.brcode,status:charge.status,expires_at:charge.expires_at});
+    }else setPixCharge(null);
   }
 
   async function loadPendingCard(currentOrders:Order[]){
@@ -550,7 +576,8 @@ export default function App(){
     const orderId=String(result.data.orderId);
     setDeliveryPreview(null);
     if(paymentMethod==="PIX"){
-      const pixResult=await supabase.functions.invoke("efi-pix-create",{body:{orderId}});
+      let pixResult=await supabase.functions.invoke("efi-pix-create",{body:{orderId}});
+      if(pixResult.error||pixResult.data?.error||!pixResult.data?.charge?.brcode){await new Promise(resolve=>setTimeout(resolve,1200));pixResult=await supabase.functions.invoke("efi-pix-create",{body:{orderId}});}
       if(pixResult.error||pixResult.data?.error||!pixResult.data?.charge?.brcode){
         await supabase.functions.invoke("customer-cancel-order",{body:{orderId,reason:"Cobrança PIX não pôde ser criada"}});
         setMessage("Não foi possível gerar o PIX e o pedido foi cancelado automaticamente. Nenhum pagamento foi realizado.");
