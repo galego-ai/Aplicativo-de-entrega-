@@ -1,0 +1,52 @@
+name: CLICK-FOOD Release Candidate 2026-09-06
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-release-candidate-20260906.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci --include=dev
+      - name: Aplicar hardening da release
+        run: node .github/scripts/patch-release-candidate-20260906.mjs
+      - name: Validar Cliente
+        run: npx tsc -p apps/cliente/tsconfig.json --noEmit
+      - name: Validar Entregador
+        run: npx tsc -p apps/entregador/tsconfig.json --noEmit
+      - name: Confirmar canais e assets declarados
+        run: |
+          grep -q 'clickfood-chamadas-v2' apps/entregador/App.tsx
+          grep -q 'clickfood-chamadas-v2' apps/entregador/DriverProfessionalShell.tsx
+          grep -q 'clickfood_chamada.wav' apps/entregador/app.json
+          test -s apps/entregador/assets/clickfood_chamada.wav
+          grep -q 'RELEASE_PIX_AUTO_CONFIRM' apps/cliente/App.tsx
+      - name: Commit
+        run: |
+          git config user.name clickfood-bot
+          git config user.email clickfood-bot@users.noreply.github.com
+          git add apps/cliente/App.tsx apps/entregador/App.tsx apps/entregador/DriverProfessionalShell.tsx
+          if git diff --cached --quiet; then
+            echo 'Sem alteracoes.'
+            exit 0
+          fi
+          git commit -m 'fix(release): confirmar PIX automaticamente e reforcar toque do entregador'
+          git push
