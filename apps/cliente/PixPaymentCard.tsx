@@ -27,6 +27,13 @@ export default function PixPaymentCard({ charge, onRefresh, busy=false }: Props)
   const remaining=useMemo(()=>Math.max(0,Math.ceil((new Date(charge.expires_at).getTime()-now)/1000)),[charge.expires_at,now]);
   const min=Math.floor(remaining/60);const sec=remaining%60;
   const expired=remaining<=0;
+
+  useEffect(()=>{
+    if(expired||busy)return;
+    const timer=setInterval(()=>{void onRefresh();},8000);
+    return()=>clearInterval(timer);
+  },[charge.orderId,charge.brcode,expired,busy,onRefresh]);
+
   async function copy(){
     await Clipboard.setStringAsync(charge.brcode);
     setCopied(true);
@@ -44,9 +51,10 @@ export default function PixPaymentCard({ charge, onRefresh, busy=false }: Props)
       <Text style={styles.copyLabel}>PIX COPIA E COLA</Text>
       <Text style={styles.code} selectable numberOfLines={4}>{charge.brcode}</Text>
       <Pressable style={[styles.primary,copied&&styles.copied]} onPress={copy}><Text style={styles.primaryText}>{copied?"PIX COPIADO ✓":"COPIAR PIX COPIA E COLA"}</Text></Pressable>
+      <View style={styles.autoStatus}><Text style={styles.autoStatusDot}>●</Text><Text style={styles.autoStatusText}>{busy?"Consultando a Efí...":"Confirmação automática ativa"}</Text></View>
     </>}
-    <Pressable style={[styles.secondary,busy&&styles.disabled]} disabled={busy} onPress={onRefresh}><Text style={styles.secondaryText}>{busy?"CONSULTANDO...":expired?"GERAR NOVO PIX":"JÁ PAGUEI • ATUALIZAR"}</Text></Pressable>
-    <Text style={styles.help}>Quando a Efí confirmar o pagamento, o pedido será enviado automaticamente para a loja.</Text>
+    <Pressable style={[styles.secondary,busy&&styles.disabled]} disabled={busy} onPress={onRefresh}><Text style={styles.secondaryText}>{busy?"CONSULTANDO...":expired?"GERAR NOVO PIX":"JÁ PAGUEI • ATUALIZAR AGORA"}</Text></Pressable>
+    <Text style={styles.help}>O CLICK-FOOD consulta a Efí automaticamente. Assim que o pagamento for confirmado, o pedido segue para a loja sem precisar enviar comprovante.</Text>
   </View>;
 }
 
@@ -63,6 +71,9 @@ const styles=StyleSheet.create({
   primary:{backgroundColor:"#111",borderRadius:12,padding:14,alignItems:"center"},
   copied:{backgroundColor:"#166534"},
   primaryText:{color:"#fff",fontWeight:"900"},
+  autoStatus:{flexDirection:"row",alignItems:"center",justifyContent:"center",gap:6,marginTop:10},
+  autoStatusDot:{fontSize:10,color:"#178447"},
+  autoStatusText:{fontSize:10,fontWeight:"800",color:"#3d6650"},
   secondary:{borderWidth:1,borderColor:"#111",borderRadius:12,padding:12,alignItems:"center",marginTop:9},
   secondaryText:{fontWeight:"900"},
   help:{fontSize:11,color:"#777",textAlign:"center",marginTop:12,lineHeight:16},
