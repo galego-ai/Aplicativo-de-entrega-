@@ -1,6 +1,6 @@
 name: CLICK-FOOD Apps Android Local Build
 # Build local de contingência quando a cota EAS cloud estiver indisponível.
-# Trigger 2026-09-06: liberação externa Loja/Matriz + atualização automática Entregador.
+# Entregador: assets oficiais são reconstruídos de fontes base64 textuais para evitar corrupção binária no Git.
 
 on:
   workflow_dispatch:
@@ -63,6 +63,39 @@ jobs:
 
       - name: Instalar dependências
         run: npm ci --include=dev
+
+      - name: Reconstruir e validar branding oficial do Entregador
+        if: matrix.app == 'entregador'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode apps/entregador/assets-source/clickfood-entregador-icon.b64 > apps/entregador/assets/clickfood-entregador-icon.png
+          base64 --decode apps/entregador/assets-source/clickfood-entregador-splash-jpg.b64 > apps/entregador/assets/clickfood-entregador-splash.jpg
+          python - <<'PY'
+          from pathlib import Path
+          import struct, zlib
+          p = Path('apps/entregador/assets/clickfood-entregador-icon.png')
+          b = p.read_bytes()
+          assert b[:8] == b'\x89PNG\r\n\x1a\n', 'Assinatura PNG inválida'
+          pos = 8
+          found_iend = False
+          while pos < len(b):
+              size = struct.unpack('>I', b[pos:pos+4])[0]
+              kind = b[pos+4:pos+8]
+              data = b[pos+8:pos+8+size]
+              expected = struct.unpack('>I', b[pos+8+size:pos+12+size])[0]
+              actual = zlib.crc32(kind)
+              actual = zlib.crc32(data, actual) & 0xffffffff
+              assert expected == actual, f'CRC inválido no chunk {kind!r}'
+              pos += 12 + size
+              if kind == b'IEND':
+                  found_iend = True
+                  break
+          assert found_iend, 'PNG sem IEND'
+          jpg = Path('apps/entregador/assets/clickfood-entregador-splash.jpg').read_bytes()
+          assert jpg[:2] == b'\xff\xd8' and jpg[-2:] == b'\xff\xd9', 'JPEG inválido'
+          print('Branding Entregador reconstruído e validado com sucesso.')
+          PY
 
       - name: Validar projeto Expo
         working-directory: apps/${{ matrix.app }}
