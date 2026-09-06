@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - '.github/workflows/apply-client-ux-pix-20260906.yml'
+      - '.github/scripts/patch-client-ux-pix-20260906.mjs'
 
 permissions:
   contents: write
