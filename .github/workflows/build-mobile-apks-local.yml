@@ -1,6 +1,6 @@
 name: CLICK-FOOD Apps Android Local Build
 # Build local de contingência quando a cota EAS cloud estiver indisponível.
-# Trigger 2026-09-05: chat safe area Cliente + Entregador; Expo patch check informativo.
+# Trigger 2026-09-06: liberação externa Loja/Matriz + atualização automática Entregador.
 
 on:
   workflow_dispatch:
