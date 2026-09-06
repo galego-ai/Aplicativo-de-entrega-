@@ -6,6 +6,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/deploy-clickfood-reviews-tracking-prod-20260906.yml'
+      - 'supabase/migrations/20260906143000_matrix_detailed_reviews_access.sql'
+      - 'supabase/migrations/20260906143500_customer_tracking_after_store_departure.sql'
+      - 'supabase/functions/customer-review-submit/**'
+      - 'supabase/functions/reviews-dashboard-read/**'
 
 permissions:
   contents: read
