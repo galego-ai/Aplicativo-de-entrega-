@@ -1,0 +1,1 @@
+Redeploy trigger after Vercel ignored the repository-root marker. No application logic changes.
