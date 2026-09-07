@@ -3,6 +3,9 @@ import { withSupabase } from "npm:@supabase/server@1.4.1";
 type Body={
  storeId:string;
  name?:string;
+ slug?:string;
+ document?:string;
+ cityId?:string|null;
  slogan?:string;
  description?:string;
  phone?:string;
@@ -24,6 +27,7 @@ type Body={
 };
 
 const hex=/^#[0-9A-Fa-f]{6}$/;
+const slugPattern=/^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const emailPattern=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const clean=(value:string|undefined,max:number)=>value===undefined?undefined:value.trim().slice(0,max)||null;
 
@@ -39,10 +43,17 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  }
  const patch:Record<string,unknown>={updated_at:new Date().toISOString()};
  if(body.name!==undefined){const value=body.name.trim().slice(0,120);if(value.length<2)return Response.json({error:"INVALID_STORE_NAME"},{status:400});patch.name=value;}
+ if(body.slug!==undefined){if(!isAdmin)return Response.json({error:"MATRIX_ONLY_FIELD"},{status:403});const value=body.slug.trim().toLowerCase().slice(0,120);if(!slugPattern.test(value))return Response.json({error:"INVALID_STORE_SLUG"},{status:400});patch.slug=value;}
+ if(body.document!==undefined){if(!isAdmin)return Response.json({error:"MATRIX_ONLY_FIELD"},{status:403});patch.document=clean(body.document,40);}
+ if(body.cityId!==undefined){
+  if(!isAdmin)return Response.json({error:"MATRIX_ONLY_FIELD"},{status:403});
+  if(body.cityId===null||body.cityId==="")patch.city_id=null;
+  else{const{data:city,error:cityError}=await ctx.supabaseAdmin.from("cities").select("id,active").eq("id",body.cityId).maybeSingle();if(cityError)return Response.json({error:"CITY_LOOKUP_FAILED"},{status:500});if(!city||!city.active)return Response.json({error:"INVALID_STORE_CITY"},{status:400});patch.city_id=body.cityId;}
+ }
  if(body.slogan!==undefined)patch.slogan=clean(body.slogan,140);
  if(body.description!==undefined)patch.description=clean(body.description,1200);
  if(body.phone!==undefined)patch.phone=clean(body.phone,30);
- if(body.email!==undefined){const value=body.email.trim().slice(0,160);if(value&& !emailPattern.test(value))return Response.json({error:"INVALID_EMAIL"},{status:400});patch.email=value||null;}
+ if(body.email!==undefined){const value=body.email.trim().slice(0,160);if(value&&!emailPattern.test(value))return Response.json({error:"INVALID_EMAIL"},{status:400});patch.email=value||null;}
  if(body.whatsapp!==undefined)patch.whatsapp=clean(body.whatsapp,30);
  if(body.instagram!==undefined)patch.instagram=clean(body.instagram,80);
  if(body.addressLine!==undefined)patch.address_line=clean(body.addressLine,180);
@@ -54,15 +65,15 @@ export default{fetch:withSupabase({auth:"user"},async(req,ctx)=>{
  if(body.minimumOrder!==undefined){if(!Number.isFinite(body.minimumOrder)||body.minimumOrder<0||body.minimumOrder>100000)return Response.json({error:"INVALID_MINIMUM_ORDER"},{status:400});patch.minimum_order=Math.round(body.minimumOrder*100)/100;}
  if(body.averagePreparationTime!==undefined){if(!Number.isInteger(body.averagePreparationTime)||body.averagePreparationTime<1||body.averagePreparationTime>300)return Response.json({error:"INVALID_PREPARATION_TIME"},{status:400});patch.average_preparation_time=body.averagePreparationTime;}
  if(body.latitude!==undefined||body.longitude!==undefined){if(!Number.isFinite(body.latitude)||!Number.isFinite(body.longitude)||Math.abs(body.latitude!)>90||Math.abs(body.longitude!)>180)return Response.json({error:"INVALID_COORDINATES"},{status:400});patch.latitude=body.latitude;patch.longitude=body.longitude;}
- for(const [field,path] of [["logo_url",body.logoPath],["cover_url",body.coverPath]] as const){
+ for(const[field,path]of[["logo_url",body.logoPath],["cover_url",body.coverPath]]as const){
   if(path!==undefined){
    if(path===null||path===""){patch[field]=null;continue;}
    if(!path.startsWith(`${body.storeId}/`))return Response.json({error:"INVALID_MEDIA_PATH"},{status:400});
    const{data}=ctx.supabaseAdmin.storage.from("store-media").getPublicUrl(path);patch[field]=data.publicUrl;
   }
  }
- const{data:store,error}=await ctx.supabaseAdmin.from("stores").update(patch).eq("id",body.storeId).select("id,name,slogan,description,phone,email,whatsapp,instagram,logo_url,cover_url,primary_color,secondary_color,address_line,neighborhood,postal_code,address_complement,minimum_order,average_preparation_time,latitude,longitude,status").single();
- if(error)return Response.json({error:"STORE_UPDATE_FAILED"},{status:500});
- await ctx.supabaseAdmin.from("audit_logs").insert({actor_id:userId,action:"STORE_SETTINGS_UPDATED",entity_type:"store",entity_id:body.storeId,after_data:{fields:Object.keys(patch).filter(k=>k!=="updated_at")}});
+ const{data:store,error}=await ctx.supabaseAdmin.from("stores").update(patch).eq("id",body.storeId).select("id,name,slug,document,city_id,slogan,description,phone,email,whatsapp,instagram,logo_url,cover_url,primary_color,secondary_color,address_line,neighborhood,postal_code,address_complement,minimum_order,average_preparation_time,latitude,longitude,status").single();
+ if(error){if(error.code==="23505")return Response.json({error:"SLUG_ALREADY_EXISTS"},{status:409});return Response.json({error:"STORE_UPDATE_FAILED"},{status:500});}
+ await ctx.supabaseAdmin.from("audit_logs").insert({actor_id:userId,action:isAdmin?"MATRIX_STORE_SETTINGS_UPDATED":"STORE_SETTINGS_UPDATED",entity_type:"store",entity_id:body.storeId,after_data:{fields:Object.keys(patch).filter(k=>k!=="updated_at")}});
  return Response.json({store});
 })};
