@@ -1,0 +1,1 @@
+Redeploy trigger for CLICK-FOOD Admin and Lojista after Vercel rate-limit window. No application logic changes.
