@@ -9,6 +9,7 @@ const operationLinks = [
   ["Saúde operacional", "/saude-operacional"],
   ["Mapa", "/mapa"],
   ["Entregadores CLICK-FOOD", "/entregadores"],
+  ["Editar lojas", "/lojas"],
   ["Permissões das lojas", "/permissoes-lojas"],
   ["Clientes", "/clientes"],
   ["Avaliações", "/avaliacoes"],
